@@ -148,6 +148,33 @@ h1 {
   gap: 12px;
 }
 
+.triage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.triage-pill {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbeafe;
+  padding: 10px 14px;
+}
+
+.triage-pill strong {
+  font-size: 1rem;
+}
+
+.triage-pill.active {
+  border-color: rgba(125, 211, 252, 0.72);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.14);
+}
+
 .signal-row {
   display: flex;
   align-items: center;
@@ -168,6 +195,17 @@ h1 {
 
 .signal-row.exit {
   border-color: rgba(251, 146, 60, 0.45);
+}
+
+.signal-row.hold {
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.signal-row:focus-visible,
+.triage-pill:focus-visible,
+.config-card input:focus-visible {
+  outline: 2px solid rgba(125, 211, 252, 0.8);
+  outline-offset: 2px;
 }
 
 .signal-row p {
@@ -244,4 +282,3 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
-
