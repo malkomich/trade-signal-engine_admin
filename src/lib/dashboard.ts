@@ -27,6 +27,22 @@ function toSignalState(signal: AdminSignal): AdminSignal {
   }
 }
 
+function formatFirestoreValue(value: unknown, fallback = new Date().toISOString()): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString()
+  }
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+  if (value && typeof value === 'object' && 'toDate' in value && typeof (value as { toDate: () => Date }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate().toISOString()
+  }
+  return fallback
+}
+
 export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
   try {
     const sessionDocs = await getDocs(
@@ -89,9 +105,9 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
         { label: 'Config version', value: String(latestSession?.config_version ?? 'v18') },
       ],
       sessionOverview: {
-        sessionId: String(latestSession?.id ?? 'local-session'),
+        sessionId: String(sessionDocs.docs[0]?.id ?? 'local-session'),
         status: String(latestSession?.status ?? 'live'),
-        updatedAt: String(latestSession?.updated_at ?? new Date().toISOString()),
+        updatedAt: formatFirestoreValue(latestSession?.updated_at),
         configVersion: String(latestSession?.config_version ?? 'v18'),
         openWindows: Number(latestSession?.open_windows ?? 0),
         rejectedEntries: Number(latestSession?.rejected_entries ?? 0),
@@ -115,7 +131,7 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
       sessionOverview: {
         sessionId: 'local-session',
         status: 'live',
-        updatedAt: '2026-04-20 15:45 UTC',
+        updatedAt: new Date().toISOString(),
         configVersion: 'v18',
         openWindows: 3,
         rejectedEntries: 7,

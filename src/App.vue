@@ -5,15 +5,24 @@ import { loadDashboardSnapshot, type DashboardSnapshot } from './lib/dashboard'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
-const sessionOverview = ref<DashboardSnapshot['sessionOverview'] | null>(null)
+const sessionOverview = ref<DashboardSnapshot['sessionOverview']>({
+  sessionId: 'local-session',
+  status: 'live',
+  updatedAt: new Date().toISOString(),
+  configVersion: 'v18',
+  openWindows: 0,
+  rejectedEntries: 0,
+  summary: 'Firebase-hosted shell is running with sample data until a live session is available.',
+})
 const loading = ref(true)
 const error = ref<string | null>(null)
 
 onMounted(async () => {
   try {
     snapshot.value = await loadDashboardSnapshot()
-    selectedSignal.value = snapshot.value.selectedSignal
-    sessionOverview.value = snapshot.value.sessionOverview
+    const loaded = snapshot.value
+    selectedSignal.value = loaded.selectedSignal
+    sessionOverview.value = loaded.sessionOverview
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load dashboard'
   } finally {
