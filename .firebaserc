@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "trade-signal-engine"
+  },
+  "targets": {
+    "trade-signal-engine": {
+      "hosting": {
+        "admin": [
+          "trade-signal-engine"
+        ]
+      }
+    }
+  }
+}
