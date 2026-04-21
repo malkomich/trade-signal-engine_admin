@@ -7,6 +7,15 @@ export type DashboardSource = 'firestore' | 'sample'
 
 export type DashboardSnapshot = {
   metrics: Array<{ label: string; value: string }>
+  sessionOverview: {
+    sessionId: string
+    status: string
+    updatedAt: string
+    configVersion: string
+    openWindows: number
+    rejectedEntries: number
+    summary: string
+  }
   selectedSignal: AdminSignal
   signals: AdminSignal[]
   configFields: ConfigField[]
@@ -50,6 +59,15 @@ function buildFallbackSnapshot(): DashboardSnapshot {
       { label: 'Rejected entries', value: '7' },
       { label: 'Config version', value: 'v18' },
     ],
+    sessionOverview: {
+      sessionId: 'local-session',
+      status: 'live',
+      updatedAt: new Date().toISOString(),
+      configVersion: 'v18',
+      openWindows: 3,
+      rejectedEntries: 7,
+      summary: 'Firebase-hosted shell is running with sample data until a live session is available.',
+    },
     selectedSignal: sampleSignals[0],
     signals: sampleSignals,
     configFields,
@@ -101,6 +119,9 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
 
     const selectedSignal = signals[0] ?? sampleSignals[0]
     const latestSession = sessionDocs.docs[0]?.data() as Record<string, unknown> | undefined
+    const openWindows = Number(latestSession?.open_windows ?? 0)
+    const rejectedEntries = Number(latestSession?.rejected_entries ?? 0)
+    const configVersion = String(latestSession?.config_version ?? 'v18')
     const hasLiveDashboardData = sessionDocs.docs.length > 0 && signalDocs.docs.length > 0 && versionDocs.docs.length > 0
     const configVersions = versionDocs.docs.length
       ? versionDocs.docs.map((doc) => {
@@ -135,10 +156,21 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
       snapshot: {
         metrics: [
           { label: 'Signals today', value: String(signals.length * 8) },
-          { label: 'Open windows', value: String(Number(latestSession?.open_windows ?? 0)) },
-          { label: 'Rejected entries', value: String(Number(latestSession?.rejected_entries ?? 0)) },
-          { label: 'Config version', value: String(latestSession?.config_version ?? 'v18') },
+          { label: 'Open windows', value: String(openWindows) },
+          { label: 'Rejected entries', value: String(rejectedEntries) },
+          { label: 'Config version', value: configVersion },
         ],
+        sessionOverview: {
+          sessionId: String(sessionDocs.docs[0]?.id ?? 'local-session'),
+          status: String(latestSession?.status ?? 'live'),
+          updatedAt: formatFirestoreTimestamp(latestSession?.updated_at, new Date().toISOString()),
+          configVersion,
+          openWindows,
+          rejectedEntries,
+          summary: latestSession
+            ? 'Latest Firestore session snapshot is loaded and ready for triage.'
+            : 'Firebase-hosted shell is running with sample data until a live session is available.',
+        },
         selectedSignal,
         signals,
         configFields,
