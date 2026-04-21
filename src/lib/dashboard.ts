@@ -194,10 +194,10 @@ export async function applyConfigVersion(sessionId: string, currentVersion: stri
   const currentRef = doc(db, CONFIG_VERSIONS_COLLECTION, `${sessionId}:${currentVersion}`)
   const targetRef = doc(db, CONFIG_VERSIONS_COLLECTION, `${sessionId}:${targetVersion}`)
   if (currentVersion && currentVersion !== targetVersion) {
-    batch.update(currentRef, {
+    batch.set(currentRef, {
       status: 'archived',
       updated_at: now,
-    })
+    }, { merge: true })
   }
   batch.update(targetRef, {
     status: 'active',
