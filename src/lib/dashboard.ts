@@ -26,6 +26,22 @@ function toSignalState(signal: AdminSignal): AdminSignal {
   }
 }
 
+function formatFirestoreTimestamp(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString()
+  }
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+  if (value && typeof value === 'object' && 'toDate' in value && typeof (value as { toDate: () => Date }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate().toISOString()
+  }
+  return fallback
+}
+
 function buildFallbackSnapshot(): DashboardSnapshot {
   return {
     metrics: [
@@ -48,7 +64,15 @@ function buildFallbackSnapshot(): DashboardSnapshot {
   }
 }
 
-export async function loadDashboardSnapshot(): Promise<DashboardSnapshotResult> {
+export async function loadDashboardSnapshot(options: { allowFirestore?: boolean } = {}): Promise<DashboardSnapshotResult> {
+  if (options.allowFirestore === false) {
+    return {
+      source: 'sample',
+      warning: 'Anonymous auth is unavailable, so the dashboard is using sample data.',
+      snapshot: buildFallbackSnapshot(),
+    }
+  }
+
   try {
     const sessionDocs = await getDocs(
       query(collection(db, MARKET_SESSIONS_COLLECTION), orderBy('updated_at', 'desc'), limit(1)),
@@ -69,7 +93,7 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshotResult> 
             entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
             exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
             regime: String(data.regime ?? 'Live market session'),
-            updatedAt: String(data.updatedAt ?? data.timestamp ?? new Date().toISOString()),
+            updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.timestamp, new Date().toISOString()),
             reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
           })
         })
@@ -77,13 +101,14 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshotResult> 
 
     const selectedSignal = signals[0] ?? sampleSignals[0]
     const latestSession = sessionDocs.docs[0]?.data() as Record<string, unknown> | undefined
+    const hasLiveDashboardData = sessionDocs.docs.length > 0 && signalDocs.docs.length > 0 && versionDocs.docs.length > 0
     const configVersions = versionDocs.docs.length
       ? versionDocs.docs.map((doc) => {
           const data = doc.data() as Record<string, unknown>
           return {
             version: String(data.version ?? doc.id),
             status: String(data.status ?? 'candidate'),
-            updatedAt: String(data.updatedAt ?? data.created_at ?? new Date().toISOString()),
+            updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.created_at, new Date().toISOString()),
             summary: String(data.summary ?? data.notes ?? 'Session-scoped config snapshot'),
           }
         })
@@ -103,19 +128,21 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshotResult> 
         ]
 
     return {
-      source: 'firestore',
-      warning: null,
+      source: hasLiveDashboardData ? 'firestore' : 'sample',
+      warning: hasLiveDashboardData
+        ? null
+        : 'Firestore returned incomplete dashboard data, so the dashboard is using sample values for the missing sections.',
       snapshot: {
-      metrics: [
-        { label: 'Signals today', value: String(signals.length * 8) },
-        { label: 'Open windows', value: String(Number(latestSession?.open_windows ?? 0)) },
-        { label: 'Rejected entries', value: String(Number(latestSession?.rejected_entries ?? 0)) },
-        { label: 'Config version', value: String(latestSession?.config_version ?? 'v18') },
-      ],
-      selectedSignal,
-      signals,
-      configFields,
-      configVersions,
+        metrics: [
+          { label: 'Signals today', value: String(signals.length * 8) },
+          { label: 'Open windows', value: String(Number(latestSession?.open_windows ?? 0)) },
+          { label: 'Rejected entries', value: String(Number(latestSession?.rejected_entries ?? 0)) },
+          { label: 'Config version', value: String(latestSession?.config_version ?? 'v18') },
+        ],
+        selectedSignal,
+        signals,
+        configFields,
+        configVersions,
       },
     }
   } catch (error) {

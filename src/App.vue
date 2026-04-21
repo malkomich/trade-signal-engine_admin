@@ -8,12 +8,29 @@ import { loadDashboardSnapshot, type DashboardSnapshot, type DashboardSource } f
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
 const loading = ref(true)
-const error = ref<string | null>(null)
 const authState = ref<'booting' | 'authenticating' | 'authenticated' | 'offline'>('booting')
 const snapshotSource = ref<DashboardSource>('sample')
 const snapshotWarning = ref<string | null>(null)
 const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
 const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
+
+const sourceDisplay = computed(() => {
+  if (snapshotSource.value === 'firestore') {
+    return {
+      title: 'Authenticated read model',
+      description: 'Firestore access is gated by Firebase Auth and the dashboard is reading live operational data.',
+    }
+  }
+
+  return {
+    title: 'Sample fallback',
+    description: 'Firestore was unavailable, so the dashboard is showing sample data instead of live operational data.',
+  }
+})
+
+function signalKey(signal: DashboardSnapshot['selectedSignal']) {
+  return `${signal.symbol}:${signal.updatedAt}`
+}
 
 const triageSignals = computed(() => {
   const signals = snapshot.value?.signals ?? []
@@ -43,10 +60,12 @@ watch(
   triageSignals,
   (signals) => {
     if (signals.length === 0) {
+      selectedSignal.value = null
       return
     }
 
-    if (!selectedSignal.value || !signals.some((signal) => signal.symbol === selectedSignal.value?.symbol)) {
+    const activeSignal = selectedSignal.value
+    if (!activeSignal || !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))) {
       selectedSignal.value = signals[0]
     }
   },
@@ -58,25 +77,22 @@ function setTriageFilter(filter: (typeof triageFilters)[number]) {
 }
 
 onMounted(async () => {
+  let allowFirestore = true
   try {
     authState.value = 'authenticating'
     await signInAnonymously(auth)
     authState.value = 'authenticated'
   } catch {
     authState.value = 'offline'
+    allowFirestore = false
   }
 
-  try {
-    const result = await loadDashboardSnapshot()
-    snapshot.value = result.snapshot
-    selectedSignal.value = snapshot.value.selectedSignal
-    snapshotSource.value = result.source
-    snapshotWarning.value = result.warning
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Failed to load dashboard'
-  } finally {
-    loading.value = false
-  }
+  const result = await loadDashboardSnapshot({ allowFirestore })
+  snapshot.value = result.snapshot
+  selectedSignal.value = result.snapshot.selectedSignal
+  snapshotSource.value = result.source
+  snapshotWarning.value = result.warning
+  loading.value = false
 })
 </script>
 
@@ -94,20 +110,8 @@ onMounted(async () => {
       <div class="hero-status">
         <span class="status-dot"></span>
         <div>
-          <strong>
-            {{
-              snapshotSource === 'firestore'
-                ? 'Authenticated read model'
-                : 'Sample fallback'
-            }}
-          </strong>
-          <p>
-            {{
-              snapshotSource === 'firestore'
-                ? 'Firestore access is gated by Firebase Auth and the dashboard is reading live operational data.'
-                : 'Firestore was unavailable, so the dashboard is showing sample data instead of live operational data.'
-            }}
-          </p>
+          <strong>{{ sourceDisplay.title }}</strong>
+          <p>{{ sourceDisplay.description }}</p>
           <p>
             {{
               authState === 'authenticated'
@@ -126,11 +130,6 @@ onMounted(async () => {
 
     <section v-if="loading" class="panel">
       Loading dashboard data...
-    </section>
-
-    <section v-else-if="error" class="panel">
-      <strong>Dashboard unavailable</strong>
-      <p>{{ error }}</p>
     </section>
 
     <template v-else>
@@ -154,6 +153,7 @@ onMounted(async () => {
               type="button"
               class="triage-pill"
               :class="{ active: triageFilter === filter }"
+              :aria-pressed="triageFilter === filter"
               @click="setTriageFilter(filter)"
             >
               <span>{{ filter }}</span>
@@ -163,7 +163,7 @@ onMounted(async () => {
           <div class="signal-list">
             <button
               v-for="signal in triageSignals"
-              :key="signal.symbol"
+              :key="signalKey(signal)"
               class="signal-row"
               :class="classifySignal(signal)"
               @click="selectedSignal = signal"
