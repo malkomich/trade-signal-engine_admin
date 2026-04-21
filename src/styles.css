@@ -106,6 +106,13 @@ h1 {
   margin-bottom: 24px;
 }
 
+.overview-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr 0.9fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
 .metric-card {
   padding: 18px;
 }
@@ -129,6 +136,30 @@ h1 {
 
 .panel {
   padding: 20px;
+}
+
+.overview-copy {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.overview-copy span {
+  display: block;
+  color: #9fb0ca;
+  margin-bottom: 6px;
+}
+
+.overview-copy strong {
+  display: block;
+  color: #ecf3ff;
+  font-size: 1rem;
+}
+
+.shell-placeholder p {
+  color: #b4c5dc;
+  line-height: 1.6;
+  margin-bottom: 0;
 }
 
 .panel-header {
@@ -240,8 +271,8 @@ h1 {
   .hero,
   .grid,
   .metrics,
+  .overview-grid,
   .config-grid {
     grid-template-columns: 1fr;
   }
 }
-

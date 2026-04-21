@@ -5,6 +5,15 @@ import { classifySignal, type AdminSignal, type ConfigField, configFields, sampl
 
 export type DashboardSnapshot = {
   metrics: Array<{ label: string; value: string }>
+  sessionOverview: {
+    sessionId: string
+    status: string
+    updatedAt: string
+    configVersion: string
+    openWindows: number
+    rejectedEntries: number
+    summary: string
+  }
   selectedSignal: AdminSignal
   signals: AdminSignal[]
   configFields: ConfigField[]
@@ -79,6 +88,17 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
         { label: 'Rejected entries', value: String(Number(latestSession?.rejected_entries ?? 0)) },
         { label: 'Config version', value: String(latestSession?.config_version ?? 'v18') },
       ],
+      sessionOverview: {
+        sessionId: String(latestSession?.id ?? 'local-session'),
+        status: String(latestSession?.status ?? 'live'),
+        updatedAt: String(latestSession?.updated_at ?? new Date().toISOString()),
+        configVersion: String(latestSession?.config_version ?? 'v18'),
+        openWindows: Number(latestSession?.open_windows ?? 0),
+        rejectedEntries: Number(latestSession?.rejected_entries ?? 0),
+        summary: latestSession
+          ? 'Latest Firestore session snapshot is loaded and ready for triage.'
+          : 'Firebase-hosted shell is running with sample data until a live session is available.',
+      },
       selectedSignal,
       signals,
       configFields,
@@ -92,6 +112,15 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
         { label: 'Rejected entries', value: '7' },
         { label: 'Config version', value: 'v18' },
       ],
+      sessionOverview: {
+        sessionId: 'local-session',
+        status: 'live',
+        updatedAt: '2026-04-20 15:45 UTC',
+        configVersion: 'v18',
+        openWindows: 3,
+        rejectedEntries: 7,
+        summary: 'Firebase-hosted shell is running with sample data until a live session is available.',
+      },
       selectedSignal: sampleSignals[0],
       signals: sampleSignals,
       configFields,

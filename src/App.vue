@@ -5,6 +5,7 @@ import { loadDashboardSnapshot, type DashboardSnapshot } from './lib/dashboard'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
+const sessionOverview = ref<DashboardSnapshot['sessionOverview'] | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 
@@ -12,6 +13,7 @@ onMounted(async () => {
   try {
     snapshot.value = await loadDashboardSnapshot()
     selectedSignal.value = snapshot.value.selectedSignal
+    sessionOverview.value = snapshot.value.sessionOverview
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load dashboard'
   } finally {
@@ -34,8 +36,8 @@ onMounted(async () => {
       <div class="hero-status">
         <span class="status-dot"></span>
         <div>
-          <strong>Session live</strong>
-          <p>Next market window runs with frozen config version v18.</p>
+          <strong>{{ sessionOverview?.status ?? 'Session live' }}</strong>
+          <p>{{ sessionOverview?.summary ?? 'Next market window runs with frozen config version v18.' }}</p>
         </div>
       </div>
     </section>
@@ -54,6 +56,53 @@ onMounted(async () => {
         <article v-for="metric in snapshot?.metrics ?? []" :key="metric.label" class="metric-card">
           <span>{{ metric.label }}</span>
           <strong>{{ metric.value }}</strong>
+        </article>
+      </section>
+
+      <section class="overview-grid">
+        <article class="panel overview-panel">
+          <div class="panel-header">
+            <h2>Session overview</h2>
+            <span>{{ sessionOverview?.configVersion }}</span>
+          </div>
+          <div class="overview-copy">
+            <div>
+              <span>Session ID</span>
+              <strong>{{ sessionOverview?.sessionId }}</strong>
+            </div>
+            <div>
+              <span>Updated</span>
+              <strong>{{ sessionOverview?.updatedAt }}</strong>
+            </div>
+            <div>
+              <span>Open windows</span>
+              <strong>{{ sessionOverview?.openWindows }}</strong>
+            </div>
+            <div>
+              <span>Rejected entries</span>
+              <strong>{{ sessionOverview?.rejectedEntries }}</strong>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel shell-placeholder">
+          <div class="panel-header">
+            <h2>Chart slot</h2>
+            <span>Reserved for later wiring</span>
+          </div>
+          <p>
+            This panel is intentionally left as a shell so a live chart can be wired without changing the page structure.
+          </p>
+        </article>
+
+        <article class="panel shell-placeholder">
+          <div class="panel-header">
+            <h2>Table slot</h2>
+            <span>Reserved for triage data</span>
+          </div>
+          <p>
+            Session rows and audit tables will plug into this area in the next story without reshaping the layout.
+          </p>
         </article>
       </section>
 
