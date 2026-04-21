@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, limit, orderBy, query, setDoc, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDocs, limit, orderBy, query, setDoc, where, writeBatch } from 'firebase/firestore'
 import { db } from './firebase'
 import { CONFIG_VERSIONS_COLLECTION, MARKET_SESSIONS_COLLECTION, SIGNAL_EVENTS_COLLECTION } from './schema'
 import { classifySignal, type AdminSignal, type ConfigField, configFields, sampleSignals } from './engine'
@@ -108,9 +108,10 @@ function normalizeConfigFields(value: unknown, fallback: ConfigField[]): ConfigF
       if (!key) {
         return null
       }
+      const numericValue = Number(raw.value ?? 0)
       return {
         key,
-        value: Number(raw.value ?? 0),
+        value: Number.isFinite(numericValue) ? numericValue : 0,
         description: String(raw.description ?? ''),
       }
     })
@@ -119,16 +120,34 @@ function normalizeConfigFields(value: unknown, fallback: ConfigField[]): ConfigF
   return fields.length > 0 ? fields : fallback
 }
 
-function bumpVersionLabel(version: string) {
-  const match = /^v(\d+)$/.exec(version.trim())
-  if (!match) {
-    return `${version.trim()}-1`
+function nextVersionLabel(baseVersion: string, existingVersions: Iterable<string>) {
+  const base = baseVersion.trim()
+  const used = new Set(Array.from(existingVersions, (value) => value.trim()))
+  const match = /^v(\d+)$/.exec(base)
+  if (match) {
+    let next = Number(match[1]) + 1
+    while (used.has(`v${next}`)) {
+      next += 1
+    }
+    return `v${next}`
   }
-  return `v${Number(match[1]) + 1}`
+
+  let suffix = 1
+  let candidate = `${base}-1`
+  while (used.has(candidate)) {
+    suffix += 1
+    candidate = `${base}-${suffix}`
+  }
+  return candidate
 }
 
 export async function saveConfigCandidate(sessionId: string, baseVersion: string, fields: ConfigField[], summary: string) {
-  const version = bumpVersionLabel(baseVersion)
+  const versionDocs = await getDocs(query(collection(db, CONFIG_VERSIONS_COLLECTION), where('session_id', '==', sessionId)))
+  const existingVersions = versionDocs.docs.flatMap((docSnap) => {
+    const data = docSnap.data() as Record<string, unknown>
+    return [docSnap.id, String(data.version ?? '')]
+  })
+  const version = nextVersionLabel(baseVersion, existingVersions)
   const now = new Date().toISOString()
   await setDoc(doc(db, CONFIG_VERSIONS_COLLECTION, version), {
     version,

@@ -357,11 +357,20 @@ h1 {
   box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.1);
 }
 
+.history-row.disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 .history-actions {
   display: grid;
   justify-items: end;
   gap: 6px;
   color: #dbeafe;
+}
+
+.config-dirty-warning {
+  margin-bottom: 16px;
 }
 
 @media (max-width: 900px) {

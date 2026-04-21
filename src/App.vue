@@ -14,7 +14,7 @@ import {
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
-const sessionOverview = ref<DashboardSnapshot['sessionOverview']>({
+const fallbackSessionOverview: DashboardSnapshot['sessionOverview'] = {
   sessionId: 'local-session',
   status: 'live',
   updatedAt: new Date().toISOString(),
@@ -22,7 +22,7 @@ const sessionOverview = ref<DashboardSnapshot['sessionOverview']>({
   openWindows: 0,
   rejectedEntries: 0,
   summary: 'Firebase-hosted shell is running with sample data until a live session is available.',
-})
+}
 const loading = ref(true)
 const authState = ref<'booting' | 'authenticating' | 'authenticated' | 'offline'>('booting')
 const snapshotSource = ref<DashboardSource>('sample')
@@ -32,6 +32,7 @@ const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
 const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
 const selectedConfigVersionId = ref<string>('current')
 const configDraft = reactive<Record<string, number>>({})
+const sessionOverview = computed(() => snapshot.value?.sessionOverview ?? fallbackSessionOverview)
 
 const sourceDisplay = computed(() => {
   if (snapshotSource.value === 'firestore') {
@@ -51,7 +52,7 @@ function signalKey(signal: DashboardSnapshot['selectedSignal']) {
   return `${signal.symbol}:${signal.updatedAt}`
 }
 
-const currentConfigVersion = computed(() => snapshot.value?.sessionOverview.configVersion ?? 'v18')
+const currentConfigVersion = computed(() => sessionOverview.value.configVersion)
 
 const configVersions = computed(() => snapshot.value?.configVersions ?? [])
 
@@ -65,12 +66,14 @@ const selectedConfigVersion = computed<ConfigVersionRecord | null>(() => {
   return configVersions.value.find((version) => version.id === selectedConfigVersionId.value) ?? null
 })
 
-const editableConfigFields = computed(() => {
+const selectedConfigFields = computed(() => {
   if (selectedConfigVersion.value?.fields?.length) {
     return selectedConfigVersion.value.fields
   }
   return snapshot.value?.configFields ?? []
 })
+
+const editableConfigFields = computed(() => selectedConfigFields.value)
 
 function syncConfigDraft(fields: DashboardSnapshot['configFields']) {
   for (const key of Object.keys(configDraft)) {
@@ -81,15 +84,31 @@ function syncConfigDraft(fields: DashboardSnapshot['configFields']) {
   }
 }
 
+function sameDraft(fields: DashboardSnapshot['configFields']) {
+  if (fields.length !== Object.keys(configDraft).length) {
+    return false
+  }
+  return fields.every((field) => configDraft[field.key] === field.value)
+}
+
+const isConfigDraftDirty = computed(() => {
+  return !sameDraft(selectedConfigFields.value)
+})
+
+const configEditorStatus = computed(() => {
+  if (isConfigDraftDirty.value) {
+    return 'draft'
+  }
+  return selectedConfigVersion.value?.status ?? 'draft'
+})
+
 function selectConfigVersion(version: ConfigVersionRecord | null) {
   if (!version) {
     selectedConfigVersionId.value = 'current'
-    syncConfigDraft(snapshot.value?.configFields ?? [])
     return
   }
 
   selectedConfigVersionId.value = version.id
-  syncConfigDraft(version.fields.length > 0 ? version.fields : snapshot.value?.configFields ?? [])
 }
 
 const triageSignals = computed(() => {
@@ -147,6 +166,13 @@ function setTriageFilter(filter: (typeof triageFilters)[number]) {
   triageFilter.value = filter
 }
 
+function handleConfigVersionClick(version: ConfigVersionRecord) {
+  if (isConfigDraftDirty.value && selectedConfigVersion.value?.id !== version.id) {
+    return
+  }
+  selectConfigVersion(version)
+}
+
 async function refreshDashboard() {
   if (!firestoreAvailable.value) {
     return
@@ -156,10 +182,7 @@ async function refreshDashboard() {
   selectedSignal.value = result.snapshot.selectedSignal
   snapshotSource.value = result.source
   snapshotWarning.value = result.warning
-  const activeVersion = result.snapshot.configVersions.find(
-    (version) => version.version === result.snapshot.sessionOverview.configVersion,
-  )
-  selectConfigVersion(activeVersion ?? result.snapshot.configVersions[0] ?? null)
+  selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
 }
 
 async function saveConfigVersion() {
@@ -167,23 +190,28 @@ async function saveConfigVersion() {
     return
   }
 
-  const fields = editableConfigFields.value.map((field) => ({
-    ...field,
-    value: configDraft[field.key] ?? field.value,
-  }))
-  const candidate = await saveConfigCandidate(
-    snapshot.value.sessionOverview.sessionId,
-    currentConfigVersion.value,
-    fields,
-    `Draft snapshot derived from ${currentConfigVersion.value}`,
-  )
+  try {
+    const fields = editableConfigFields.value.map((field) => ({
+      ...field,
+      value: Number.isFinite(configDraft[field.key]) ? configDraft[field.key] : field.value,
+    }))
+    const baseVersion = selectedConfigVersion.value?.version ?? currentConfigVersion.value
+    const candidate = await saveConfigCandidate(
+      sessionOverview.value.sessionId,
+      baseVersion,
+      fields,
+      `Draft snapshot derived from ${baseVersion}`,
+    )
 
-  snapshot.value = {
-    ...snapshot.value,
-    configVersions: [candidate, ...snapshot.value.configVersions],
-    configFields: fields,
+    snapshot.value = {
+      ...snapshot.value,
+      configVersions: [candidate, ...snapshot.value.configVersions.filter((version) => version.id !== candidate.id)],
+      configFields: fields,
+    }
+    selectConfigVersion(candidate)
+  } catch (error) {
+    console.error('Failed to save config candidate:', error)
   }
-  selectConfigVersion(candidate)
 }
 
 async function applySelectedVersion(version: ConfigVersionRecord) {
@@ -191,12 +219,16 @@ async function applySelectedVersion(version: ConfigVersionRecord) {
     return
   }
 
-  await applyConfigVersion(
-    snapshot.value.sessionOverview.sessionId,
-    currentConfigVersion.value,
-    version.version,
-  )
-  await refreshDashboard()
+  try {
+    await applyConfigVersion(
+      sessionOverview.value.sessionId,
+      currentConfigVersion.value,
+      version.version,
+    )
+    await refreshDashboard()
+  } catch (error) {
+    console.error('Failed to apply config version:', error)
+  }
 }
 
 onMounted(async () => {
@@ -269,24 +301,24 @@ onMounted(async () => {
         <article class="panel overview-panel">
           <div class="panel-header">
             <h2>Session overview</h2>
-            <span>{{ sessionOverview?.configVersion }}</span>
+            <span>{{ sessionOverview.configVersion }}</span>
           </div>
           <div class="overview-copy">
             <div>
               <span>Session ID</span>
-              <strong>{{ sessionOverview?.sessionId }}</strong>
+              <strong>{{ sessionOverview.sessionId }}</strong>
             </div>
             <div>
               <span>Updated</span>
-              <strong>{{ sessionOverview?.updatedAt }}</strong>
+              <strong>{{ sessionOverview.updatedAt }}</strong>
             </div>
             <div>
               <span>Open windows</span>
-              <strong>{{ sessionOverview?.openWindows }}</strong>
+              <strong>{{ sessionOverview.openWindows }}</strong>
             </div>
             <div>
               <span>Rejected entries</span>
-              <strong>{{ sessionOverview?.rejectedEntries }}</strong>
+              <strong>{{ sessionOverview.rejectedEntries }}</strong>
             </div>
           </div>
         </article>
@@ -382,17 +414,20 @@ onMounted(async () => {
       <section class="panel">
         <div class="panel-header">
           <h2>Config editor</h2>
-          <span>{{ selectedConfigVersion?.status ?? 'draft' }}</span>
+          <span>{{ configEditorStatus }}</span>
         </div>
         <div class="config-editor-bar">
           <p>
-            Current session version: <strong>{{ sessionOverview?.configVersion }}</strong>
+            Current session version: <strong>{{ currentConfigVersion }}</strong>
             <span v-if="selectedConfigVersion">Selected: {{ selectedConfigVersion.version }}</span>
           </p>
           <button type="button" class="action-button" :disabled="snapshotSource !== 'firestore'" @click="saveConfigVersion">
             Save candidate
           </button>
         </div>
+        <p v-if="isConfigDraftDirty" class="status-warning config-dirty-warning">
+          Unsaved draft changes are active. Save before switching versions.
+        </p>
         <div class="config-grid">
           <article v-for="field in editableConfigFields" :key="field.key" class="config-card">
             <label :for="field.key">{{ field.key }}</label>
@@ -412,8 +447,8 @@ onMounted(async () => {
             v-for="version in configVersions"
             :key="version.id"
             class="signal-row history-row"
-            :class="{ active: selectedConfigVersion?.id === version.id }"
-            @click="selectConfigVersion(version)"
+            :class="{ active: selectedConfigVersion?.id === version.id, disabled: isConfigDraftDirty && selectedConfigVersion?.id !== version.id }"
+            @click="handleConfigVersionClick(version)"
           >
             <div>
               <strong>{{ version.version }}</strong>
@@ -429,7 +464,7 @@ onMounted(async () => {
                 :disabled="snapshotSource !== 'firestore'"
                 @click.stop="applySelectedVersion(version)"
               >
-                {{ version.status === 'candidate' ? 'Promote' : 'Rollback' }}
+                {{ version.status === 'candidate' ? 'Promote' : version.status === 'archived' ? 'Rollback' : 'Apply' }}
               </button>
             </div>
           </article>
