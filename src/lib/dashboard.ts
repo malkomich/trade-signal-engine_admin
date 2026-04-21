@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, limit, orderBy, query, setDoc, where, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDocs, limit, orderBy, query, runTransaction, where, writeBatch } from 'firebase/firestore'
 import { db } from './firebase'
 import { CONFIG_VERSIONS_COLLECTION, MARKET_SESSIONS_COLLECTION, SIGNAL_EVENTS_COLLECTION } from './schema'
 import { classifySignal, type AdminSignal, type ConfigField, configFields, sampleSignals } from './engine'
@@ -98,6 +98,7 @@ function normalizeConfigFields(value: unknown, fallback: ConfigField[]): ConfigF
     return fallback
   }
 
+  const fallbackByKey = new Map(fallback.map((field) => [field.key, field.value]))
   const fields = value
     .map((item) => {
       if (!item || typeof item !== 'object') {
@@ -108,10 +109,19 @@ function normalizeConfigFields(value: unknown, fallback: ConfigField[]): ConfigF
       if (!key) {
         return null
       }
-      const numericValue = Number(raw.value ?? 0)
+      const fallbackValue = fallbackByKey.get(key)
+      const numericValue =
+        typeof raw.value === 'number' && Number.isFinite(raw.value)
+          ? raw.value
+          : typeof raw.value === 'string' && raw.value.trim() && Number.isFinite(Number(raw.value))
+            ? Number(raw.value)
+            : fallbackValue
+      if (typeof numericValue !== 'number' || !Number.isFinite(numericValue)) {
+        return null
+      }
       return {
         key,
-        value: Number.isFinite(numericValue) ? numericValue : 0,
+        value: numericValue,
         description: String(raw.description ?? ''),
       }
     })
@@ -142,32 +152,40 @@ function nextVersionLabel(baseVersion: string, existingVersions: Iterable<string
 }
 
 export async function saveConfigCandidate(sessionId: string, baseVersion: string, fields: ConfigField[], summary: string) {
+  const now = new Date().toISOString()
   const versionDocs = await getDocs(query(collection(db, CONFIG_VERSIONS_COLLECTION), where('session_id', '==', sessionId)))
   const existingVersions = versionDocs.docs.flatMap((docSnap) => {
     const data = docSnap.data() as Record<string, unknown>
     return [docSnap.id, String(data.version ?? '')]
   })
-  const version = nextVersionLabel(baseVersion, existingVersions)
-  const now = new Date().toISOString()
-  const id = `${sessionId}:${version}`
-  await setDoc(doc(db, CONFIG_VERSIONS_COLLECTION, id), {
+  const versionPrefix = nextVersionLabel(baseVersion, existingVersions)
+  const sessionRef = doc(db, MARKET_SESSIONS_COLLECTION, sessionId)
+  return runTransaction(db, async (transaction) => {
+    const sessionSnap = await transaction.get(sessionRef)
+    const currentSequence = Number((sessionSnap.data() as Record<string, unknown> | undefined)?.config_candidate_sequence ?? 0)
+    const nextSequence = currentSequence + 1
+    const version = `${versionPrefix}-${nextSequence}`
+    const id = `${sessionId}:${version}`
+    transaction.set(doc(db, CONFIG_VERSIONS_COLLECTION, id), {
       version,
       status: 'candidate',
       summary,
       fields,
       base_version: baseVersion,
-    session_id: sessionId,
-    created_at: now,
-    updated_at: now,
+      session_id: sessionId,
+      created_at: now,
+      updated_at: now,
+    })
+    transaction.set(sessionRef, { config_candidate_sequence: nextSequence, updated_at: now }, { merge: true })
+    return {
+      id,
+      version,
+      status: 'candidate',
+      updatedAt: now,
+      summary,
+      fields,
+    } satisfies ConfigVersionRecord
   })
-  return {
-    id,
-    version,
-    status: 'candidate',
-    updatedAt: new Date().toISOString(),
-    summary,
-    fields,
-  } satisfies ConfigVersionRecord
 }
 
 export async function applyConfigVersion(sessionId: string, currentVersion: string, targetVersion: string) {
