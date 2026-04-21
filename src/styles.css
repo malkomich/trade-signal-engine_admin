@@ -289,6 +289,27 @@ h1 {
   gap: 16px;
 }
 
+.config-editor-bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.config-editor-bar p {
+  margin-bottom: 0;
+  color: #9fb0ca;
+}
+
+.config-editor-bar strong {
+  color: #ecf3ff;
+}
+
+.config-editor-bar span {
+  margin-left: 12px;
+}
+
 .config-card {
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 16px;
@@ -312,6 +333,46 @@ h1 {
   color: #ecf3ff;
 }
 
+.action-button {
+  border: 1px solid rgba(125, 211, 252, 0.45);
+  border-radius: 999px;
+  background: rgba(125, 211, 252, 0.12);
+  color: #ecf3ff;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.action-button.ghost {
+  background: transparent;
+  margin-left: 12px;
+}
+
+.action-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.history-row.active {
+  border-color: rgba(125, 211, 252, 0.55);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.1);
+}
+
+.history-row.disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.history-actions {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  color: #dbeafe;
+}
+
+.config-dirty-warning {
+  margin-bottom: 16px;
+}
+
 @media (max-width: 900px) {
   .hero,
   .grid,
@@ -319,5 +380,10 @@ h1 {
   .overview-grid,
   .config-grid {
     grid-template-columns: 1fr;
+  }
+
+  .config-editor-bar {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

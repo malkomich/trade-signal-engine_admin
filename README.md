@@ -14,6 +14,12 @@ Vue admin console served from Firebase Hosting for session triage, signal review
 - `Firebase Auth` gates read access before the dashboard loads live data.
 - `Firestore` is the operational read model for sessions, signals, and versioned configs.
 
+## Config workflow
+
+- The config editor can save a candidate snapshot from the current session values.
+- Version history rows can be promoted or rolled back explicitly.
+- The active session keeps a frozen `config_version` reference until a version change is applied.
+
 ## Run
 
 ```bash

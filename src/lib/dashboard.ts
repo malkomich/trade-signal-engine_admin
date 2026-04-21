@@ -1,9 +1,18 @@
-import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore'
+import { collection, doc, getDocs, limit, orderBy, query, runTransaction, where, writeBatch } from 'firebase/firestore'
 import { db } from './firebase'
 import { CONFIG_VERSIONS_COLLECTION, MARKET_SESSIONS_COLLECTION, SIGNAL_EVENTS_COLLECTION } from './schema'
 import { classifySignal, type AdminSignal, type ConfigField, configFields, sampleSignals } from './engine'
 
 export type DashboardSource = 'firestore' | 'sample'
+
+export type ConfigVersionRecord = {
+  id: string
+  version: string
+  status: string
+  updatedAt: string
+  summary: string
+  fields: ConfigField[]
+}
 
 export type DashboardSnapshot = {
   metrics: Array<{ label: string; value: string }>
@@ -19,7 +28,7 @@ export type DashboardSnapshot = {
   selectedSignal: AdminSignal
   signals: AdminSignal[]
   configFields: ConfigField[]
-  configVersions: Array<{ version: string; status: string; updatedAt: string; summary: string }>
+  configVersions: ConfigVersionRecord[]
 }
 
 export type DashboardSnapshotResult = {
@@ -73,13 +82,136 @@ function buildFallbackSnapshot(): DashboardSnapshot {
     configFields,
     configVersions: [
       {
+        id: 'v18',
         version: 'v18',
         status: 'active',
         updatedAt: '2026-04-20 15:45 UTC',
         summary: 'Frozen session config for the current market window.',
+        fields: configFields,
       },
     ],
   }
+}
+
+function normalizeConfigFields(value: unknown, fallback: ConfigField[]): ConfigField[] {
+  if (!Array.isArray(value)) {
+    return fallback
+  }
+
+  const fallbackByKey = new Map(fallback.map((field) => [field.key, field.value]))
+  const fields = value
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null
+      }
+      const raw = item as Record<string, unknown>
+      const key = String(raw.key ?? '').trim()
+      if (!key) {
+        return null
+      }
+      const fallbackValue = fallbackByKey.get(key)
+      const numericValue =
+        typeof raw.value === 'number' && Number.isFinite(raw.value)
+          ? raw.value
+          : typeof raw.value === 'string' && raw.value.trim() && Number.isFinite(Number(raw.value))
+            ? Number(raw.value)
+            : fallbackValue
+      if (typeof numericValue !== 'number' || !Number.isFinite(numericValue)) {
+        return null
+      }
+      return {
+        key,
+        value: numericValue,
+        description: String(raw.description ?? ''),
+      }
+    })
+    .filter((field): field is ConfigField => field !== null)
+
+  return fields
+}
+
+function nextVersionLabel(baseVersion: string, existingVersions: Iterable<string>) {
+  const base = baseVersion.trim()
+  const used = new Set(Array.from(existingVersions, (value) => value.trim()))
+  const match = /^v(\d+)$/.exec(base)
+  if (match) {
+    let next = Number(match[1]) + 1
+    while (used.has(`v${next}`)) {
+      next += 1
+    }
+    return `v${next}`
+  }
+
+  let suffix = 1
+  let candidate = `${base}-1`
+  while (used.has(candidate)) {
+    suffix += 1
+    candidate = `${base}-${suffix}`
+  }
+  return candidate
+}
+
+export async function saveConfigCandidate(sessionId: string, baseVersion: string, fields: ConfigField[], summary: string) {
+  const now = new Date().toISOString()
+  const versionDocs = await getDocs(query(collection(db, CONFIG_VERSIONS_COLLECTION), where('session_id', '==', sessionId)))
+  const existingVersions = versionDocs.docs.flatMap((docSnap) => {
+    const data = docSnap.data() as Record<string, unknown>
+    return [docSnap.id, String(data.version ?? '')]
+  })
+  const versionPrefix = nextVersionLabel(baseVersion, existingVersions)
+  const sessionRef = doc(db, MARKET_SESSIONS_COLLECTION, sessionId)
+  return runTransaction(db, async (transaction) => {
+    const sessionSnap = await transaction.get(sessionRef)
+    const currentSequence = Number((sessionSnap.data() as Record<string, unknown> | undefined)?.config_candidate_sequence ?? 0)
+    const nextSequence = currentSequence + 1
+    const version = `${versionPrefix}-${nextSequence}`
+    const id = `${sessionId}:${version}`
+    transaction.set(doc(db, CONFIG_VERSIONS_COLLECTION, id), {
+      version,
+      status: 'candidate',
+      summary,
+      fields,
+      base_version: baseVersion,
+      session_id: sessionId,
+      created_at: now,
+      updated_at: now,
+    })
+    transaction.set(sessionRef, { config_candidate_sequence: nextSequence, updated_at: now }, { merge: true })
+    return {
+      id,
+      version,
+      status: 'candidate',
+      updatedAt: now,
+      summary,
+      fields,
+    } satisfies ConfigVersionRecord
+  })
+}
+
+export async function applyConfigVersion(sessionId: string, currentVersion: string, targetVersion: string) {
+  const now = new Date().toISOString()
+  const batch = writeBatch(db)
+  const currentRef = doc(db, CONFIG_VERSIONS_COLLECTION, `${sessionId}:${currentVersion}`)
+  const targetRef = doc(db, CONFIG_VERSIONS_COLLECTION, `${sessionId}:${targetVersion}`)
+  if (currentVersion && currentVersion !== targetVersion) {
+    batch.set(currentRef, {
+      status: 'archived',
+      updated_at: now,
+    }, { merge: true })
+  }
+  batch.update(targetRef, {
+    status: 'active',
+    updated_at: now,
+  })
+  batch.set(
+    doc(db, MARKET_SESSIONS_COLLECTION, sessionId),
+    {
+      config_version: targetVersion,
+      updated_at: now,
+    },
+    { merge: true },
+  )
+  await batch.commit()
 }
 
 export async function loadDashboardSnapshot(options: { allowFirestore?: boolean } = {}): Promise<DashboardSnapshotResult> {
@@ -126,25 +258,31 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
     const configVersions = versionDocs.docs.length
       ? versionDocs.docs.map((doc) => {
           const data = doc.data() as Record<string, unknown>
-          return {
-            version: String(data.version ?? doc.id),
-            status: String(data.status ?? 'candidate'),
-            updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.created_at, new Date().toISOString()),
-            summary: String(data.summary ?? data.notes ?? 'Session-scoped config snapshot'),
-          }
-        })
+        return {
+          id: doc.id,
+          version: String(data.version ?? doc.id),
+          status: String(data.status ?? 'candidate'),
+          updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.updated_at ?? data.created_at, new Date().toISOString()),
+          summary: String(data.summary ?? data.notes ?? 'Session-scoped config snapshot'),
+          fields: normalizeConfigFields(data.fields, configFields),
+        }
+      })
       : [
           {
+            id: 'v18',
             version: 'v18',
             status: 'active',
             updatedAt: '2026-04-20 15:45 UTC',
             summary: 'Frozen session config for the current market window.',
+            fields: configFields,
           },
           {
+            id: 'v17',
             version: 'v17',
             status: 'archived',
             updatedAt: '2026-04-19 15:45 UTC',
             summary: 'Previous replay-approved config candidate.',
+            fields: configFields,
           },
         ]
 
