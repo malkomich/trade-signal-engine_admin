@@ -3,6 +3,8 @@ import { db } from './firebase'
 import { CONFIG_VERSIONS_COLLECTION, MARKET_SESSIONS_COLLECTION, SIGNAL_EVENTS_COLLECTION } from './schema'
 import { classifySignal, type AdminSignal, type ConfigField, configFields, sampleSignals } from './engine'
 
+export type DashboardSource = 'firestore' | 'sample'
+
 export type DashboardSnapshot = {
   metrics: Array<{ label: string; value: string }>
   sessionOverview: {
@@ -20,6 +22,12 @@ export type DashboardSnapshot = {
   configVersions: Array<{ version: string; status: string; updatedAt: string; summary: string }>
 }
 
+export type DashboardSnapshotResult = {
+  snapshot: DashboardSnapshot
+  source: DashboardSource
+  warning: string | null
+}
+
 function toSignalState(signal: AdminSignal): AdminSignal {
   return {
     ...signal,
@@ -27,7 +35,7 @@ function toSignalState(signal: AdminSignal): AdminSignal {
   }
 }
 
-function formatFirestoreValue(value: unknown, fallback = new Date().toISOString()): string {
+function formatFirestoreTimestamp(value: unknown, fallback: string): string {
   if (typeof value === 'string' && value.trim()) {
     return value
   }
@@ -43,7 +51,46 @@ function formatFirestoreValue(value: unknown, fallback = new Date().toISOString(
   return fallback
 }
 
-export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
+function buildFallbackSnapshot(): DashboardSnapshot {
+  return {
+    metrics: [
+      { label: 'Signals today', value: '24' },
+      { label: 'Open windows', value: '3' },
+      { label: 'Rejected entries', value: '7' },
+      { label: 'Config version', value: 'v18' },
+    ],
+    sessionOverview: {
+      sessionId: 'local-session',
+      status: 'live',
+      updatedAt: new Date().toISOString(),
+      configVersion: 'v18',
+      openWindows: 3,
+      rejectedEntries: 7,
+      summary: 'Firebase-hosted shell is running with sample data until a live session is available.',
+    },
+    selectedSignal: sampleSignals[0],
+    signals: sampleSignals,
+    configFields,
+    configVersions: [
+      {
+        version: 'v18',
+        status: 'active',
+        updatedAt: '2026-04-20 15:45 UTC',
+        summary: 'Frozen session config for the current market window.',
+      },
+    ],
+  }
+}
+
+export async function loadDashboardSnapshot(options: { allowFirestore?: boolean } = {}): Promise<DashboardSnapshotResult> {
+  if (options.allowFirestore === false) {
+    return {
+      source: 'sample',
+      warning: 'Anonymous auth is unavailable, so the dashboard is using sample data.',
+      snapshot: buildFallbackSnapshot(),
+    }
+  }
+
   try {
     const sessionDocs = await getDocs(
       query(collection(db, MARKET_SESSIONS_COLLECTION), orderBy('updated_at', 'desc'), limit(1)),
@@ -64,7 +111,7 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
             entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
             exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
             regime: String(data.regime ?? 'Live market session'),
-            updatedAt: String(data.updatedAt ?? data.timestamp ?? new Date().toISOString()),
+            updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.timestamp, new Date().toISOString()),
             reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
           })
         })
@@ -75,13 +122,14 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
     const openWindows = Number(latestSession?.open_windows ?? 0)
     const rejectedEntries = Number(latestSession?.rejected_entries ?? 0)
     const configVersion = String(latestSession?.config_version ?? 'v18')
+    const hasLiveDashboardData = sessionDocs.docs.length > 0 && signalDocs.docs.length > 0 && versionDocs.docs.length > 0
     const configVersions = versionDocs.docs.length
       ? versionDocs.docs.map((doc) => {
           const data = doc.data() as Record<string, unknown>
           return {
             version: String(data.version ?? doc.id),
             status: String(data.status ?? 'candidate'),
-            updatedAt: String(data.updatedAt ?? data.created_at ?? new Date().toISOString()),
+            updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.created_at, new Date().toISOString()),
             summary: String(data.summary ?? data.notes ?? 'Session-scoped config snapshot'),
           }
         })
@@ -101,56 +149,39 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
         ]
 
     return {
-      metrics: [
-        { label: 'Signals today', value: String(signals.length * 8) },
-        { label: 'Open windows', value: String(openWindows) },
-        { label: 'Rejected entries', value: String(rejectedEntries) },
-        { label: 'Config version', value: configVersion },
-      ],
-      sessionOverview: {
-        sessionId: String(sessionDocs.docs[0]?.id ?? 'local-session'),
-        status: String(latestSession?.status ?? 'live'),
-        updatedAt: formatFirestoreValue(latestSession?.updated_at),
-        configVersion,
-        openWindows,
-        rejectedEntries,
-        summary: latestSession
-          ? 'Latest Firestore session snapshot is loaded and ready for triage.'
-          : 'Firebase-hosted shell is running with sample data until a live session is available.',
-      },
-      selectedSignal,
-      signals,
-      configFields,
-      configVersions,
-    }
-  } catch {
-    return {
-      metrics: [
-        { label: 'Signals today', value: '24' },
-        { label: 'Open windows', value: '3' },
-        { label: 'Rejected entries', value: '7' },
-        { label: 'Config version', value: 'v18' },
-      ],
-      sessionOverview: {
-        sessionId: 'local-session',
-        status: 'live',
-        updatedAt: new Date().toISOString(),
-        configVersion: 'v18',
-        openWindows: 3,
-        rejectedEntries: 7,
-        summary: 'Firebase-hosted shell is running with sample data until a live session is available.',
-      },
-      selectedSignal: sampleSignals[0],
-      signals: sampleSignals,
-      configFields,
-      configVersions: [
-        {
-          version: 'v18',
-          status: 'active',
-          updatedAt: '2026-04-20 15:45 UTC',
-          summary: 'Frozen session config for the current market window.',
+      source: hasLiveDashboardData ? 'firestore' : 'sample',
+      warning: hasLiveDashboardData
+        ? null
+        : 'Firestore returned incomplete dashboard data, so the dashboard is using sample values for the missing sections.',
+      snapshot: {
+        metrics: [
+          { label: 'Signals today', value: String(signals.length * 8) },
+          { label: 'Open windows', value: String(openWindows) },
+          { label: 'Rejected entries', value: String(rejectedEntries) },
+          { label: 'Config version', value: configVersion },
+        ],
+        sessionOverview: {
+          sessionId: String(sessionDocs.docs[0]?.id ?? 'local-session'),
+          status: String(latestSession?.status ?? 'live'),
+          updatedAt: formatFirestoreTimestamp(latestSession?.updated_at, new Date().toISOString()),
+          configVersion,
+          openWindows,
+          rejectedEntries,
+          summary: latestSession
+            ? 'Latest Firestore session snapshot is loaded and ready for triage.'
+            : 'Firebase-hosted shell is running with sample data until a live session is available.',
         },
-      ],
+        selectedSignal,
+        signals,
+        configFields,
+        configVersions,
+      },
+    }
+  } catch (error) {
+    return {
+      source: 'sample',
+      warning: error instanceof Error ? error.message : 'Firestore dashboard data is unavailable.',
+      snapshot: buildFallbackSnapshot(),
     }
   }
 }

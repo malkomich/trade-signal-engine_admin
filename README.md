@@ -8,6 +8,12 @@ Vue admin console served from Firebase Hosting for session triage, signal review
 - Vite
 - Firebase Hosting + Firestore
 
+## External integrations
+
+- `Firebase Hosting` serves the admin console.
+- `Firebase Auth` gates read access before the dashboard loads live data.
+- `Firestore` is the operational read model for sessions, signals, and versioned configs.
+
 ## Run
 
 ```bash
