@@ -45,6 +45,9 @@ npm run build
 npm run deploy
 ```
 
+The GitHub Actions workflow also deploys to Firebase Hosting on every merge to `main`. The
+hosting target remains `admin`, mapped to the `trade-signal-engine` Firebase project.
+
 ## Firebase config
 
 Configure these environment variables (typically in a .env file) to override the built-in defaults:
