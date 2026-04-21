@@ -117,7 +117,7 @@ function normalizeConfigFields(value: unknown, fallback: ConfigField[]): ConfigF
     })
     .filter((field): field is ConfigField => field !== null)
 
-  return fields.length > 0 ? fields : fallback
+  return fields
 }
 
 function nextVersionLabel(baseVersion: string, existingVersions: Iterable<string>) {
@@ -149,18 +149,19 @@ export async function saveConfigCandidate(sessionId: string, baseVersion: string
   })
   const version = nextVersionLabel(baseVersion, existingVersions)
   const now = new Date().toISOString()
-  await setDoc(doc(db, CONFIG_VERSIONS_COLLECTION, version), {
-    version,
-    status: 'candidate',
-    summary,
-    fields,
-    base_version: baseVersion,
+  const id = `${sessionId}:${version}`
+  await setDoc(doc(db, CONFIG_VERSIONS_COLLECTION, id), {
+      version,
+      status: 'candidate',
+      summary,
+      fields,
+      base_version: baseVersion,
     session_id: sessionId,
     created_at: now,
     updated_at: now,
   })
   return {
-    id: version,
+    id,
     version,
     status: 'candidate',
     updatedAt: new Date().toISOString(),
@@ -172,24 +173,18 @@ export async function saveConfigCandidate(sessionId: string, baseVersion: string
 export async function applyConfigVersion(sessionId: string, currentVersion: string, targetVersion: string) {
   const now = new Date().toISOString()
   const batch = writeBatch(db)
+  const currentRef = doc(db, CONFIG_VERSIONS_COLLECTION, `${sessionId}:${currentVersion}`)
+  const targetRef = doc(db, CONFIG_VERSIONS_COLLECTION, `${sessionId}:${targetVersion}`)
   if (currentVersion && currentVersion !== targetVersion) {
-    batch.set(
-      doc(db, CONFIG_VERSIONS_COLLECTION, currentVersion),
-      {
-        status: 'archived',
-        updated_at: now,
-      },
-      { merge: true },
-    )
-  }
-  batch.set(
-    doc(db, CONFIG_VERSIONS_COLLECTION, targetVersion),
-    {
-      status: 'active',
+    batch.update(currentRef, {
+      status: 'archived',
       updated_at: now,
-    },
-    { merge: true },
-  )
+    })
+  }
+  batch.update(targetRef, {
+    status: 'active',
+    updated_at: now,
+  })
   batch.set(
     doc(db, MARKET_SESSIONS_COLLECTION, sessionId),
     {
@@ -245,15 +240,15 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
     const configVersions = versionDocs.docs.length
       ? versionDocs.docs.map((doc) => {
           const data = doc.data() as Record<string, unknown>
-          return {
-            id: doc.id,
-            version: String(data.version ?? doc.id),
-            status: String(data.status ?? 'candidate'),
-            updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.created_at, new Date().toISOString()),
-            summary: String(data.summary ?? data.notes ?? 'Session-scoped config snapshot'),
-            fields: normalizeConfigFields(data.fields, configFields),
-          }
-        })
+        return {
+          id: doc.id,
+          version: String(data.version ?? doc.id),
+          status: String(data.status ?? 'candidate'),
+          updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.updated_at ?? data.created_at, new Date().toISOString()),
+          summary: String(data.summary ?? data.notes ?? 'Session-scoped config snapshot'),
+          fields: normalizeConfigFields(data.fields, configFields),
+        }
+      })
       : [
           {
             id: 'v18',
