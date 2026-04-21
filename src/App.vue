@@ -3,13 +3,15 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { signInAnonymously } from 'firebase/auth'
 import { classifySignal } from './lib/engine'
 import { auth } from './lib/firebase'
-import { loadDashboardSnapshot, type DashboardSnapshot } from './lib/dashboard'
+import { loadDashboardSnapshot, type DashboardSnapshot, type DashboardSource } from './lib/dashboard'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 const authState = ref<'booting' | 'authenticating' | 'authenticated' | 'offline'>('booting')
+const snapshotSource = ref<DashboardSource>('sample')
+const snapshotWarning = ref<string | null>(null)
 const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
 const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
 
@@ -21,11 +23,26 @@ const triageSignals = computed(() => {
   return signals.filter((signal) => classifySignal(signal) === triageFilter.value)
 })
 
+const triageCounts = computed(() => {
+  const signals = snapshot.value?.signals ?? []
+  const counts: Record<(typeof triageFilters)[number], number> = {
+    all: signals.length,
+    entry: 0,
+    exit: 0,
+    hold: 0,
+  }
+
+  for (const signal of signals) {
+    counts[classifySignal(signal)] += 1
+  }
+
+  return counts
+})
+
 watch(
   triageSignals,
   (signals) => {
     if (signals.length === 0) {
-      selectedSignal.value = snapshot.value?.selectedSignal ?? null
       return
     }
 
@@ -40,14 +57,6 @@ function setTriageFilter(filter: (typeof triageFilters)[number]) {
   triageFilter.value = filter
 }
 
-function triageCount(filter: (typeof triageFilters)[number]) {
-  const signals = snapshot.value?.signals ?? []
-  if (filter === 'all') {
-    return signals.length
-  }
-  return signals.filter((signal) => classifySignal(signal) === filter).length
-}
-
 onMounted(async () => {
   try {
     authState.value = 'authenticating'
@@ -58,8 +67,11 @@ onMounted(async () => {
   }
 
   try {
-    snapshot.value = await loadDashboardSnapshot()
+    const result = await loadDashboardSnapshot()
+    snapshot.value = result.snapshot
     selectedSignal.value = snapshot.value.selectedSignal
+    snapshotSource.value = result.source
+    snapshotWarning.value = result.warning
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load dashboard'
   } finally {
@@ -84,19 +96,29 @@ onMounted(async () => {
         <div>
           <strong>
             {{
-              authState === 'authenticated'
+              snapshotSource === 'firestore'
                 ? 'Authenticated read model'
-                : authState === 'offline'
-                  ? 'Offline fallback'
-                  : 'Signing in'
+                : 'Sample fallback'
             }}
           </strong>
           <p>
             {{
-              authState === 'authenticated'
-                ? 'Firestore access is gated by Firebase Auth before the dashboard reads live operational data.'
-                : 'The dashboard is preparing an authenticated Firestore session and falling back to sample data if required.'
+              snapshotSource === 'firestore'
+                ? 'Firestore access is gated by Firebase Auth and the dashboard is reading live operational data.'
+                : 'Firestore was unavailable, so the dashboard is showing sample data instead of live operational data.'
             }}
+          </p>
+          <p>
+            {{
+              authState === 'authenticated'
+                ? 'Firebase Auth completed successfully.'
+                : authState === 'offline'
+                  ? 'Offline fallback'
+                  : 'Signing in'
+            }}
+          </p>
+          <p v-if="snapshotWarning" class="status-warning">
+            {{ snapshotWarning }}
           </p>
         </div>
       </div>
@@ -135,7 +157,7 @@ onMounted(async () => {
               @click="setTriageFilter(filter)"
             >
               <span>{{ filter }}</span>
-              <strong>{{ triageCount(filter) }}</strong>
+              <strong>{{ triageCounts[filter] }}</strong>
             </button>
           </div>
           <div class="signal-list">
