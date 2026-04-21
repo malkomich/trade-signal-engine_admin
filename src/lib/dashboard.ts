@@ -5,6 +5,15 @@ import { classifySignal, type AdminSignal, type ConfigField, configFields, sampl
 
 export type DashboardSnapshot = {
   metrics: Array<{ label: string; value: string }>
+  sessionOverview: {
+    sessionId: string
+    status: string
+    updatedAt: string
+    configVersion: string
+    openWindows: number
+    rejectedEntries: number
+    summary: string
+  }
   selectedSignal: AdminSignal
   signals: AdminSignal[]
   configFields: ConfigField[]
@@ -16,6 +25,22 @@ function toSignalState(signal: AdminSignal): AdminSignal {
     ...signal,
     state: classifySignal(signal) === 'exit' ? 'EXIT_SIGNALLED' : classifySignal(signal) === 'entry' ? 'ENTRY_SIGNALLED' : signal.state,
   }
+}
+
+function formatFirestoreValue(value: unknown, fallback = new Date().toISOString()): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString()
+  }
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+  if (value && typeof value === 'object' && 'toDate' in value && typeof (value as { toDate: () => Date }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate().toISOString()
+  }
+  return fallback
 }
 
 export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
@@ -47,6 +72,9 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
 
     const selectedSignal = signals[0] ?? sampleSignals[0]
     const latestSession = sessionDocs.docs[0]?.data() as Record<string, unknown> | undefined
+    const openWindows = Number(latestSession?.open_windows ?? 0)
+    const rejectedEntries = Number(latestSession?.rejected_entries ?? 0)
+    const configVersion = String(latestSession?.config_version ?? 'v18')
     const configVersions = versionDocs.docs.length
       ? versionDocs.docs.map((doc) => {
           const data = doc.data() as Record<string, unknown>
@@ -75,10 +103,21 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
     return {
       metrics: [
         { label: 'Signals today', value: String(signals.length * 8) },
-        { label: 'Open windows', value: String(Number(latestSession?.open_windows ?? 0)) },
-        { label: 'Rejected entries', value: String(Number(latestSession?.rejected_entries ?? 0)) },
-        { label: 'Config version', value: String(latestSession?.config_version ?? 'v18') },
+        { label: 'Open windows', value: String(openWindows) },
+        { label: 'Rejected entries', value: String(rejectedEntries) },
+        { label: 'Config version', value: configVersion },
       ],
+      sessionOverview: {
+        sessionId: String(sessionDocs.docs[0]?.id ?? 'local-session'),
+        status: String(latestSession?.status ?? 'live'),
+        updatedAt: formatFirestoreValue(latestSession?.updated_at),
+        configVersion,
+        openWindows,
+        rejectedEntries,
+        summary: latestSession
+          ? 'Latest Firestore session snapshot is loaded and ready for triage.'
+          : 'Firebase-hosted shell is running with sample data until a live session is available.',
+      },
       selectedSignal,
       signals,
       configFields,
@@ -92,6 +131,15 @@ export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
         { label: 'Rejected entries', value: '7' },
         { label: 'Config version', value: 'v18' },
       ],
+      sessionOverview: {
+        sessionId: 'local-session',
+        status: 'live',
+        updatedAt: new Date().toISOString(),
+        configVersion: 'v18',
+        openWindows: 3,
+        rejectedEntries: 7,
+        summary: 'Firebase-hosted shell is running with sample data until a live session is available.',
+      },
       selectedSignal: sampleSignals[0],
       signals: sampleSignals,
       configFields,
