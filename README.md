@@ -35,7 +35,7 @@ npm run deploy
 
 ## Firebase config
 
-Configure these environment variables when you want to override the built-in defaults:
+Configure these environment variables (typically in a .env file) to override the built-in defaults:
 
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
