@@ -67,10 +67,7 @@ const selectedConfigVersion = computed<ConfigVersionRecord | null>(() => {
 })
 
 const selectedConfigFields = computed(() => {
-  if (selectedConfigVersion.value?.fields?.length) {
-    return selectedConfigVersion.value.fields
-  }
-  return snapshot.value?.configFields ?? []
+  return selectedConfigVersion.value?.fields ?? snapshot.value?.configFields ?? []
 })
 
 const editableConfigFields = computed(() => selectedConfigFields.value)
@@ -157,7 +154,7 @@ watch(
     if (!snapshot.value) {
       return
     }
-    syncConfigDraft(version?.fields.length ? version.fields : snapshot.value.configFields)
+    syncConfigDraft(version?.fields ?? snapshot.value.configFields)
   },
   { immediate: true },
 )
@@ -206,7 +203,6 @@ async function saveConfigVersion() {
     snapshot.value = {
       ...snapshot.value,
       configVersions: [candidate, ...snapshot.value.configVersions.filter((version) => version.id !== candidate.id)],
-      configFields: fields,
     }
     selectConfigVersion(candidate)
   } catch (error) {
