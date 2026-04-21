@@ -94,7 +94,7 @@ onMounted(async () => {
           </div>
         </article>
 
-        <article class="panel shell-placeholder">
+        <article class="panel shell-placeholder" data-slot="chart">
           <div class="panel-header">
             <h2>Chart slot</h2>
             <span>Reserved for later wiring</span>
@@ -104,7 +104,7 @@ onMounted(async () => {
           </p>
         </article>
 
-        <article class="panel shell-placeholder">
+        <article class="panel shell-placeholder" data-slot="table">
           <div class="panel-header">
             <h2>Table slot</h2>
             <span>Reserved for triage data</span>
