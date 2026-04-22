@@ -78,6 +78,15 @@ export type DashboardSnapshotResult = {
   warning: string | null
 }
 
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 function toSignalState(signal: AdminSignal): AdminSignal {
   return {
     ...signal,
@@ -345,12 +354,15 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
       query(
         collection(db, MARKET_SNAPSHOTS_COLLECTION),
         where('session_id', '==', latestSessionId),
-        orderBy('timestamp', 'asc'),
+        orderBy('timestamp', 'desc'),
         limit(240),
       ),
     )
     const marketSnapshots = marketSnapshotDocs.docs.length
-      ? marketSnapshotDocs.docs.map((doc) => {
+      ? marketSnapshotDocs.docs
+          .slice()
+          .reverse()
+          .map((doc) => {
           const data = doc.data() as Record<string, unknown>
           return {
             id: doc.id,
@@ -362,21 +374,21 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
             low: Number(data.low ?? 0),
             close: Number(data.close ?? 0),
             volume: Number(data.volume ?? 0),
-            smaFast: Number.isFinite(Number(data.sma_fast)) ? Number(data.sma_fast) : null,
-            smaSlow: Number.isFinite(Number(data.sma_slow)) ? Number(data.sma_slow) : null,
-            emaFast: Number.isFinite(Number(data.ema_fast)) ? Number(data.ema_fast) : null,
-            emaSlow: Number.isFinite(Number(data.ema_slow)) ? Number(data.ema_slow) : null,
-            vwap: Number.isFinite(Number(data.vwap)) ? Number(data.vwap) : null,
-            rsi: Number.isFinite(Number(data.rsi)) ? Number(data.rsi) : null,
-            atr: Number.isFinite(Number(data.atr)) ? Number(data.atr) : null,
-            plusDi: Number.isFinite(Number(data.plus_di)) ? Number(data.plus_di) : null,
-            minusDi: Number.isFinite(Number(data.minus_di)) ? Number(data.minus_di) : null,
-            adx: Number.isFinite(Number(data.adx)) ? Number(data.adx) : null,
-            macd: Number.isFinite(Number(data.macd)) ? Number(data.macd) : null,
-            macdSignal: Number.isFinite(Number(data.macd_signal)) ? Number(data.macd_signal) : null,
-            macdHistogram: Number.isFinite(Number(data.macd_histogram)) ? Number(data.macd_histogram) : null,
-            stochasticK: Number.isFinite(Number(data.stochastic_k)) ? Number(data.stochastic_k) : null,
-            stochasticD: Number.isFinite(Number(data.stochastic_d)) ? Number(data.stochastic_d) : null,
+            smaFast: toNullableNumber(data.sma_fast),
+            smaSlow: toNullableNumber(data.sma_slow),
+            emaFast: toNullableNumber(data.ema_fast),
+            emaSlow: toNullableNumber(data.ema_slow),
+            vwap: toNullableNumber(data.vwap),
+            rsi: toNullableNumber(data.rsi),
+            atr: toNullableNumber(data.atr),
+            plusDi: toNullableNumber(data.plus_di),
+            minusDi: toNullableNumber(data.minus_di),
+            adx: toNullableNumber(data.adx),
+            macd: toNullableNumber(data.macd),
+            macdSignal: toNullableNumber(data.macd_signal),
+            macdHistogram: toNullableNumber(data.macd_histogram),
+            stochasticK: toNullableNumber(data.stochastic_k),
+            stochasticD: toNullableNumber(data.stochastic_d),
             entryScore: Number(data.entry_score ?? 0),
             exitScore: Number(data.exit_score ?? 0),
             eventType: String(data.event_type ?? ''),

@@ -42,10 +42,13 @@ const notificationMessage = ref<string | null>(null)
 let notificationSetupGeneration = 0
 let isMounted = true
 let dashboardRefreshTimer: number | null = null
+let dashboardRefreshInFlight = false
+let dashboardVisibilityChangeHandler: (() => void) | null = null
 const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
 const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
 const selectedConfigVersionId = ref<string>('current')
 const configDraft = reactive<Record<string, number>>({})
+const DASHBOARD_REFRESH_INTERVAL_MS = 30_000
 const sessionOverview = computed(() => snapshot.value?.sessionOverview ?? fallbackSessionOverview)
 const marketSnapshots = computed(() => snapshot.value?.marketSnapshots ?? [])
 const marketSymbols = computed(() => {
@@ -198,6 +201,7 @@ type ChartPoint = {
 }
 
 type ChartMarker = ChartPoint & {
+  id: string
   kind: 'entry' | 'exit'
 }
 
@@ -298,6 +302,22 @@ function formatChartValue(value: number | null, decimals = 2) {
   return value.toFixed(decimals)
 }
 
+function formatLocaleTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return 'waiting for live data'
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(parsed)
+}
+
 function buildChartView(records: MarketSnapshotRecord[], chart: ChartDefinition): ChartView {
   const usableRecords = records.length > 0 ? records : []
   const latestTimestamp = usableRecords.at(-1)?.timestamp ?? null
@@ -340,6 +360,7 @@ function buildChartView(records: MarketSnapshotRecord[], chart: ChartDefinition)
         return null
       }
       return {
+        id: record.id,
         x: usableRecords.length > 1 ? (index / width) * 100 : 50,
         y: record.signalAction === 'BUY_ALERT' ? 12 : 88,
         kind: record.signalAction === 'BUY_ALERT' ? 'entry' : 'exit',
@@ -437,18 +458,29 @@ async function refreshDashboard() {
   if (!firestoreAvailable.value) {
     return
   }
+  if (dashboardRefreshInFlight) {
+    return
+  }
+
+  dashboardRefreshInFlight = true
   const preserveSelectedConfig = selectedConfigVersionId.value
-  const result = await loadDashboardSnapshot({ allowFirestore: true })
-  snapshot.value = result.snapshot
-  selectedSignal.value = result.snapshot.selectedSignal
-  snapshotSource.value = result.source
-  snapshotWarning.value = result.warning
-  if (preserveSelectedConfig === 'current') {
-    selectConfigVersion(
-      result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ??
-        result.snapshot.configVersions[0] ??
-        null,
-    )
+  try {
+    const result = await loadDashboardSnapshot({ allowFirestore: true })
+    snapshot.value = result.snapshot
+    selectedSignal.value = result.snapshot.selectedSignal
+    snapshotSource.value = result.source
+    snapshotWarning.value = result.warning
+    if (preserveSelectedConfig === 'current') {
+      selectConfigVersion(
+        result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ??
+          result.snapshot.configVersions[0] ??
+          null,
+      )
+    }
+  } catch (error) {
+    console.error('Failed to refresh dashboard:', error)
+  } finally {
+    dashboardRefreshInFlight = false
   }
 }
 
@@ -539,27 +571,63 @@ onMounted(async () => {
   }
 
   firestoreAvailable.value = allowFirestore
-  const result = await loadDashboardSnapshot({ allowFirestore })
-  snapshot.value = result.snapshot
-  selectedSignal.value = result.snapshot.selectedSignal
-  snapshotSource.value = result.source
-  snapshotWarning.value = result.warning
-  selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
-  void initializeNotifications(false)
-  if (dashboardRefreshTimer !== null) {
-    window.clearInterval(dashboardRefreshTimer)
+  try {
+    const result = await loadDashboardSnapshot({ allowFirestore })
+    snapshot.value = result.snapshot
+    selectedSignal.value = result.snapshot.selectedSignal
+    snapshotSource.value = result.source
+    snapshotWarning.value = result.warning
+    selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
+  } catch (error) {
+    console.error('Failed to load dashboard snapshot:', error)
   }
-  dashboardRefreshTimer = window.setInterval(() => {
-    void refreshDashboard()
-  }, 30_000)
+  void initializeNotifications(false)
+  const scheduleDashboardRefresh = () => {
+    if (!isMounted || !firestoreAvailable.value || document.hidden) {
+      return
+    }
+
+    if (dashboardRefreshTimer !== null) {
+      window.clearTimeout(dashboardRefreshTimer)
+    }
+
+    dashboardRefreshTimer = window.setTimeout(async () => {
+      dashboardRefreshTimer = null
+      try {
+        await refreshDashboard()
+      } finally {
+        if (isMounted && firestoreAvailable.value && !document.hidden) {
+          scheduleDashboardRefresh()
+        }
+      }
+    }, DASHBOARD_REFRESH_INTERVAL_MS)
+  }
+
+  const handleVisibilityChange = () => {
+    if (dashboardRefreshTimer !== null) {
+      window.clearTimeout(dashboardRefreshTimer)
+      dashboardRefreshTimer = null
+    }
+    if (!document.hidden) {
+      scheduleDashboardRefresh()
+    }
+  }
+
+  dashboardVisibilityChangeHandler = handleVisibilityChange
+  document.addEventListener('visibilitychange', dashboardVisibilityChangeHandler)
+  scheduleDashboardRefresh()
   loading.value = false
 })
 
 onUnmounted(() => {
   isMounted = false
   if (dashboardRefreshTimer !== null) {
-    window.clearInterval(dashboardRefreshTimer)
+    window.clearTimeout(dashboardRefreshTimer)
     dashboardRefreshTimer = null
+  }
+  if (dashboardVisibilityChangeHandler) {
+    document.removeEventListener('visibilitychange', dashboardVisibilityChangeHandler)
+    dashboardVisibilityChangeHandler = null
   }
   stopLiveSignalNotifications()
 })
@@ -637,7 +705,7 @@ onUnmounted(() => {
             </div>
             <div>
               <span>Updated</span>
-              <strong>{{ sessionOverview.updatedAt }}</strong>
+              <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong>
             </div>
             <div>
               <span>Open windows</span>
@@ -677,7 +745,7 @@ onUnmounted(() => {
                   <strong>{{ item.chart.title }}</strong>
                   <p>{{ item.chart.subtitle }}</p>
                 </div>
-                <span>{{ item.view.latestTimestamp ?? 'waiting for live data' }}</span>
+                <span>{{ formatLocaleTimestamp(item.view.latestTimestamp) }}</span>
               </div>
               <div class="chart-legend">
                 <span v-for="line in item.view.lines" :key="line.label">
@@ -697,7 +765,7 @@ onUnmounted(() => {
                     stroke-linejoin="round"
                   />
                 </g>
-                <g v-for="marker in item.view.markers" :key="`${item.chart.id}-${marker.kind}-${marker.x}-${marker.y}`">
+                <g v-for="marker in item.view.markers" :key="`${item.chart.id}-${marker.id}`">
                   <line
                     :x1="marker.x"
                     y1="0"
@@ -730,7 +798,7 @@ onUnmounted(() => {
           <div class="signal-list compact">
             <div v-for="snapshotPoint in latestMarketSnapshots" :key="snapshotPoint.id" class="signal-row ledger-row">
               <div>
-                <strong>{{ snapshotPoint.timestamp }}</strong>
+                <strong>{{ formatLocaleTimestamp(snapshotPoint.timestamp) }}</strong>
                 <p>{{ snapshotPoint.signalAction }} · {{ snapshotPoint.signalState }} · {{ snapshotPoint.signalRegime }}</p>
               </div>
               <div class="scores">
@@ -790,7 +858,7 @@ onUnmounted(() => {
           <div class="detail-card" v-if="selectedSignal">
             <div class="detail-title">
               <strong>{{ selectedSignal.state }}</strong>
-              <span>Updated {{ selectedSignal.updatedAt }}</span>
+              <span>Updated {{ formatLocaleTimestamp(selectedSignal.updatedAt) }}</span>
             </div>
             <div class="score-grid">
               <div>
@@ -854,7 +922,7 @@ onUnmounted(() => {
             </div>
             <div class="history-actions">
               <span>{{ version.status }}</span>
-              <span>{{ version.updatedAt }}</span>
+              <span>{{ formatLocaleTimestamp(version.updatedAt) }}</span>
               <button
                 v-if="version.status !== 'active'"
                 type="button"
