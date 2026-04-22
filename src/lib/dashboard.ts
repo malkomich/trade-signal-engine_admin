@@ -391,8 +391,8 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
     const openWindows = Number(latestSession?.open_windows ?? 0)
     const rejectedEntries = Number(latestSession?.rejected_entries ?? 0)
     const configVersion = String(latestSession?.config_version ?? 'v18')
-    const hasLiveDashboardData =
-      sessionDocs.docs.length > 0 && signalDocs.docs.length > 0 && versionDocs.docs.length > 0 && marketSnapshotDocs.docs.length > 0
+    const hasCoreDashboardData = sessionDocs.docs.length > 0 && signalDocs.docs.length > 0 && versionDocs.docs.length > 0
+    const hasLiveMarketData = marketSnapshotDocs.docs.length > 0
     const configVersions = versionDocs.docs.length
       ? versionDocs.docs.map((doc) => {
           const data = doc.data() as Record<string, unknown>
@@ -425,9 +425,11 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
         ]
 
     return {
-      source: hasLiveDashboardData ? 'firestore' : 'sample',
-      warning: hasLiveDashboardData
-        ? null
+      source: hasCoreDashboardData ? 'firestore' : 'sample',
+      warning: hasCoreDashboardData
+        ? hasLiveMarketData
+          ? null
+          : 'Firestore returned live session data, but no market snapshots were available so the dashboard is showing sample chart data.'
         : 'Firestore returned incomplete dashboard data, so the dashboard is using sample values for the missing sections.',
       snapshot: {
         metrics: [

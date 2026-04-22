@@ -89,6 +89,20 @@ function signalKey(signal: DashboardSnapshot['selectedSignal']) {
   return `${signal.symbol}:${signal.updatedAt}`
 }
 
+function syncSelectedMarketSymbol(symbols: string[]) {
+  if (symbols.length === 0) {
+    selectedMarketSymbol.value = ''
+    return
+  }
+
+  if (selectedMarketSymbol.value && symbols.includes(selectedMarketSymbol.value)) {
+    return
+  }
+
+  const preferredSymbol = selectedSignal.value?.symbol ?? ''
+  selectedMarketSymbol.value = symbols.includes(preferredSymbol) ? preferredSymbol : symbols[0]
+}
+
 const currentConfigVersion = computed(() => sessionOverview.value.configVersion)
 
 const configVersions = computed(() => snapshot.value?.configVersions ?? [])
@@ -393,27 +407,9 @@ watch(
 )
 
 watch(
-  marketSymbols,
-  (symbols) => {
-    if (symbols.length === 0) {
-      selectedMarketSymbol.value = ''
-      return
-    }
-    if (!selectedMarketSymbol.value || !symbols.includes(selectedMarketSymbol.value)) {
-      selectedMarketSymbol.value = symbols.includes(selectedSignal.value?.symbol ?? '')
-        ? (selectedSignal.value?.symbol ?? symbols[0])
-        : symbols[0]
-    }
-  },
-  { immediate: true },
-)
-
-watch(
-  selectedSignal,
-  (signal) => {
-    if (!selectedMarketSymbol.value && signal && marketSymbols.value.includes(signal.symbol)) {
-      selectedMarketSymbol.value = signal.symbol
-    }
+  [marketSymbols, selectedSignal],
+  ([symbols]) => {
+    syncSelectedMarketSymbol(symbols)
   },
   { immediate: true },
 )
