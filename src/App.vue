@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { signInAnonymously } from 'firebase/auth'
+import { type MessagePayload } from 'firebase/messaging'
 import { classifySignal } from './lib/engine'
 import { auth } from './lib/firebase'
 import {
@@ -11,6 +12,12 @@ import {
   type DashboardSnapshot,
   type DashboardSource,
 } from './lib/dashboard'
+import {
+  probeLiveSignalNotifications,
+  setupLiveSignalNotifications,
+  stopLiveSignalNotifications,
+  type NotificationSetupState,
+} from './lib/notifications'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
@@ -28,6 +35,10 @@ const authState = ref<'booting' | 'authenticating' | 'authenticated' | 'offline'
 const snapshotSource = ref<DashboardSource>('sample')
 const snapshotWarning = ref<string | null>(null)
 const firestoreAvailable = ref(true)
+const notificationState = ref<NotificationSetupState>('unsupported')
+const notificationMessage = ref<string | null>(null)
+let notificationSetupGeneration = 0
+let isMounted = true
 const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
 const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
 const selectedConfigVersionId = ref<string>('current')
@@ -182,6 +193,36 @@ async function refreshDashboard() {
   selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
 }
 
+async function refreshOnRelevantSignal(payload: MessagePayload) {
+  const type = payload.data?.type?.trim().toLowerCase()
+  if (type === 'decision.accepted' || type === 'decision.exited') {
+    await refreshDashboard()
+  }
+}
+
+async function initializeNotifications(promptForPermission: boolean) {
+  if (!firestoreAvailable.value) {
+    notificationState.value = 'failed'
+    notificationMessage.value = 'Cannot enable live updates: Firestore is unavailable.'
+    return
+  }
+
+  const generation = ++notificationSetupGeneration
+  stopLiveSignalNotifications()
+  const setup = promptForPermission ? setupLiveSignalNotifications : probeLiveSignalNotifications
+  const result = await setup(refreshOnRelevantSignal)
+  if (!isMounted || generation !== notificationSetupGeneration) {
+    result.stop?.()
+    return
+  }
+  notificationState.value = result.state
+  notificationMessage.value = result.error
+}
+
+async function enableLiveNotifications() {
+  await initializeNotifications(true)
+}
+
 async function saveConfigVersion() {
   if (!snapshot.value || snapshotSource.value !== 'firestore') {
     return
@@ -245,7 +286,13 @@ onMounted(async () => {
   snapshotSource.value = result.source
   snapshotWarning.value = result.warning
   selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
+  void initializeNotifications(false)
   loading.value = false
+})
+
+onUnmounted(() => {
+  isMounted = false
+  stopLiveSignalNotifications()
 })
 </script>
 
@@ -274,9 +321,24 @@ onMounted(async () => {
                   : 'Signing in'
             }}
           </p>
+          <p>
+            Browser alerts:
+            <strong>{{ notificationState }}</strong>
+          </p>
           <p v-if="snapshotWarning" class="status-warning">
             {{ snapshotWarning }}
           </p>
+          <p v-if="notificationMessage" class="status-warning">
+            {{ notificationMessage }}
+          </p>
+          <button
+            type="button"
+            class="action-button ghost"
+            :disabled="notificationState === 'ready'"
+            @click="enableLiveNotifications"
+          >
+            {{ notificationState === 'ready' ? 'Live notifications enabled' : 'Enable live notifications' }}
+          </button>
         </div>
       </div>
     </section>
