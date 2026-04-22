@@ -125,6 +125,8 @@ async function initializeLiveSignalNotifications(
         stop: null,
       }
     }
+    // Foreground notifications are intentionally owned here; the service worker
+    // handles background delivery and this listener only dedupes live tab events.
     const unsubscribe = onMessage(messaging, (payload) => {
       const key = notificationTag(payload)
       if (seenNotificationKeys.has(key)) {

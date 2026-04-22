@@ -17,6 +17,9 @@ function notificationTag(payload) {
 const messaging = firebase.messaging()
 
 messaging.onBackgroundMessage((payload) => {
+  if (payload?.notification) {
+    return
+  }
   const title = payload?.notification?.title || DEFAULT_NOTIFICATION_TITLE
   const body = payload?.notification?.body || DEFAULT_NOTIFICATION_BODY
   self.registration.showNotification(title, {
