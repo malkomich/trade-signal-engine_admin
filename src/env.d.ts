@@ -1,5 +1,11 @@
 /// <reference types="vite/client" />
 
+import type { FirebaseWebConfig } from './lib/firebase'
+
+declare global {
+  var __TRADE_SIGNAL_ENGINE_FIREBASE_CONFIG__: FirebaseWebConfig | undefined
+}
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
   const component: DefineComponent<Record<string, unknown>, Record<string, unknown>, unknown>

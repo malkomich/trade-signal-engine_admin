@@ -3,6 +3,7 @@ import { firebaseApp, firebaseMessagingConfig } from './firebase'
 
 export type NotificationSetupState =
   | 'ready'
+  | 'permission-needed'
   | 'unsupported'
   | 'permission-denied'
   | 'failed'
@@ -18,34 +19,42 @@ function canUseBrowserNotifications() {
   return typeof window !== 'undefined' && 'Notification' in window && 'serviceWorker' in navigator
 }
 
-export async function setupLiveSignalNotifications(onSignal: (payload: MessagePayload) => void): Promise<NotificationSetupResult> {
+const DEFAULT_NOTIFICATION_TITLE = 'Trade Signal Engine'
+const DEFAULT_NOTIFICATION_BODY = 'A new signal event is available.'
+let currentUnsubscribe: (() => void) | null = null
+const seenNotificationKeys = new Set<string>()
+
+function notificationTag(payload: MessagePayload): string {
+  return String(payload.data?.event_key ?? payload.data?.message_id ?? payload.data?.symbol ?? payload?.notification?.title ?? 'trade-signal-engine')
+}
+
+function shouldShowForegroundNotification(payload: MessagePayload): boolean {
+  const type = payload.data?.type?.trim().toLowerCase()
+  return type === 'decision.accepted' || type === 'decision.exited'
+}
+
+function pruneSeenNotificationKeys() {
+  if (seenNotificationKeys.size <= 64) {
+    return
+  }
+  seenNotificationKeys.clear()
+}
+
+function stopCurrentNotifications() {
+  currentUnsubscribe?.()
+  currentUnsubscribe = null
+}
+
+async function initializeLiveSignalNotifications(
+  onSignal: (payload: MessagePayload) => void,
+  requestPermission: boolean,
+): Promise<NotificationSetupResult> {
   if (!canUseBrowserNotifications()) {
     return {
       state: 'unsupported',
       token: null,
       error: 'Browser notifications are not available in this environment.',
       stop: null,
-    }
-  }
-
-  if (Notification.permission === 'denied') {
-    return {
-      state: 'permission-denied',
-      token: null,
-      error: 'Notification permission was denied by the browser.',
-      stop: null,
-    }
-  }
-
-  if (Notification.permission === 'default') {
-    const permission = await Notification.requestPermission()
-    if (permission !== 'granted') {
-      return {
-        state: 'permission-denied',
-        token: null,
-        error: 'Notification permission was not granted.',
-        stop: null,
-      }
     }
   }
 
@@ -59,33 +68,88 @@ export async function setupLiveSignalNotifications(onSignal: (payload: MessagePa
     }
   }
 
+  if (!firebaseMessagingConfig.vapidKey) {
+    return {
+      state: 'failed',
+      token: null,
+      error: 'VAPID key is required to register browser push notifications.',
+      stop: null,
+    }
+  }
+
+  if (Notification.permission === 'default') {
+    if (!requestPermission) {
+      return {
+        state: 'permission-needed',
+        token: null,
+        error: 'Notification permission has not been requested yet.',
+        stop: null,
+      }
+    }
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      return {
+        state: 'permission-denied',
+        token: null,
+        error: 'Notification permission was not granted.',
+        stop: null,
+      }
+    }
+  }
+
+  if (Notification.permission === 'denied') {
+    return {
+      state: 'permission-denied',
+      token: null,
+      error: 'Notification permission was denied by the browser.',
+      stop: null,
+    }
+  }
+
   try {
+    stopCurrentNotifications()
+
     const messaging = getMessaging(firebaseApp)
-    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js')
-    const token = firebaseMessagingConfig.vapidKey
-      ? await getToken(messaging, {
-          vapidKey: firebaseMessagingConfig.vapidKey,
-          serviceWorkerRegistration: registration,
-        })
-      : await getToken(messaging, {
-          serviceWorkerRegistration: registration,
-        })
+    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
+    const token = await getToken(messaging, {
+      vapidKey: firebaseMessagingConfig.vapidKey,
+      serviceWorkerRegistration: registration,
+    }).catch((error) => {
+      throw error instanceof Error ? error : new Error('Failed to retrieve the FCM token.')
+    })
+    if (!token) {
+      return {
+        state: 'failed',
+        token: null,
+        error: 'FCM did not return a web token.',
+        stop: null,
+      }
+    }
     const unsubscribe = onMessage(messaging, (payload) => {
+      const key = notificationTag(payload)
+      if (seenNotificationKeys.has(key)) {
+        return
+      }
+      seenNotificationKeys.add(key)
+      pruneSeenNotificationKeys()
       onSignal(payload)
-      if (payload.notification && Notification.permission === 'granted') {
-        new Notification(payload.notification.title ?? 'Trade Signal Engine', {
-          body: payload.notification.body ?? '',
+      if (payload.notification && Notification.permission === 'granted' && shouldShowForegroundNotification(payload)) {
+        new Notification(payload.notification.title ?? DEFAULT_NOTIFICATION_TITLE, {
+          body: payload.notification.body ?? DEFAULT_NOTIFICATION_BODY,
+          tag: notificationTag(payload),
         })
       }
     })
+    currentUnsubscribe = unsubscribe
 
     return {
       state: 'ready',
-      token: token || null,
-      error: token ? null : 'FCM did not return a web token.',
-      stop: unsubscribe,
+      token,
+      error: null,
+      stop: stopCurrentNotifications,
     }
   } catch (error) {
+    stopCurrentNotifications()
     return {
       state: 'failed',
       token: null,
@@ -93,4 +157,16 @@ export async function setupLiveSignalNotifications(onSignal: (payload: MessagePa
       stop: null,
     }
   }
+}
+
+export async function probeLiveSignalNotifications(onSignal: (payload: MessagePayload) => void): Promise<NotificationSetupResult> {
+  return initializeLiveSignalNotifications(onSignal, false)
+}
+
+export async function setupLiveSignalNotifications(onSignal: (payload: MessagePayload) => void): Promise<NotificationSetupResult> {
+  return initializeLiveSignalNotifications(onSignal, true)
+}
+
+export function stopLiveSignalNotifications() {
+  stopCurrentNotifications()
 }

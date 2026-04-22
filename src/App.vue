@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { signInAnonymously } from 'firebase/auth'
+import { type MessagePayload } from 'firebase/messaging'
 import { classifySignal } from './lib/engine'
 import { auth } from './lib/firebase'
 import {
@@ -11,7 +12,12 @@ import {
   type DashboardSnapshot,
   type DashboardSource,
 } from './lib/dashboard'
-import { setupLiveSignalNotifications, type NotificationSetupState } from './lib/notifications'
+import {
+  probeLiveSignalNotifications,
+  setupLiveSignalNotifications,
+  stopLiveSignalNotifications,
+  type NotificationSetupState,
+} from './lib/notifications'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
@@ -31,7 +37,8 @@ const snapshotWarning = ref<string | null>(null)
 const firestoreAvailable = ref(true)
 const notificationState = ref<NotificationSetupState>('unsupported')
 const notificationMessage = ref<string | null>(null)
-let stopNotificationListener: (() => void) | null = null
+let notificationSetupGeneration = 0
+let isMounted = true
 const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
 const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
 const selectedConfigVersionId = ref<string>('current')
@@ -186,14 +193,34 @@ async function refreshDashboard() {
   selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
 }
 
-async function enableLiveNotifications() {
-  stopNotificationListener?.()
-  const result = await setupLiveSignalNotifications(async () => {
+async function refreshOnRelevantSignal(payload: MessagePayload) {
+  const type = payload.data?.type?.trim().toLowerCase()
+  if (type === 'decision.accepted' || type === 'decision.exited') {
     await refreshDashboard()
-  })
+  }
+}
+
+async function initializeNotifications(promptForPermission: boolean) {
+  if (!firestoreAvailable.value) {
+    notificationState.value = 'failed'
+    notificationMessage.value = 'Cannot enable live updates: Firestore is unavailable.'
+    return
+  }
+
+  const generation = ++notificationSetupGeneration
+  stopLiveSignalNotifications()
+  const setup = promptForPermission ? setupLiveSignalNotifications : probeLiveSignalNotifications
+  const result = await setup(refreshOnRelevantSignal)
+  if (!isMounted || generation !== notificationSetupGeneration) {
+    result.stop?.()
+    return
+  }
   notificationState.value = result.state
   notificationMessage.value = result.error
-  stopNotificationListener = result.stop
+}
+
+async function enableLiveNotifications() {
+  await initializeNotifications(true)
 }
 
 async function saveConfigVersion() {
@@ -259,12 +286,13 @@ onMounted(async () => {
   snapshotSource.value = result.source
   snapshotWarning.value = result.warning
   selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
-  void enableLiveNotifications()
+  void initializeNotifications(false)
   loading.value = false
 })
 
 onUnmounted(() => {
-  stopNotificationListener?.()
+  isMounted = false
+  stopLiveSignalNotifications()
 })
 </script>
 

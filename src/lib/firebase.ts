@@ -2,26 +2,46 @@ import { FirebaseApp, getApp, getApps, initializeApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 
-const defaultFirebaseConfig = {
-  apiKey: 'AIzaSyAEnPeQJlPcYnJIV9rjRgROU-mRvoGMDFA',
-  authDomain: 'trade-signal-engine.firebaseapp.com',
-  projectId: 'trade-signal-engine',
-  storageBucket: 'trade-signal-engine.firebasestorage.app',
-  messagingSenderId: '616349678895',
-  appId: '1:616349678895:web:95a2b698c7f6769723f5da',
-  measurementId: 'G-T2BP0YX4LQ',
+export type FirebaseWebConfig = {
+  apiKey: string
+  authDomain: string
+  projectId: string
+  storageBucket: string
+  messagingSenderId: string
+  appId: string
+  measurementId: string
 }
 
-function resolveFirebaseConfig() {
+function resolveFirebaseConfig(): FirebaseWebConfig {
+  const runtimeConfig = globalThis.__TRADE_SIGNAL_ENGINE_FIREBASE_CONFIG__ as Partial<FirebaseWebConfig> | undefined
+  const pick = (runtimeValue: string | undefined, envValue: string | undefined, name: string) => {
+    const candidate = (runtimeValue ?? envValue ?? '').trim()
+    if (!candidate) {
+      throw new Error(`Firebase configuration value ${name} is required.`)
+    }
+    return candidate
+  }
+
   return {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY || defaultFirebaseConfig.apiKey,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || defaultFirebaseConfig.authDomain,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || defaultFirebaseConfig.projectId,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || defaultFirebaseConfig.storageBucket,
-    messagingSenderId:
-      import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || defaultFirebaseConfig.messagingSenderId,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID || defaultFirebaseConfig.appId,
-    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || defaultFirebaseConfig.measurementId,
+    apiKey: pick(runtimeConfig?.apiKey, import.meta.env.VITE_FIREBASE_API_KEY, 'apiKey'),
+    authDomain: pick(runtimeConfig?.authDomain, import.meta.env.VITE_FIREBASE_AUTH_DOMAIN, 'authDomain'),
+    projectId: pick(runtimeConfig?.projectId, import.meta.env.VITE_FIREBASE_PROJECT_ID, 'projectId'),
+    storageBucket: pick(
+      runtimeConfig?.storageBucket,
+      import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+      'storageBucket',
+    ),
+    messagingSenderId: pick(
+      runtimeConfig?.messagingSenderId,
+      import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+      'messagingSenderId',
+    ),
+    appId: pick(runtimeConfig?.appId, import.meta.env.VITE_FIREBASE_APP_ID, 'appId'),
+    measurementId: pick(
+      runtimeConfig?.measurementId,
+      import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+      'measurementId',
+    ),
   }
 }
 
@@ -35,10 +55,10 @@ export function getFirebaseApp(): FirebaseApp {
 export const firebaseApp = getFirebaseApp()
 export const auth = getAuth(firebaseApp)
 export const db = getFirestore(firebaseApp)
+const firebaseConfig = resolveFirebaseConfig()
 
 export const firebaseMessagingConfig = {
-  projectId: defaultFirebaseConfig.projectId,
-  messagingSenderId:
-    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || defaultFirebaseConfig.messagingSenderId,
+  projectId: firebaseConfig.projectId,
+  messagingSenderId: firebaseConfig.messagingSenderId,
   vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY?.trim() || '',
 }
