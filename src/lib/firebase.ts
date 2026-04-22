@@ -14,8 +14,8 @@ export type FirebaseWebConfig = {
 
 function resolveFirebaseConfig(): FirebaseWebConfig {
   const runtimeConfig = globalThis.__TRADE_SIGNAL_ENGINE_FIREBASE_CONFIG__ as Partial<FirebaseWebConfig> | undefined
-  const pick = (runtimeValue: string | undefined, envValue: string | undefined, name: string) => {
-    const candidate = (envValue ?? runtimeValue ?? '').trim()
+  const pick = (envValue: string | undefined, runtimeValue: string | undefined, name: string) => {
+    const candidate = (envValue?.trim() || runtimeValue?.trim() || '').trim()
     if (!candidate) {
       throw new Error(`Firebase configuration value ${name} is required.`)
     }

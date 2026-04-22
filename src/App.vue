@@ -317,13 +317,9 @@ function buildChartView(records: MarketSnapshotRecord[], chart: ChartDefinition)
       if (record.signalAction !== 'BUY_ALERT' && record.signalAction !== 'SELL_ALERT') {
         return null
       }
-      const closeValue = readSeriesValue(record, 'close')
-      if (closeValue === null) {
-        return null
-      }
-      const point = toPoint(closeValue, index)
       return {
-        ...point,
+        x: usableRecords.length > 1 ? (index / width) * 100 : 50,
+        y: record.signalAction === 'BUY_ALERT' ? 12 : 88,
         kind: record.signalAction === 'BUY_ALERT' ? 'entry' : 'exit',
       }
     })
@@ -400,6 +396,7 @@ watch(
   marketSymbols,
   (symbols) => {
     if (symbols.length === 0) {
+      selectedMarketSymbol.value = ''
       return
     }
     if (!selectedMarketSymbol.value || !symbols.includes(selectedMarketSymbol.value)) {
@@ -436,12 +433,19 @@ async function refreshDashboard() {
   if (!firestoreAvailable.value) {
     return
   }
+  const preserveSelectedConfig = selectedConfigVersionId.value
   const result = await loadDashboardSnapshot({ allowFirestore: true })
   snapshot.value = result.snapshot
   selectedSignal.value = result.snapshot.selectedSignal
   snapshotSource.value = result.source
   snapshotWarning.value = result.warning
-  selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
+  if (preserveSelectedConfig === 'current') {
+    selectConfigVersion(
+      result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ??
+        result.snapshot.configVersions[0] ??
+        null,
+    )
+  }
 }
 
 async function refreshOnRelevantSignal(payload: MessagePayload) {
