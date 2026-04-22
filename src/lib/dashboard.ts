@@ -8,7 +8,7 @@ import {
 } from './schema'
 import { classifySignal, type AdminSignal, type ConfigField, configFields, sampleSignals } from './engine'
 
-export type DashboardSource = 'firestore' | 'sample'
+export type DashboardSource = 'firestore' | 'partial' | 'sample'
 
 export type ConfigVersionRecord = {
   id: string
@@ -425,7 +425,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
         ]
 
     return {
-      source: hasCoreDashboardData ? 'firestore' : 'sample',
+      source: hasCoreDashboardData ? (hasLiveMarketData ? 'firestore' : 'partial') : 'sample',
       warning: hasCoreDashboardData
         ? hasLiveMarketData
           ? null

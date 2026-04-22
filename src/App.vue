@@ -79,6 +79,14 @@ const sourceDisplay = computed(() => {
     }
   }
 
+  if (snapshotSource.value === 'partial') {
+    return {
+      title: 'Live core data',
+      description:
+        'Firestore is providing live session, signal, and config data, while chart snapshots are temporarily falling back to sample values.',
+    }
+  }
+
   return {
     title: 'Sample fallback',
     description: 'Firestore was unavailable, so the dashboard is showing sample data instead of live operational data.',
@@ -475,7 +483,7 @@ async function enableLiveNotifications() {
 }
 
 async function saveConfigVersion() {
-  if (!snapshot.value || snapshotSource.value !== 'firestore') {
+  if (!snapshot.value || snapshotSource.value === 'sample') {
     return
   }
 
@@ -503,7 +511,7 @@ async function saveConfigVersion() {
 }
 
 async function applySelectedVersion(version: ConfigVersionRecord) {
-  if (!snapshot.value || snapshotSource.value !== 'firestore') {
+  if (!snapshot.value || snapshotSource.value === 'sample') {
     return
   }
 
