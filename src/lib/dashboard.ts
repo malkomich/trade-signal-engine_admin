@@ -1,9 +1,14 @@
 import { collection, doc, getDocs, limit, orderBy, query, runTransaction, where, writeBatch } from 'firebase/firestore'
 import { db } from './firebase'
-import { CONFIG_VERSIONS_COLLECTION, MARKET_SESSIONS_COLLECTION, SIGNAL_EVENTS_COLLECTION } from './schema'
+import {
+  CONFIG_VERSIONS_COLLECTION,
+  MARKET_SESSIONS_COLLECTION,
+  MARKET_SNAPSHOTS_COLLECTION,
+  SIGNAL_EVENTS_COLLECTION,
+} from './schema'
 import { classifySignal, type AdminSignal, type ConfigField, configFields, sampleSignals } from './engine'
 
-export type DashboardSource = 'firestore' | 'sample'
+export type DashboardSource = 'firestore' | 'partial' | 'sample'
 
 export type ConfigVersionRecord = {
   id: string
@@ -27,14 +32,59 @@ export type DashboardSnapshot = {
   }
   selectedSignal: AdminSignal
   signals: AdminSignal[]
+  marketSnapshots: MarketSnapshotRecord[]
   configFields: ConfigField[]
   configVersions: ConfigVersionRecord[]
+}
+
+export type MarketSnapshotRecord = {
+  id: string
+  sessionId: string
+  symbol: string
+  timestamp: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+  smaFast: number | null
+  smaSlow: number | null
+  emaFast: number | null
+  emaSlow: number | null
+  vwap: number | null
+  rsi: number | null
+  atr: number | null
+  plusDi: number | null
+  minusDi: number | null
+  adx: number | null
+  macd: number | null
+  macdSignal: number | null
+  macdHistogram: number | null
+  stochasticK: number | null
+  stochasticD: number | null
+  entryScore: number
+  exitScore: number
+  eventType: string
+  signalAction: string
+  signalState: string
+  signalRegime: string
+  benchmarkSymbol: string
+  reasons: string[]
 }
 
 export type DashboardSnapshotResult = {
   snapshot: DashboardSnapshot
   source: DashboardSource
   warning: string | null
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function toSignalState(signal: AdminSignal): AdminSignal {
@@ -79,6 +129,7 @@ function buildFallbackSnapshot(): DashboardSnapshot {
     },
     selectedSignal: sampleSignals[0],
     signals: sampleSignals,
+    marketSnapshots: buildFallbackMarketSnapshots(),
     configFields,
     configVersions: [
       {
@@ -91,6 +142,53 @@ function buildFallbackSnapshot(): DashboardSnapshot {
       },
     ],
   }
+}
+
+function buildFallbackMarketSnapshots(): MarketSnapshotRecord[] {
+  const symbols = ['AAPL', 'NVDA']
+  const snapshots: MarketSnapshotRecord[] = []
+  const now = Date.now()
+  for (const [symbolIndex, symbol] of symbols.entries()) {
+    for (let index = 0; index < 24; index += 1) {
+      const price = 180 + symbolIndex * 8 + index * 0.75 + Math.sin(index / 3) * 2
+      const timestamp = new Date(now - (23 - index) * 60_000).toISOString()
+      snapshots.push({
+        id: `${symbol}:${index}`,
+        sessionId: 'local-session',
+        symbol,
+        timestamp,
+        open: price - 0.4,
+        high: price + 0.8,
+        low: price - 1.0,
+        close: price,
+        volume: 1_000 + index * 20,
+        smaFast: price - 0.6,
+        smaSlow: price - 1.1,
+        emaFast: price - 0.3,
+        emaSlow: price - 0.9,
+        vwap: price - 0.8,
+        rsi: Math.min(85, 48 + index * 1.6),
+        atr: 1.2 + index * 0.03,
+        plusDi: 24 + index * 0.4,
+        minusDi: 18 - index * 0.1,
+        adx: 21 + index * 0.35,
+        macd: 0.15 + index * 0.03,
+        macdSignal: 0.1 + index * 0.025,
+        macdHistogram: 0.05 + index * 0.005,
+        stochasticK: 32 + index * 1.1,
+        stochasticD: 30 + index * 1.0,
+        entryScore: Math.min(0.96, 0.48 + index * 0.02),
+        exitScore: Math.max(0.12, 0.38 - index * 0.006),
+        eventType: index % 12 === 0 ? 'buy_alert' : 'market.snapshot',
+        signalAction: index % 12 === 0 ? 'BUY_ALERT' : 'HOLD',
+        signalState: index % 12 === 0 ? 'ENTRY_SIGNALLED' : 'FLAT',
+        signalRegime: 'Sample live market window',
+        benchmarkSymbol: 'IXIC',
+        reasons: index % 12 === 0 ? ['entry-qualified'] : [],
+      })
+    }
+  }
+  return snapshots
 }
 
 function normalizeConfigFields(value: unknown, fallback: ConfigField[]): ConfigField[] {
@@ -251,10 +349,62 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
 
     const selectedSignal = signals[0] ?? sampleSignals[0]
     const latestSession = sessionDocs.docs[0]?.data() as Record<string, unknown> | undefined
+    const latestSessionId = String(sessionDocs.docs[0]?.id ?? latestSession?.session_id ?? 'local-session')
+    const marketSnapshotDocs = await getDocs(
+      query(
+        collection(db, MARKET_SNAPSHOTS_COLLECTION),
+        where('session_id', '==', latestSessionId),
+        orderBy('timestamp', 'desc'),
+        limit(240),
+      ),
+    )
+    const marketSnapshots = marketSnapshotDocs.docs.length
+      ? marketSnapshotDocs.docs
+          .slice()
+          .reverse()
+          .map((doc) => {
+          const data = doc.data() as Record<string, unknown>
+          return {
+            id: doc.id,
+            sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
+            symbol: String(data.symbol ?? doc.id),
+            timestamp: formatFirestoreTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, new Date().toISOString()),
+            open: Number(data.open ?? 0),
+            high: Number(data.high ?? 0),
+            low: Number(data.low ?? 0),
+            close: Number(data.close ?? 0),
+            volume: Number(data.volume ?? 0),
+            smaFast: toNullableNumber(data.sma_fast),
+            smaSlow: toNullableNumber(data.sma_slow),
+            emaFast: toNullableNumber(data.ema_fast),
+            emaSlow: toNullableNumber(data.ema_slow),
+            vwap: toNullableNumber(data.vwap),
+            rsi: toNullableNumber(data.rsi),
+            atr: toNullableNumber(data.atr),
+            plusDi: toNullableNumber(data.plus_di),
+            minusDi: toNullableNumber(data.minus_di),
+            adx: toNullableNumber(data.adx),
+            macd: toNullableNumber(data.macd),
+            macdSignal: toNullableNumber(data.macd_signal),
+            macdHistogram: toNullableNumber(data.macd_histogram),
+            stochasticK: toNullableNumber(data.stochastic_k),
+            stochasticD: toNullableNumber(data.stochastic_d),
+            entryScore: Number(data.entry_score ?? 0),
+            exitScore: Number(data.exit_score ?? 0),
+            eventType: String(data.event_type ?? ''),
+            signalAction: String(data.signal_action ?? data.action ?? 'HOLD'),
+            signalState: String(data.signal_state ?? data.state ?? 'FLAT'),
+            signalRegime: String(data.signal_regime ?? data.regime ?? 'Live market session'),
+            benchmarkSymbol: String(data.benchmark_symbol ?? ''),
+            reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
+          }
+        })
+      : buildFallbackMarketSnapshots()
     const openWindows = Number(latestSession?.open_windows ?? 0)
     const rejectedEntries = Number(latestSession?.rejected_entries ?? 0)
     const configVersion = String(latestSession?.config_version ?? 'v18')
-    const hasLiveDashboardData = sessionDocs.docs.length > 0 && signalDocs.docs.length > 0 && versionDocs.docs.length > 0
+    const hasCoreDashboardData = sessionDocs.docs.length > 0 && signalDocs.docs.length > 0 && versionDocs.docs.length > 0
+    const hasLiveMarketData = marketSnapshotDocs.docs.length > 0
     const configVersions = versionDocs.docs.length
       ? versionDocs.docs.map((doc) => {
           const data = doc.data() as Record<string, unknown>
@@ -287,9 +437,11 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
         ]
 
     return {
-      source: hasLiveDashboardData ? 'firestore' : 'sample',
-      warning: hasLiveDashboardData
-        ? null
+      source: hasCoreDashboardData ? (hasLiveMarketData ? 'firestore' : 'partial') : 'sample',
+      warning: hasCoreDashboardData
+        ? hasLiveMarketData
+          ? null
+          : 'Firestore returned live session data, but no market snapshots were available so the dashboard is showing sample chart data.'
         : 'Firestore returned incomplete dashboard data, so the dashboard is using sample values for the missing sections.',
       snapshot: {
         metrics: [
@@ -311,6 +463,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
         },
         selectedSignal,
         signals,
+        marketSnapshots,
         configFields,
         configVersions,
       },

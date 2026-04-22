@@ -118,6 +118,14 @@ h1 {
   margin-bottom: 20px;
 }
 
+.shell-placeholder[data-slot='chart'] {
+  grid-column: span 2;
+}
+
+.shell-placeholder[data-slot='table'] {
+  grid-column: span 1;
+}
+
 .metric-card {
   padding: 18px;
 }
@@ -165,6 +173,117 @@ h1 {
   color: #b4c5dc;
   line-height: 1.6;
   margin-bottom: 0;
+}
+
+.symbol-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 18px;
+}
+
+.symbol-tab {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.75);
+  color: #dbeafe;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.symbol-tab.active {
+  border-color: rgba(125, 211, 252, 0.72);
+  background: rgba(125, 211, 252, 0.1);
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.chart-card {
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.68);
+  padding: 14px;
+}
+
+.chart-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.chart-card-header p {
+  margin-bottom: 0;
+  color: #9fb0ca;
+  font-size: 0.92rem;
+}
+
+.chart-card-header span {
+  color: #7dd3fc;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-bottom: 10px;
+  color: #cbd5e1;
+  font-size: 0.88rem;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.chart-svg {
+  width: 100%;
+  height: 132px;
+  overflow: visible;
+}
+
+.signal-marker-line {
+  stroke: rgba(148, 163, 184, 0.22);
+  stroke-dasharray: 3 5;
+}
+
+.signal-marker-line.entry,
+.signal-marker-dot.entry {
+  stroke: rgba(52, 211, 153, 0.85);
+  fill: rgba(52, 211, 153, 0.95);
+}
+
+.signal-marker-line.exit,
+.signal-marker-dot.exit {
+  stroke: rgba(251, 146, 60, 0.85);
+  fill: rgba(251, 146, 60, 0.95);
+}
+
+.signal-marker-dot {
+  stroke-width: 0.8;
+}
+
+.signal-list.compact {
+  gap: 10px;
+}
+
+.ledger-row {
+  padding: 12px 14px;
 }
 
 .panel-header {
@@ -379,6 +498,15 @@ h1 {
   .metrics,
   .overview-grid,
   .config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shell-placeholder[data-slot='chart'],
+  .shell-placeholder[data-slot='table'] {
+    grid-column: auto;
+  }
+
+  .chart-grid {
     grid-template-columns: 1fr;
   }
 

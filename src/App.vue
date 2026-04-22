@@ -11,6 +11,7 @@ import {
   type ConfigVersionRecord,
   type DashboardSnapshot,
   type DashboardSource,
+  type MarketSnapshotRecord,
 } from './lib/dashboard'
 import {
   probeLiveSignalNotifications,
@@ -21,6 +22,7 @@ import {
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
+const selectedMarketSymbol = ref<string>('')
 const fallbackSessionOverview: DashboardSnapshot['sessionOverview'] = {
   sessionId: 'local-session',
   status: 'live',
@@ -39,17 +41,52 @@ const notificationState = ref<NotificationSetupState>('unsupported')
 const notificationMessage = ref<string | null>(null)
 let notificationSetupGeneration = 0
 let isMounted = true
+let dashboardRefreshTimer: number | null = null
+let dashboardRefreshInFlight = false
+let dashboardVisibilityChangeHandler: (() => void) | null = null
 const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
 const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
 const selectedConfigVersionId = ref<string>('current')
 const configDraft = reactive<Record<string, number>>({})
+const DASHBOARD_REFRESH_INTERVAL_MS = 30_000
 const sessionOverview = computed(() => snapshot.value?.sessionOverview ?? fallbackSessionOverview)
+const marketSnapshots = computed(() => snapshot.value?.marketSnapshots ?? [])
+const marketSymbols = computed(() => {
+  const symbols = new Set<string>()
+  for (const snapshotRecord of marketSnapshots.value) {
+    if (snapshotRecord.symbol) {
+      symbols.add(snapshotRecord.symbol)
+    }
+  }
+  return Array.from(symbols).sort()
+})
+const selectedMarketSnapshots = computed(() => {
+  if (!selectedMarketSymbol.value) {
+    return marketSnapshots.value
+  }
+  return marketSnapshots.value.filter((record) => record.symbol === selectedMarketSymbol.value)
+})
+const latestMarketSnapshots = computed(() => selectedMarketSnapshots.value.slice(-6).reverse())
+const marketChartViews = computed(() =>
+  marketCharts.map((chart) => ({
+    chart,
+    view: buildChartView(selectedMarketSnapshots.value, chart),
+  })),
+)
 
 const sourceDisplay = computed(() => {
   if (snapshotSource.value === 'firestore') {
     return {
       title: 'Authenticated read model',
       description: 'Firestore access is gated by Firebase Auth and the dashboard is reading live operational data.',
+    }
+  }
+
+  if (snapshotSource.value === 'partial') {
+    return {
+      title: 'Live core data',
+      description:
+        'Firestore is providing live session, signal, and config data, while chart snapshots are temporarily falling back to sample values.',
     }
   }
 
@@ -61,6 +98,20 @@ const sourceDisplay = computed(() => {
 
 function signalKey(signal: DashboardSnapshot['selectedSignal']) {
   return `${signal.symbol}:${signal.updatedAt}`
+}
+
+function syncSelectedMarketSymbol(symbols: string[]) {
+  if (symbols.length === 0) {
+    selectedMarketSymbol.value = ''
+    return
+  }
+
+  if (selectedMarketSymbol.value && symbols.includes(selectedMarketSymbol.value)) {
+    return
+  }
+
+  const preferredSymbol = selectedSignal.value?.symbol ?? ''
+  selectedMarketSymbol.value = symbols.includes(preferredSymbol) ? preferredSymbol : symbols[0]
 }
 
 const currentConfigVersion = computed(() => sessionOverview.value.configVersion)
@@ -109,6 +160,220 @@ const configEditorStatus = computed(() => {
   }
   return selectedConfigVersion.value?.status ?? 'draft'
 })
+
+type ChartSeriesKey = keyof Pick<
+  MarketSnapshotRecord,
+  | 'close'
+  | 'smaFast'
+  | 'smaSlow'
+  | 'emaFast'
+  | 'emaSlow'
+  | 'vwap'
+  | 'rsi'
+  | 'atr'
+  | 'plusDi'
+  | 'minusDi'
+  | 'adx'
+  | 'macd'
+  | 'macdSignal'
+  | 'macdHistogram'
+  | 'stochasticK'
+  | 'stochasticD'
+>
+
+type ChartSeries = {
+  key: ChartSeriesKey
+  label: string
+  color: string
+  decimals?: number
+}
+
+type ChartDefinition = {
+  id: string
+  title: string
+  subtitle: string
+  series: ChartSeries[]
+}
+
+type ChartPoint = {
+  x: number
+  y: number
+}
+
+type ChartMarker = ChartPoint & {
+  id: string
+  kind: 'entry' | 'exit'
+}
+
+type ChartView = {
+  lines: Array<{
+    label: string
+    color: string
+    latestValue: string
+    points: string
+  }>
+  markers: ChartMarker[]
+  latestTimestamp: string | null
+}
+
+const marketCharts: ChartDefinition[] = [
+  {
+    id: 'price',
+    title: 'Price',
+    subtitle: 'Close price with market signals',
+    series: [{ key: 'close', label: 'Close', color: '#7dd3fc', decimals: 2 }],
+  },
+  {
+    id: 'sma',
+    title: 'SMA',
+    subtitle: 'Fast and slow simple moving averages',
+    series: [
+      { key: 'smaFast', label: 'Fast SMA', color: '#34d399', decimals: 2 },
+      { key: 'smaSlow', label: 'Slow SMA', color: '#f59e0b', decimals: 2 },
+    ],
+  },
+  {
+    id: 'ema',
+    title: 'EMA',
+    subtitle: 'Fast and slow exponential moving averages',
+    series: [
+      { key: 'emaFast', label: 'Fast EMA', color: '#60a5fa', decimals: 2 },
+      { key: 'emaSlow', label: 'Slow EMA', color: '#c084fc', decimals: 2 },
+    ],
+  },
+  {
+    id: 'vwap',
+    title: 'VWAP',
+    subtitle: 'Volume weighted price reference',
+    series: [{ key: 'vwap', label: 'VWAP', color: '#22d3ee', decimals: 2 }],
+  },
+  {
+    id: 'rsi',
+    title: 'RSI',
+    subtitle: 'Momentum oscillator',
+    series: [{ key: 'rsi', label: 'RSI', color: '#fb7185', decimals: 1 }],
+  },
+  {
+    id: 'atr',
+    title: 'ATR',
+    subtitle: 'Volatility range',
+    series: [{ key: 'atr', label: 'ATR', color: '#f97316', decimals: 2 }],
+  },
+  {
+    id: 'dmi',
+    title: 'DMI / ADX',
+    subtitle: 'Directional movement and trend strength',
+    series: [
+      { key: 'plusDi', label: '+DI', color: '#22c55e', decimals: 1 },
+      { key: 'minusDi', label: '-DI', color: '#ef4444', decimals: 1 },
+      { key: 'adx', label: 'ADX', color: '#f59e0b', decimals: 1 },
+    ],
+  },
+  {
+    id: 'macd',
+    title: 'MACD',
+    subtitle: 'Trend momentum and histogram',
+    series: [
+      { key: 'macd', label: 'MACD', color: '#38bdf8', decimals: 3 },
+      { key: 'macdSignal', label: 'Signal', color: '#c084fc', decimals: 3 },
+      { key: 'macdHistogram', label: 'Histogram', color: '#34d399', decimals: 3 },
+    ],
+  },
+  {
+    id: 'stochastic',
+    title: 'Stochastic',
+    subtitle: 'Momentum turning points',
+    series: [
+      { key: 'stochasticK', label: '%K', color: '#f472b6', decimals: 1 },
+      { key: 'stochasticD', label: '%D', color: '#fbbf24', decimals: 1 },
+    ],
+  },
+]
+
+function readSeriesValue(record: MarketSnapshotRecord, key: ChartSeriesKey): number | null {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function formatChartValue(value: number | null, decimals = 2) {
+  if (value === null) {
+    return '--'
+  }
+  return value.toFixed(decimals)
+}
+
+function formatLocaleTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return 'waiting for live data'
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(parsed)
+}
+
+function buildChartView(records: MarketSnapshotRecord[], chart: ChartDefinition): ChartView {
+  const usableRecords = records.length > 0 ? records : []
+  const latestTimestamp = usableRecords.at(-1)?.timestamp ?? null
+  const values = chart.series
+    .flatMap((series) => usableRecords.map((record) => readSeriesValue(record, series.key)))
+    .filter((value): value is number => typeof value === 'number')
+  const minValue = values.length > 0 ? Math.min(...values) : 0
+  const maxValue = values.length > 0 ? Math.max(...values) : 1
+  const spread = maxValue - minValue || 1
+  const width = usableRecords.length > 1 ? usableRecords.length - 1 : 1
+
+  const toPoint = (value: number, index: number): ChartPoint => {
+    const x = usableRecords.length > 1 ? (index / width) * 100 : 50
+    const y = 100 - ((value - minValue) / spread) * 100
+    return { x, y }
+  }
+
+  const lines = chart.series.map((series) => {
+    const coords: ChartPoint[] = []
+    usableRecords.forEach((record, index) => {
+      const value = readSeriesValue(record, series.key)
+      if (value === null) {
+        return
+      }
+      coords.push(toPoint(value, index))
+    })
+    const points = coords.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
+    const latestRecord = usableRecords.at(-1)
+    return {
+      label: series.label,
+      color: series.color,
+      latestValue: formatChartValue(latestRecord ? readSeriesValue(latestRecord, series.key) : null, series.decimals ?? 2),
+      points,
+    }
+  })
+
+  const markers: ChartMarker[] = usableRecords
+    .map((record, index) => {
+      if (record.signalAction !== 'BUY_ALERT' && record.signalAction !== 'SELL_ALERT') {
+        return null
+      }
+      return {
+        id: record.id,
+        x: usableRecords.length > 1 ? (index / width) * 100 : 50,
+        y: record.signalAction === 'BUY_ALERT' ? 12 : 88,
+        kind: record.signalAction === 'BUY_ALERT' ? 'entry' : 'exit',
+      }
+    })
+    .filter((marker): marker is ChartMarker => marker !== null)
+
+  return {
+    lines,
+    markers,
+    latestTimestamp,
+  }
+}
 
 function selectConfigVersion(version: ConfigVersionRecord | null) {
   if (!version) {
@@ -170,6 +435,14 @@ watch(
   { immediate: true },
 )
 
+watch(
+  [marketSymbols, selectedSignal],
+  ([symbols]) => {
+    syncSelectedMarketSymbol(symbols)
+  },
+  { immediate: true },
+)
+
 function setTriageFilter(filter: (typeof triageFilters)[number]) {
   triageFilter.value = filter
 }
@@ -185,12 +458,30 @@ async function refreshDashboard() {
   if (!firestoreAvailable.value) {
     return
   }
-  const result = await loadDashboardSnapshot({ allowFirestore: true })
-  snapshot.value = result.snapshot
-  selectedSignal.value = result.snapshot.selectedSignal
-  snapshotSource.value = result.source
-  snapshotWarning.value = result.warning
-  selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
+  if (dashboardRefreshInFlight) {
+    return
+  }
+
+  dashboardRefreshInFlight = true
+  const preserveSelectedConfig = selectedConfigVersionId.value
+  try {
+    const result = await loadDashboardSnapshot({ allowFirestore: true })
+    snapshot.value = result.snapshot
+    selectedSignal.value = result.snapshot.selectedSignal
+    snapshotSource.value = result.source
+    snapshotWarning.value = result.warning
+    if (preserveSelectedConfig === 'current') {
+      selectConfigVersion(
+        result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ??
+          result.snapshot.configVersions[0] ??
+          null,
+      )
+    }
+  } catch (error) {
+    console.error('Failed to refresh dashboard:', error)
+  } finally {
+    dashboardRefreshInFlight = false
+  }
 }
 
 async function refreshOnRelevantSignal(payload: MessagePayload) {
@@ -224,7 +515,7 @@ async function enableLiveNotifications() {
 }
 
 async function saveConfigVersion() {
-  if (!snapshot.value || snapshotSource.value !== 'firestore') {
+  if (!snapshot.value || snapshotSource.value === 'sample') {
     return
   }
 
@@ -252,7 +543,7 @@ async function saveConfigVersion() {
 }
 
 async function applySelectedVersion(version: ConfigVersionRecord) {
-  if (!snapshot.value || snapshotSource.value !== 'firestore') {
+  if (!snapshot.value || snapshotSource.value === 'sample') {
     return
   }
 
@@ -280,18 +571,64 @@ onMounted(async () => {
   }
 
   firestoreAvailable.value = allowFirestore
-  const result = await loadDashboardSnapshot({ allowFirestore })
-  snapshot.value = result.snapshot
-  selectedSignal.value = result.snapshot.selectedSignal
-  snapshotSource.value = result.source
-  snapshotWarning.value = result.warning
-  selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
+  try {
+    const result = await loadDashboardSnapshot({ allowFirestore })
+    snapshot.value = result.snapshot
+    selectedSignal.value = result.snapshot.selectedSignal
+    snapshotSource.value = result.source
+    snapshotWarning.value = result.warning
+    selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
+  } catch (error) {
+    console.error('Failed to load dashboard snapshot:', error)
+  }
   void initializeNotifications(false)
+  const scheduleDashboardRefresh = () => {
+    if (!isMounted || !firestoreAvailable.value || document.hidden) {
+      return
+    }
+
+    if (dashboardRefreshTimer !== null) {
+      window.clearTimeout(dashboardRefreshTimer)
+    }
+
+    dashboardRefreshTimer = window.setTimeout(async () => {
+      dashboardRefreshTimer = null
+      try {
+        await refreshDashboard()
+      } finally {
+        if (isMounted && firestoreAvailable.value && !document.hidden) {
+          scheduleDashboardRefresh()
+        }
+      }
+    }, DASHBOARD_REFRESH_INTERVAL_MS)
+  }
+
+  const handleVisibilityChange = () => {
+    if (dashboardRefreshTimer !== null) {
+      window.clearTimeout(dashboardRefreshTimer)
+      dashboardRefreshTimer = null
+    }
+    if (!document.hidden) {
+      scheduleDashboardRefresh()
+    }
+  }
+
+  dashboardVisibilityChangeHandler = handleVisibilityChange
+  document.addEventListener('visibilitychange', dashboardVisibilityChangeHandler)
+  scheduleDashboardRefresh()
   loading.value = false
 })
 
 onUnmounted(() => {
   isMounted = false
+  if (dashboardRefreshTimer !== null) {
+    window.clearTimeout(dashboardRefreshTimer)
+    dashboardRefreshTimer = null
+  }
+  if (dashboardVisibilityChangeHandler) {
+    document.removeEventListener('visibilitychange', dashboardVisibilityChangeHandler)
+    dashboardVisibilityChangeHandler = null
+  }
   stopLiveSignalNotifications()
 })
 </script>
@@ -368,7 +705,7 @@ onUnmounted(() => {
             </div>
             <div>
               <span>Updated</span>
-              <strong>{{ sessionOverview.updatedAt }}</strong>
+              <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong>
             </div>
             <div>
               <span>Open windows</span>
@@ -383,22 +720,93 @@ onUnmounted(() => {
 
         <article class="panel shell-placeholder" data-slot="chart">
           <div class="panel-header">
-            <h2>Chart slot</h2>
-            <span>Reserved for later wiring</span>
+            <h2>Live market charts</h2>
+            <span>{{ selectedMarketSymbol || 'No symbol selected' }}</span>
           </div>
           <p>
-            This panel is intentionally left as a shell so a live chart can be wired without changing the page structure.
+            Close price and indicators update in real time for the selected symbol. Entry and exit points are marked on the time axis.
           </p>
+          <div class="symbol-tabs">
+            <button
+              v-for="symbol in marketSymbols"
+              :key="symbol"
+              type="button"
+              class="symbol-tab"
+              :class="{ active: selectedMarketSymbol === symbol }"
+              @click="selectedMarketSymbol = symbol"
+            >
+              {{ symbol }}
+            </button>
+          </div>
+          <div v-if="marketChartViews.length" class="chart-grid">
+            <article v-for="item in marketChartViews" :key="item.chart.id" class="chart-card">
+              <div class="chart-card-header">
+                <div>
+                  <strong>{{ item.chart.title }}</strong>
+                  <p>{{ item.chart.subtitle }}</p>
+                </div>
+                <span>{{ formatLocaleTimestamp(item.view.latestTimestamp) }}</span>
+              </div>
+              <div class="chart-legend">
+                <span v-for="line in item.view.lines" :key="line.label">
+                  <i :style="{ background: line.color }"></i>
+                  {{ line.label }} {{ line.latestValue }}
+                </span>
+              </div>
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="chart-svg" aria-hidden="true">
+                <g v-for="line in item.view.lines" :key="`${item.chart.id}-${line.label}`">
+                  <polyline
+                    v-if="line.points"
+                    :points="line.points"
+                    fill="none"
+                    :stroke="line.color"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </g>
+                <g v-for="marker in item.view.markers" :key="`${item.chart.id}-${marker.id}`">
+                  <line
+                    :x1="marker.x"
+                    y1="0"
+                    :x2="marker.x"
+                    y2="100"
+                    :class="marker.kind"
+                    class="signal-marker-line"
+                  />
+                  <circle
+                    :cx="marker.x"
+                    :cy="marker.y"
+                    r="1.9"
+                    :class="marker.kind"
+                    class="signal-marker-dot"
+                  />
+                </g>
+              </svg>
+            </article>
+          </div>
         </article>
 
         <article class="panel shell-placeholder" data-slot="table">
           <div class="panel-header">
-            <h2>Table slot</h2>
-            <span>Reserved for triage data</span>
+            <h2>Live snapshot ledger</h2>
+            <span>{{ selectedMarketSnapshots.length }} points</span>
           </div>
           <p>
-            Session rows and audit tables will plug into this area in the next story without reshaping the layout.
+            This ledger highlights the latest marker state for the selected symbol. It refreshes alongside the charts so the graph and the decision trail stay aligned.
           </p>
+          <div class="signal-list compact">
+            <div v-for="snapshotPoint in latestMarketSnapshots" :key="snapshotPoint.id" class="signal-row ledger-row">
+              <div>
+                <strong>{{ formatLocaleTimestamp(snapshotPoint.timestamp) }}</strong>
+                <p>{{ snapshotPoint.signalAction }} · {{ snapshotPoint.signalState }} · {{ snapshotPoint.signalRegime }}</p>
+              </div>
+              <div class="scores">
+                <span>{{ snapshotPoint.entryScore.toFixed(2) }}</span>
+                <span>{{ snapshotPoint.exitScore.toFixed(2) }}</span>
+              </div>
+            </div>
+          </div>
         </article>
       </section>
 
@@ -450,7 +858,7 @@ onUnmounted(() => {
           <div class="detail-card" v-if="selectedSignal">
             <div class="detail-title">
               <strong>{{ selectedSignal.state }}</strong>
-              <span>Updated {{ selectedSignal.updatedAt }}</span>
+              <span>Updated {{ formatLocaleTimestamp(selectedSignal.updatedAt) }}</span>
             </div>
             <div class="score-grid">
               <div>
@@ -514,7 +922,7 @@ onUnmounted(() => {
             </div>
             <div class="history-actions">
               <span>{{ version.status }}</span>
-              <span>{{ version.updatedAt }}</span>
+              <span>{{ formatLocaleTimestamp(version.updatedAt) }}</span>
               <button
                 v-if="version.status !== 'active'"
                 type="button"
