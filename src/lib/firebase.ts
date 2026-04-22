@@ -35,3 +35,10 @@ export function getFirebaseApp(): FirebaseApp {
 export const firebaseApp = getFirebaseApp()
 export const auth = getAuth(firebaseApp)
 export const db = getFirestore(firebaseApp)
+
+export const firebaseMessagingConfig = {
+  projectId: defaultFirebaseConfig.projectId,
+  messagingSenderId:
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || defaultFirebaseConfig.messagingSenderId,
+  vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY?.trim() || '',
+}

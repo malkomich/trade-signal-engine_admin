@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.firebase/
+firebase-debug.log
 .idea/
 .vite/
 *.tsbuildinfo
