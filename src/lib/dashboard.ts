@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, limit, orderBy, query, runTransaction, where, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDocs, query, runTransaction, where, writeBatch } from 'firebase/firestore'
 import { db } from './firebase'
 import {
   CONFIG_VERSIONS_COLLECTION,
@@ -322,18 +322,21 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
   }
 
   try {
-    const sessionDocs = await getDocs(
-      query(collection(db, MARKET_SESSIONS_COLLECTION), orderBy('updated_at', 'desc'), limit(1)),
-    )
-    const signalDocs = await getDocs(
-      query(collection(db, SIGNAL_EVENTS_COLLECTION), orderBy('timestamp', 'desc'), limit(3)),
-    )
-    const versionDocs = await getDocs(
-      query(collection(db, CONFIG_VERSIONS_COLLECTION), orderBy('created_at', 'desc'), limit(5)),
-    )
+    const sessionDocs = await getDocs(collection(db, MARKET_SESSIONS_COLLECTION))
+    const signalDocs = await getDocs(collection(db, SIGNAL_EVENTS_COLLECTION))
+    const versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
 
-    const signals = signalDocs.docs.length
-      ? signalDocs.docs.map((doc) => {
+    const latestSessionDoc = [...sessionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['updated_at', 'updatedAt']))
+      [0]
+    const latestSignalDocs = [...signalDocs.docs]
+      .sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
+      .slice(0, 3)
+    const latestVersionDocs = [...versionDocs.docs]
+      .sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt']))
+      .slice(0, 5)
+
+    const signals = latestSignalDocs.length
+      ? latestSignalDocs.map((doc) => {
           const data = doc.data() as Record<string, unknown>
           return toSignalState({
             symbol: String(data.symbol ?? doc.id),
@@ -348,15 +351,9 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
       : sampleSignals
 
     const selectedSignal = signals[0] ?? sampleSignals[0]
-    const latestSession = sessionDocs.docs[0]?.data() as Record<string, unknown> | undefined
-    const latestSessionId = String(sessionDocs.docs[0]?.id ?? latestSession?.session_id ?? 'local-session')
-    const marketSnapshotDocs = await getDocs(
-      query(
-        collection(db, MARKET_SNAPSHOTS_COLLECTION),
-        where('session_id', '==', latestSessionId),
-        limit(240),
-      ),
-    )
+    const latestSession = latestSessionDoc?.data() as Record<string, unknown> | undefined
+    const latestSessionId = String(latestSessionDoc?.id ?? latestSession?.session_id ?? 'local-session')
+    const marketSnapshotDocs = await getDocs(query(collection(db, MARKET_SNAPSHOTS_COLLECTION), where('session_id', '==', latestSessionId)))
     const marketSnapshots = marketSnapshotDocs.docs.length
       ? marketSnapshotDocs.docs
           .map((doc) => {
@@ -407,14 +404,15 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
             }
             return left.id.localeCompare(right.id)
           })
+          .slice(-240)
       : buildFallbackMarketSnapshots()
     const openWindows = Number(latestSession?.open_windows ?? 0)
     const rejectedEntries = Number(latestSession?.rejected_entries ?? 0)
     const configVersion = String(latestSession?.config_version ?? 'v18')
     const hasCoreDashboardData = sessionDocs.docs.length > 0 && signalDocs.docs.length > 0 && versionDocs.docs.length > 0
     const hasLiveMarketData = marketSnapshotDocs.docs.length > 0
-    const configVersions = versionDocs.docs.length
-      ? versionDocs.docs.map((doc) => {
+    const configVersions = latestVersionDocs.length
+      ? latestVersionDocs.map((doc) => {
           const data = doc.data() as Record<string, unknown>
         return {
           id: doc.id,
@@ -453,7 +451,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
         : 'Firestore returned incomplete dashboard data, so the dashboard is using sample values for the missing sections.',
       snapshot: {
         metrics: [
-          { label: 'Signals today', value: String(signals.length * 8) },
+          { label: 'Signals today', value: String(signals.length) },
           { label: 'Open windows', value: String(openWindows) },
           { label: 'Rejected entries', value: String(rejectedEntries) },
           { label: 'Config version', value: configVersion },
@@ -483,4 +481,42 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
       snapshot: buildFallbackSnapshot(),
     }
   }
+}
+
+function compareFirestoreDoc(left: { data: () => unknown }, right: { data: () => unknown }, timestampKeys: string[]): number {
+  const leftData = left.data() as Record<string, unknown>
+  const rightData = right.data() as Record<string, unknown>
+  const leftTimestamp = timestampKeys.map((key) => formatComparableTimestamp(leftData[key])).find((value) => value !== null)
+  const rightTimestamp = timestampKeys.map((key) => formatComparableTimestamp(rightData[key])).find((value) => value !== null)
+
+  if (leftTimestamp !== undefined && rightTimestamp !== undefined && leftTimestamp !== rightTimestamp) {
+    return leftTimestamp - rightTimestamp
+  }
+  if (leftTimestamp !== undefined && rightTimestamp === undefined) {
+    return -1
+  }
+  if (leftTimestamp === undefined && rightTimestamp !== undefined) {
+    return 1
+  }
+  return 0
+}
+
+function formatComparableTimestamp(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  if (value instanceof Date) {
+    return value.getTime()
+  }
+  if (typeof value === 'object' && value !== null && 'toDate' in value && typeof (value as { toDate: () => Date }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate().getTime()
+  }
+  return null
 }
