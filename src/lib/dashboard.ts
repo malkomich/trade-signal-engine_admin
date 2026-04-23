@@ -442,13 +442,19 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
           },
         ]
 
+    const hasAnyLiveData = sessionDocs.docs.length > 0 || signalDocs.docs.length > 0 || versionDocs.docs.length > 0 || hasLiveMarketData
+    const source = hasCoreDashboardData ? (hasLiveMarketData ? 'firestore' : 'partial') : hasAnyLiveData ? 'partial' : 'sample'
+    const warning = hasCoreDashboardData
+      ? hasLiveMarketData
+        ? null
+        : 'Firestore returned live session data, but no market snapshots were available so the dashboard is showing sample chart data.'
+      : hasAnyLiveData
+        ? 'Firestore returned partial live data, so the dashboard is mixing Firestore-backed sections with sample values where live data is still missing.'
+        : 'Firestore returned incomplete dashboard data, so the dashboard is using sample values for the missing sections.'
+
     return {
-      source: hasCoreDashboardData ? (hasLiveMarketData ? 'firestore' : 'partial') : 'sample',
-      warning: hasCoreDashboardData
-        ? hasLiveMarketData
-          ? null
-          : 'Firestore returned live session data, but no market snapshots were available so the dashboard is showing sample chart data.'
-        : 'Firestore returned incomplete dashboard data, so the dashboard is using sample values for the missing sections.',
+      source,
+      warning,
       snapshot: {
         metrics: [
           { label: 'Signals today', value: String(signals.length) },
