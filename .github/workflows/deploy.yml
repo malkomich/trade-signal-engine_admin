@@ -33,5 +33,5 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Deploy to Firebase Hosting and Firestore rules
-        run: npx firebase-tools deploy --only firestore:rules,hosting:admin --project trade-signal-engine --non-interactive
+      - name: Deploy to Firebase Hosting, Firestore rules, and Firestore indexes
+        run: npx firebase-tools deploy --only firestore:indexes,firestore:rules,hosting:admin --project trade-signal-engine --non-interactive
