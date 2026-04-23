@@ -10,10 +10,12 @@ export type FirebaseWebConfig = {
   messagingSenderId: string
   appId: string
   measurementId?: string
+  vapidKey?: string
 }
 
+const runtimeConfig = globalThis.__TRADE_SIGNAL_ENGINE_FIREBASE_CONFIG__ as Partial<FirebaseWebConfig> | undefined
+
 function resolveFirebaseConfig(): FirebaseWebConfig {
-  const runtimeConfig = globalThis.__TRADE_SIGNAL_ENGINE_FIREBASE_CONFIG__ as Partial<FirebaseWebConfig> | undefined
   const pick = (envValue: string | undefined, runtimeValue: string | undefined, name: string) => {
     const candidate = (envValue?.trim() || runtimeValue?.trim() || '').trim()
     if (!candidate) {
@@ -56,5 +58,8 @@ export const auth = getAuth(firebaseApp)
 export const db = getFirestore(firebaseApp)
 
 export const firebaseMessagingConfig = {
-  vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY?.trim() || '',
+  vapidKey:
+    import.meta.env.VITE_FIREBASE_VAPID_KEY?.trim() ||
+    runtimeConfig?.vapidKey?.trim() ||
+    '',
 }

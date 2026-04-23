@@ -1,0 +1,44 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function hasOnlyKeys(keys) {
+      return request.resource.data.keys().hasOnly(keys);
+    }
+
+    match /{document=**} {
+      allow read: if isAuthenticated();
+    }
+
+    match /market_sessions/{sessionId} {
+      allow create, update: if isAuthenticated() && hasOnlyKeys([
+        "id",
+        "status",
+        "open_windows",
+        "last_decision_at",
+        "symbols",
+        "updated_at",
+        "config_version",
+        "config_candidate_sequence"
+      ]);
+    }
+
+    match /config_versions/{versionId} {
+      allow create, update: if isAuthenticated() && hasOnlyKeys([
+        "id",
+        "version",
+        "status",
+        "summary",
+        "fields",
+        "base_version",
+        "session_id",
+        "created_at",
+        "updated_at"
+      ]);
+    }
+  }
+}
