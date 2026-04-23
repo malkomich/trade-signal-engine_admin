@@ -354,14 +354,11 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
       query(
         collection(db, MARKET_SNAPSHOTS_COLLECTION),
         where('session_id', '==', latestSessionId),
-        orderBy('timestamp', 'desc'),
         limit(240),
       ),
     )
     const marketSnapshots = marketSnapshotDocs.docs.length
       ? marketSnapshotDocs.docs
-          .slice()
-          .reverse()
           .map((doc) => {
           const data = doc.data() as Record<string, unknown>
           return {
@@ -399,6 +396,17 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
             reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
           }
         })
+          .sort((left, right) => {
+            const leftTimestamp = Date.parse(left.timestamp)
+            const rightTimestamp = Date.parse(right.timestamp)
+            if (leftTimestamp !== rightTimestamp) {
+              return leftTimestamp - rightTimestamp
+            }
+            if (left.symbol !== right.symbol) {
+              return left.symbol.localeCompare(right.symbol)
+            }
+            return left.id.localeCompare(right.id)
+          })
       : buildFallbackMarketSnapshots()
     const openWindows = Number(latestSession?.open_windows ?? 0)
     const rejectedEntries = Number(latestSession?.rejected_entries ?? 0)
