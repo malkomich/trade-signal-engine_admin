@@ -6,13 +6,13 @@ Vue admin console served from Firebase Hosting for session triage, signal review
 
 - Vue 3
 - Vite
-- Firebase Hosting + Firestore
+- Firebase Hosting + Realtime Database
 
 ## External integrations
 
 - `Firebase Hosting` serves the admin console.
 - `Firebase Auth` gates read access before the dashboard loads live data.
-- `Firestore` is the operational read model for sessions, signals, and versioned configs.
+- `Realtime Database` is the operational read model for sessions, signals, and versioned configs.
 
 ## Config workflow
 
@@ -55,10 +55,13 @@ Configure these environment variables (typically in a .env file) to override the
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
 - `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_DATABASE_URL`
 - `VITE_FIREBASE_STORAGE_BUCKET`
 - `VITE_FIREBASE_MESSAGING_SENDER_ID`
 - `VITE_FIREBASE_APP_ID`
 - `VITE_FIREBASE_MEASUREMENT_ID`
+
+`VITE_FIREBASE_DATABASE_URL` overrides the Realtime Database host when the project does not use the default `https://<project-id>-default-rtdb.firebaseio.com/` endpoint.
 
 The Firebase Hosting target is `admin`, mapped to `trade-signal-engine`.
 

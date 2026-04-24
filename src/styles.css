@@ -308,6 +308,15 @@ h1 {
   display: inline-block;
 }
 
+.chart-legend-inline {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.chart-legend-inline span {
+  white-space: nowrap;
+}
+
 .window-toolbar {
   align-items: center;
 }
@@ -365,8 +374,8 @@ h1 {
 
 .signal-marker-line.exit,
 .signal-marker-dot.exit {
-  stroke: rgba(251, 146, 60, 0.85);
-  fill: rgba(251, 146, 60, 0.95);
+  stroke: rgba(239, 68, 68, 0.85);
+  fill: rgba(239, 68, 68, 0.95);
 }
 
 .signal-marker-dot {
@@ -646,6 +655,17 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.symbol-add-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.symbol-add-row input {
+  flex: 1;
+}
+
 .config-card input {
   width: 100%;
   background: rgba(3, 7, 18, 0.42);
@@ -796,6 +816,14 @@ h1 {
 .config-section-list {
   display: grid;
   gap: 16px;
+}
+
+section.panel {
+  margin-bottom: 24px;
+}
+
+section.panel.two-column {
+  margin-bottom: 28px;
 }
 
 .config-group {

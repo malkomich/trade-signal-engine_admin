@@ -3,6 +3,7 @@
     apiKey: 'AIzaSyAEnPeQJlPcYnJIV9rjRgROU-mRvoGMDFA',
     authDomain: 'trade-signal-engine.firebaseapp.com',
     projectId: 'trade-signal-engine',
+    databaseURL: 'https://trade-signal-engine-default-rtdb.firebaseio.com/',
     storageBucket: 'trade-signal-engine.firebasestorage.app',
     messagingSenderId: '616349678895',
     appId: '1:616349678895:web:95a2b698c7f6769723f5da',

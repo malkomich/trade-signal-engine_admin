@@ -144,6 +144,15 @@ export const configFields: ConfigField[] = [
     step: 0.01,
   },
   {
+    key: 'entry_exit_margin',
+    label: 'Entry-exit margin',
+    value: 0.05,
+    description: 'Extra distance the entry score must keep above exit pressure before a flat-state entry is allowed. Lower values admit more signals; higher values make entries stricter.',
+    group: 'Entry rules',
+    inputType: 'number',
+    step: 0.01,
+  },
+  {
     key: 'buy_weight_sma',
     label: 'Entry SMA weight',
     value: 1.6,
@@ -364,6 +373,7 @@ export const configFields: ConfigField[] = [
 export function classifySignal(signal: AdminSignal): 'entry' | 'exit' | 'hold' {
   switch (signal.state) {
     case 'ENTRY_SIGNALLED':
+    case 'ACCEPTED_OPEN':
       return 'entry'
     case 'EXIT_SIGNALLED':
       return 'exit'

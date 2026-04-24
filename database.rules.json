@@ -1,0 +1,45 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "market_sessions": {
+      ".read": "auth != null",
+      ".indexOn": ["updated_at"],
+      "$sessionId": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['status', 'open_windows', 'last_decision_at', 'symbols', 'config_version', 'updated_at'])"
+      }
+    },
+    "signal_events": {
+      ".read": "auth != null",
+      ".write": false,
+      ".indexOn": ["session_id", "timestamp", "updated_at"]
+    },
+    "market_snapshots": {
+      ".read": "auth != null",
+      ".write": false,
+      ".indexOn": ["session_id", "timestamp", "updated_at"]
+    },
+    "trade_windows": {
+      ".read": "auth != null",
+      ".write": false,
+      ".indexOn": ["session_id", "opened_at", "closed_at", "updated_at"]
+    },
+    "config_versions": {
+      ".read": "auth != null",
+      ".indexOn": ["session_id", "version", "created_at", "updated_at"],
+      "$versionId": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['id', 'session_id', 'version', 'status', 'summary', 'fields', 'created_at', 'updated_at'])"
+      }
+    },
+    "window_optimizations": {
+      ".read": "auth != null",
+      ".indexOn": ["session_id", "window_id", "day", "created_at", "updated_at"],
+      "$optimizationId": {
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['id', 'session_id', 'window_id', 'symbol', 'day', 'entry_snapshot', 'exit_snapshot', 'entry_score', 'exit_score', 'change_pct', 'notes', 'created_at', 'updated_at'])"
+      }
+    }
+  }
+}
