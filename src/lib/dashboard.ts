@@ -407,8 +407,8 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
             where('session_id', '==', latestSessionId),
             where('timestamp', '>=', Timestamp.fromDate(marketBounds.start)),
             where('timestamp', '<', Timestamp.fromDate(marketBounds.end)),
-        ),
-      )
+          ),
+        )
       : await getDocs(query(collection(db, MARKET_SNAPSHOTS_COLLECTION), where('session_id', '==', latestSessionId)))
     const latestVersionDocs = [...versionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt']))
     const signals = [...signalDocs.docs]

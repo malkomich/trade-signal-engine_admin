@@ -533,22 +533,6 @@ watch(
   { immediate: true },
 )
 
-watch(
-  selectedDaySignals,
-  (signals) => {
-    if (signals.length === 0) {
-      selectedSignal.value = null
-      return
-    }
-
-    const activeSignal = selectedSignal.value
-    if (!activeSignal || !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))) {
-      selectedSignal.value = signals[0]
-    }
-  },
-  { immediate: true },
-)
-
 function setTriageFilter(filter: (typeof triageFilters)[number]) {
   triageFilter.value = filter
 }
