@@ -697,9 +697,6 @@ function syncConfigDraft(fields: ConfigField[]) {
       delete symbolAddDrafts[key]
     }
   }
-  for (const key of Object.keys(symbolAddDrafts)) {
-    delete symbolAddDrafts[key]
-  }
   for (const field of fields) {
     if (!(field.key in configDraft)) {
       configDraft[field.key] = typeof field.value === 'number' ? field.value : stringifyConfigValue(field.value)
@@ -2199,26 +2196,6 @@ onUnmounted(() => {
         <div class="panel-header">
           <h2>Window optimizer</h2>
           <span>{{ selectedOptimizationReview?.symbol ?? 'No window selected' }}</span>
-        </div>
-        <div class="symbol-tabs optimizer-symbol-tabs">
-          <button
-            type="button"
-            class="symbol-tab"
-            :class="{ active: !selectedOptimizationSymbol }"
-            @click="selectedOptimizationSymbol = ''"
-          >
-            All
-          </button>
-          <button
-            v-for="symbol in marketSymbols"
-            :key="`optimization-${symbol}`"
-            type="button"
-            class="symbol-tab"
-            :class="{ active: selectedOptimizationSymbol === symbol }"
-            @click="selectedOptimizationSymbol = symbol"
-          >
-            {{ symbol }}
-          </button>
         </div>
         <div class="symbol-tabs optimizer-symbol-tabs">
           <button
