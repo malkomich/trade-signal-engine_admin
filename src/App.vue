@@ -1887,10 +1887,9 @@ onUnmounted(() => {
             <p>{{ windowChartMarkers }}</p>
           </div>
           <div class="optimizer-point-list">
-            <button
+            <div
               v-for="snapshotPoint in selectedWindowSnapshots"
               :key="`${selectedWindowReview.id}:${snapshotPoint.id}`"
-              type="button"
               class="signal-row ledger-row optimizer-row"
               :class="{ active: optimizationEntrySnapshotId === snapshotPoint.id || optimizationExitSnapshotId === snapshotPoint.id }"
             >
@@ -1909,7 +1908,7 @@ onUnmounted(() => {
                   Exit
                 </button>
               </div>
-            </button>
+            </div>
           </div>
           <div class="optimizer-footer">
             <textarea
