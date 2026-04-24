@@ -25,14 +25,16 @@ function resolveFirebaseConfig(): FirebaseWebConfig {
     return candidate
   }
 
+  const projectId = pick(import.meta.env.VITE_FIREBASE_PROJECT_ID, runtimeConfig?.projectId, 'projectId')
+
   return {
     apiKey: pick(import.meta.env.VITE_FIREBASE_API_KEY, runtimeConfig?.apiKey, 'apiKey'),
     authDomain: pick(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN, runtimeConfig?.authDomain, 'authDomain'),
-    projectId: pick(import.meta.env.VITE_FIREBASE_PROJECT_ID, runtimeConfig?.projectId, 'projectId'),
+    projectId,
     databaseURL:
       import.meta.env.VITE_FIREBASE_DATABASE_URL?.trim() ||
       runtimeConfig?.databaseURL?.trim() ||
-      `https://${pick(import.meta.env.VITE_FIREBASE_PROJECT_ID, runtimeConfig?.projectId, 'projectId')}-default-rtdb.firebaseio.com/`,
+      `https://${projectId}-default-rtdb.firebaseio.com/`,
     storageBucket: pick(
       import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
       runtimeConfig?.storageBucket,

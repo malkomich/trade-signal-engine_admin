@@ -1,4 +1,4 @@
-import { get, ref, runTransaction, set, update } from 'firebase/database'
+import { equalTo, get, query, orderByChild, ref, runTransaction, set, update } from 'firebase/database'
 import { rtdb } from './firebase'
 import {
   CONFIG_VERSIONS_COLLECTION,
@@ -17,7 +17,7 @@ import {
   type WindowOptimizationSnapshot,
   type WindowOptimizationRecord,
 } from './engine'
-import { currentMarketDayKey, marketDayBounds, marketDayKeyForTimestamp } from './market-day'
+import { currentMarketDayKey, marketDayKeyForTimestamp } from './market-day'
 
 export type DashboardSource = 'live' | 'empty'
 
@@ -119,8 +119,14 @@ type RealtimeCollectionDoc<T = Record<string, unknown>> = {
   data: () => T
 }
 
-async function loadRealtimeCollection<T extends Record<string, unknown>>(collectionPath: string): Promise<Array<RealtimeCollectionDoc<T>>> {
-  const snapshot = await get(ref(rtdb, collectionPath))
+async function loadRealtimeCollection<T extends Record<string, unknown>>(
+  collectionPath: string,
+  sessionID?: string,
+): Promise<Array<RealtimeCollectionDoc<T>>> {
+  const collectionRef = sessionID
+    ? query(ref(rtdb, collectionPath), orderByChild('session_id'), equalTo(sessionID))
+    : ref(rtdb, collectionPath)
+  const snapshot = await get(collectionRef)
   const value = snapshot.val()
   if (!value || typeof value !== 'object') {
     return []
@@ -308,9 +314,8 @@ function nextVersionLabel(baseVersion: string, existingVersions: Iterable<string
 
 export async function saveConfigCandidate(sessionId: string, baseVersion: string, fields: ConfigField[], summary: string) {
   const now = new Date().toISOString()
-  const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(CONFIG_VERSIONS_COLLECTION)
+  const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(CONFIG_VERSIONS_COLLECTION, sessionId)
   const existingVersions = versionDocs
-    .filter((docSnap) => (docSnap.data().session_id ?? docSnap.data().sessionId ?? '') === sessionId)
     .flatMap((docSnap) => [docSnap.id, String(docSnap.data().version ?? '')])
   const versionPrefix = nextVersionLabel(baseVersion, existingVersions)
   const sessionRef = ref(rtdb, `${MARKET_SESSIONS_COLLECTION}/${sessionId}`)
@@ -350,20 +355,17 @@ export async function saveConfigCandidate(sessionId: string, baseVersion: string
 
 export async function applyConfigVersion(sessionId: string, currentVersion: string, targetVersion: string) {
   const now = new Date().toISOString()
-  if (currentVersion && currentVersion !== targetVersion) {
-    await update(ref(rtdb, `${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${currentVersion}`), {
-      status: 'archived',
-      updated_at: now,
-    })
+  const updates: Record<string, unknown> = {
+    [`${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${targetVersion}/status`]: 'active',
+    [`${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${targetVersion}/updated_at`]: now,
+    [`${MARKET_SESSIONS_COLLECTION}/${sessionId}/config_version`]: targetVersion,
+    [`${MARKET_SESSIONS_COLLECTION}/${sessionId}/updated_at`]: now,
   }
-  await update(ref(rtdb, `${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${targetVersion}`), {
-    status: 'active',
-    updated_at: now,
-  })
-  await update(ref(rtdb, `${MARKET_SESSIONS_COLLECTION}/${sessionId}`), {
-    config_version: targetVersion,
-    updated_at: now,
-  })
+  if (currentVersion && currentVersion !== targetVersion) {
+    updates[`${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${currentVersion}/status`] = 'archived'
+    updates[`${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${currentVersion}/updated_at`] = now
+  }
+  await update(ref(rtdb), updates)
 }
 
 export async function saveWindowOptimization(
@@ -419,10 +421,10 @@ export async function saveWindowOptimization(
     optimizerBiasCap,
     now,
   )
-  await set(ref(rtdb, `${WINDOW_OPTIMIZATIONS_COLLECTION}/${id}`), payload)
-  await update(ref(rtdb, `${MARKET_SESSIONS_COLLECTION}/${sessionId}`), {
-    optimization_summary: summary,
-    updated_at: now,
+  await update(ref(rtdb), {
+    [`${WINDOW_OPTIMIZATIONS_COLLECTION}/${id}`]: payload,
+    [`${MARKET_SESSIONS_COLLECTION}/${sessionId}/optimization_summary`]: summary,
+    [`${MARKET_SESSIONS_COLLECTION}/${sessionId}/updated_at`]: now,
   })
   return normalizedRecord
 }
@@ -533,10 +535,10 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         latestSession?.session_id ??
         'nasdaq-live',
     )
-    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(SIGNAL_EVENTS_COLLECTION)
-    const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(CONFIG_VERSIONS_COLLECTION)
-    const windowDocs = await loadRealtimeCollection<Record<string, unknown>>(TRADE_WINDOWS_COLLECTION)
-    const optimizationDocs = await loadRealtimeCollection<Record<string, unknown>>(WINDOW_OPTIMIZATIONS_COLLECTION)
+    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(SIGNAL_EVENTS_COLLECTION, latestSessionId)
+    const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(CONFIG_VERSIONS_COLLECTION, latestSessionId)
+    const windowDocs = await loadRealtimeCollection<Record<string, unknown>>(TRADE_WINDOWS_COLLECTION, latestSessionId)
+    const optimizationDocs = await loadRealtimeCollection<Record<string, unknown>>(WINDOW_OPTIMIZATIONS_COLLECTION, latestSessionId)
     const latestSignalDoc = selectLatestRealtimeDoc(signalDocs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
     const latestVersionDoc = selectLatestRealtimeDoc(versionDocs, ['updatedAt', 'updated_at', 'created_at'])
@@ -548,8 +550,6 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       month: '2-digit',
       day: '2-digit',
     }).format(new Date())
-    const marketBounds = marketDayBounds(marketDayKey)
-
     const sessionWindows = windowDocs.filter((doc) => {
       const data = doc.data()
       const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
@@ -597,19 +597,9 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       })
     const decisionSignals = selectedDaySignals.filter((signal) => classifySignal(signal) !== 'hold')
 
-    let marketSnapshots = (await loadRealtimeCollection<Record<string, unknown>>(MARKET_SNAPSHOTS_COLLECTION))
-      .filter((doc) => {
-        const data = doc.data()
-        const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
-        if (sessionId !== latestSessionId) {
-          return false
-        }
-        if (!marketBounds) {
-          return true
-        }
-        const timestamp = formatComparableTimestamp(data.timestamp ?? data.created_at ?? data.updated_at)
-        return timestamp !== null && timestamp >= marketBounds.start.getTime() && timestamp < marketBounds.end.getTime()
-      })
+    const marketSnapshots = (await loadRealtimeCollection<Record<string, unknown>>(
+      `${MARKET_SNAPSHOTS_COLLECTION}/${latestSessionId}/${marketDayKey}`,
+    ))
       .map((doc) => {
         const data = doc.data()
         return {
@@ -687,7 +677,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       })
 
     const selectedDaySignalsForMetrics = decisionSignals.filter((signal) => marketDayKeyForTimestamp(signal.updatedAt) === marketDayKey)
-    const entrySignalCount = selectedDaySignalsForMetrics.filter((signal) => signal.state === 'ENTRY_SIGNALLED').length
+    const entrySignalCount = selectedDaySignalsForMetrics.filter((signal) => classifySignal(signal) === 'entry').length
     const exitSignalCount = selectedDaySignalsForMetrics.filter((signal) => signal.state === 'EXIT_SIGNALLED').length
     const selectedDayWindows = windows.filter((window) => {
       return marketDayKeyForTimestamp(window.openedAt) === marketDayKey || marketDayKeyForTimestamp(window.closedAt) === marketDayKey
@@ -775,6 +765,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       },
     }
   } catch (error) {
+    console.error('Failed to load dashboard snapshot:', error)
     return {
       source: 'empty',
       warning: 'Live dashboard data is unavailable.',
@@ -906,7 +897,7 @@ function formatComparableTimestamp(value: unknown): number | null {
     return null
   }
   if (typeof value === 'number' && Number.isFinite(value)) {
-    return value
+    return value < 1e12 ? value * 1000 : value
   }
   if (typeof value === 'string' && value.trim()) {
     const parsed = Date.parse(value)
