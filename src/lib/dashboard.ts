@@ -384,7 +384,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
     const latestSession = latestSessionDoc?.data() as Record<string, unknown> | undefined
     const latestSignalDoc = selectLatestFirestoreDoc(signalDocs.docs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
-    const latestVersionDoc = selectLatestFirestoreDoc(versionDocs.docs, ['created_at', 'updated_at', 'updatedAt'])
+    const latestVersionDoc = selectLatestFirestoreDoc(versionDocs.docs, ['updatedAt', 'updated_at', 'created_at'])
     const latestVersion = latestVersionDoc?.data() as Record<string, unknown> | undefined
     const latestSessionId = String(
       latestSessionDoc?.id ??
