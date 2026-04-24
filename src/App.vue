@@ -30,11 +30,13 @@ const selectedMarketSymbol = ref<string>('')
 const selectedDecisionSymbol = ref<string>('')
 const selectedMarketDay = ref<string>(currentMarketDayKey())
 const chartIntervalMinutes = ref<1 | 5 | 10 | 30 | 60>(1)
+const selectedWindowSymbol = ref<string>('')
+const selectedOptimizationSymbol = ref<string>('')
 const loading = ref(true)
 const authState = ref<'booting' | 'authenticating' | 'authenticated' | 'offline'>('booting')
 const snapshotSource = ref<DashboardSource>('empty')
 const snapshotWarning = ref<string | null>(null)
-const firestoreAvailable = ref(true)
+const liveDataAvailable = ref(true)
 const notificationState = ref<NotificationSetupState>('unsupported')
 const notificationMessage = ref<string | null>(null)
 const selectedLedgerSnapshotId = ref<string>('')
@@ -54,6 +56,7 @@ const triageFilter = ref<'all' | 'entry' | 'exit'>('all')
 const triageFilters = ['all', 'entry', 'exit'] as const
 const selectedConfigVersionId = ref<string>('current')
 const configDraft = reactive<Record<string, string | number>>({})
+const symbolAddDrafts = reactive<Record<string, string>>({})
 const optimizationEntrySnapshotId = ref<string>('')
 const optimizationExitSnapshotId = ref<string>('')
 const optimizationNotes = ref('')
@@ -178,7 +181,7 @@ const selectedLedgerSnapshot = computed(() => {
 const allWindowReviews = computed(() => {
   return tradeWindows.value
     .filter((window) => getMarketDayKey(window.openedAt) === selectedMarketDay.value || (window.closedAt ? getMarketDayKey(window.closedAt) === selectedMarketDay.value : false))
-    .filter((window) => !selectedMarketSymbol.value || window.symbol === selectedMarketSymbol.value)
+    .filter((window) => !selectedWindowSymbol.value || window.symbol === selectedWindowSymbol.value)
     .slice()
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
     .map((window) => decorateWindowReview(window))
@@ -228,7 +231,7 @@ const windowOptimizationHistory = computed(() => {
   const optimizations = snapshot.value?.windowOptimizations ?? []
   return optimizations
     .filter((item) => item.day === selectedMarketDay.value)
-    .filter((item) => !selectedMarketSymbol.value || item.symbol === selectedMarketSymbol.value)
+    .filter((item) => !selectedOptimizationSymbol.value || item.symbol === selectedOptimizationSymbol.value)
     .slice()
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
 })
@@ -460,6 +463,40 @@ function syncSelectedDecisionSymbol(symbols: string[]) {
   selectedDecisionSymbol.value = symbols[0] ?? ''
 }
 
+function syncSelectedWindowSymbol(symbols: string[]) {
+  if (symbols.length === 0) {
+    selectedWindowSymbol.value = ''
+    return
+  }
+
+  if (!selectedWindowSymbol.value) {
+    return
+  }
+
+  if (symbols.includes(selectedWindowSymbol.value)) {
+    return
+  }
+
+  selectedWindowSymbol.value = symbols[0] ?? ''
+}
+
+function syncSelectedOptimizationSymbol(symbols: string[]) {
+  if (symbols.length === 0) {
+    selectedOptimizationSymbol.value = ''
+    return
+  }
+
+  if (!selectedOptimizationSymbol.value) {
+    return
+  }
+
+  if (symbols.includes(selectedOptimizationSymbol.value)) {
+    return
+  }
+
+  selectedOptimizationSymbol.value = symbols[0] ?? ''
+}
+
 const currentConfigVersion = computed(() => sessionOverview.value.configVersion)
 
 const configVersions = computed(() => snapshot.value?.configVersions ?? [])
@@ -587,6 +624,19 @@ function toggleDraftSymbol(field: ConfigField, symbol: string) {
   configDraft[field.key] = next.join('\n')
 }
 
+function addDraftSymbol(field: ConfigField) {
+  const normalized = (symbolAddDrafts[field.key] ?? '').trim().toUpperCase()
+  if (!normalized) {
+    return
+  }
+
+  const current = readDraftSymbols(field)
+  if (!current.includes(normalized)) {
+    configDraft[field.key] = [...current, normalized].join('\n')
+  }
+  symbolAddDrafts[field.key] = ''
+}
+
 function isDraftSymbolSelected(field: ConfigField, symbol: string) {
   return readDraftSymbols(field).includes(symbol.trim().toUpperCase())
 }
@@ -607,6 +657,9 @@ function groupConfigFields(fields: ConfigField[]) {
 function syncConfigDraft(fields: ConfigField[]) {
   for (const key of Object.keys(configDraft)) {
     delete configDraft[key]
+  }
+  for (const key of Object.keys(symbolAddDrafts)) {
+    delete symbolAddDrafts[key]
   }
   for (const field of fields) {
     configDraft[field.key] = typeof field.value === 'number' ? field.value : stringifyConfigValue(field.value)
@@ -1073,6 +1126,16 @@ watch(
   },
 )
 
+watch(selectedMarketDay, () => {
+  selectedWindowSymbol.value = ''
+  selectedOptimizationSymbol.value = ''
+})
+
+watch(selectedWindowSymbol, () => {
+  windowReviewPage.value = 0
+  selectedWindowReviewId.value = ''
+})
+
 watch(
   [selectedMarketDay, selectedDecisionSymbol],
   ([nextDay, nextSymbol], [previousDay, previousSymbol]) => {
@@ -1108,6 +1171,14 @@ watch(windowReviewPageCount, (pageCount) => {
 
 watch([marketSymbols, selectedSignal], ([symbols]) => {
   syncSelectedMarketSymbol(symbols)
+}, { immediate: true })
+
+watch([marketSymbols, selectedWindowSymbol], ([symbols]) => {
+  syncSelectedWindowSymbol(symbols)
+}, { immediate: true })
+
+watch([marketSymbols, selectedOptimizationSymbol], ([symbols]) => {
+  syncSelectedOptimizationSymbol(symbols)
 }, { immediate: true })
 
 watch([decisionSymbols, selectedSignal], ([symbols]) => {
@@ -1280,7 +1351,7 @@ function formatWindowOptimizationChange(changePct: number) {
 }
 
 async function saveWindowReviewOptimization() {
-  if (!snapshot.value || !firestoreAvailable.value) {
+  if (!snapshot.value || !liveDataAvailable.value) {
     return
   }
   const review = selectedWindowReview.value
@@ -1397,7 +1468,7 @@ function handleConfigVersionClick(version: ConfigVersionRecord) {
 }
 
 async function requestDashboardRefresh() {
-  if (!firestoreAvailable.value) {
+  if (!liveDataAvailable.value) {
     return
   }
   if (dashboardRefreshInFlight) {
@@ -1408,7 +1479,7 @@ async function requestDashboardRefresh() {
   dashboardRefreshInFlight = true
   const preserveSelectedConfig = selectedConfigVersionId.value
   try {
-    const result = await loadDashboardSnapshot({ allowFirestore: true, marketDayKey: selectedMarketDay.value })
+    const result = await loadDashboardSnapshot({ allowLiveData: true, marketDayKey: selectedMarketDay.value })
     snapshot.value = result.snapshot
     selectedSignal.value = result.snapshot.selectedSignal
     snapshotSource.value = result.source
@@ -1439,7 +1510,7 @@ async function refreshOnRelevantSignal(payload: MessagePayload) {
 }
 
 async function initializeNotifications(promptForPermission: boolean) {
-  if (!firestoreAvailable.value) {
+  if (!liveDataAvailable.value) {
     notificationState.value = 'failed'
     notificationMessage.value = 'Cannot enable live updates: live data is unavailable.'
     return
@@ -1462,7 +1533,7 @@ async function enableLiveNotifications() {
 }
 
 async function saveConfigVersion() {
-  if (!snapshot.value || !firestoreAvailable.value) {
+  if (!snapshot.value || !liveDataAvailable.value) {
     return
   }
 
@@ -1490,7 +1561,7 @@ async function saveConfigVersion() {
 }
 
 async function applySelectedVersion(version: ConfigVersionRecord) {
-  if (!snapshot.value || !firestoreAvailable.value) {
+  if (!snapshot.value || !liveDataAvailable.value) {
     return
   }
 
@@ -1507,19 +1578,19 @@ async function applySelectedVersion(version: ConfigVersionRecord) {
 }
 
 onMounted(async () => {
-  let allowFirestore = true
+  let allowLiveData = true
   try {
     authState.value = 'authenticating'
     await signInAnonymously(auth)
     authState.value = 'authenticated'
   } catch {
     authState.value = 'offline'
-    allowFirestore = false
+    allowLiveData = false
   }
 
-  firestoreAvailable.value = allowFirestore
+  liveDataAvailable.value = allowLiveData
   try {
-    const result = await loadDashboardSnapshot({ allowFirestore, marketDayKey: selectedMarketDay.value })
+    const result = await loadDashboardSnapshot({ allowLiveData, marketDayKey: selectedMarketDay.value })
     snapshot.value = result.snapshot
     selectedSignal.value = result.snapshot.selectedSignal
     snapshotSource.value = result.source
@@ -1530,7 +1601,7 @@ onMounted(async () => {
   }
   void initializeNotifications(false)
   const scheduleDashboardRefresh = () => {
-    if (!isMounted || !firestoreAvailable.value || document.hidden) {
+    if (!isMounted || !liveDataAvailable.value || document.hidden) {
       return
     }
 
@@ -1543,7 +1614,7 @@ onMounted(async () => {
       try {
         await requestDashboardRefresh()
       } finally {
-        if (isMounted && firestoreAvailable.value && !document.hidden) {
+        if (isMounted && liveDataAvailable.value && !document.hidden) {
           scheduleDashboardRefresh()
         }
       }
@@ -1969,6 +2040,26 @@ onUnmounted(() => {
           <h2>Trade windows</h2>
           <span>{{ allWindowReviews.length }} windows · {{ formatMarketDayLabel(selectedMarketDay) }}</span>
         </div>
+        <div class="symbol-tabs">
+          <button
+            type="button"
+            class="symbol-tab"
+            :class="{ active: !selectedWindowSymbol }"
+            @click="selectedWindowSymbol = ''"
+          >
+            All
+          </button>
+          <button
+            v-for="symbol in marketSymbols"
+            :key="`window-${symbol}`"
+            type="button"
+            class="symbol-tab"
+            :class="{ active: selectedWindowSymbol === symbol }"
+            @click="selectedWindowSymbol = symbol"
+          >
+            {{ symbol }}
+          </button>
+        </div>
         <p>
           Each window shows the entry and exit decision, the change in price, and the context that pushed the engine into the trade.
           This is the section to use when checking profitability and signal quality.
@@ -2053,6 +2144,26 @@ onUnmounted(() => {
         <div class="panel-header">
           <h2>Window optimizer</h2>
           <span>{{ selectedWindowReview?.symbol ?? 'No window selected' }}</span>
+        </div>
+        <div class="symbol-tabs optimizer-symbol-tabs">
+          <button
+            type="button"
+            class="symbol-tab"
+            :class="{ active: !selectedOptimizationSymbol }"
+            @click="selectedOptimizationSymbol = ''"
+          >
+            All
+          </button>
+          <button
+            v-for="symbol in marketSymbols"
+            :key="`optimization-${symbol}`"
+            type="button"
+            class="symbol-tab"
+            :class="{ active: selectedOptimizationSymbol === symbol }"
+            @click="selectedOptimizationSymbol = symbol"
+          >
+            {{ symbol }}
+          </button>
         </div>
         <p>
           Pick the most informative entry and exit points for the selected window. You can click the markers on the charts or the points below, then save the review so the engine can reuse the sample later.
@@ -2180,7 +2291,7 @@ onUnmounted(() => {
             Active profile: <strong>{{ currentConfigVersion }}</strong>
             <span v-if="selectedConfigVersion">Viewing: {{ selectedConfigVersion.version }}</span>
           </p>
-          <button type="button" class="action-button" :disabled="!firestoreAvailable" @click="saveConfigVersion">
+          <button type="button" class="action-button" :disabled="!liveDataAvailable" @click="saveConfigVersion">
             Save candidate
           </button>
         </div>
@@ -2215,14 +2326,19 @@ onUnmounted(() => {
                     {{ option }}
                   </button>
                 </div>
-                <textarea
-                  v-if="field.inputType === 'symbols'"
-                  :id="field.key"
-                  v-model="configDraft[field.key]"
-                  rows="4"
-                  :placeholder="field.placeholder"
-                  :title="field.description"
-                />
+                <div v-if="field.inputType === 'symbols'" class="symbol-add-row">
+                  <input
+                    :id="field.key"
+                    v-model="symbolAddDrafts[field.key]"
+                    type="text"
+                    :placeholder="field.placeholder"
+                    :title="field.description"
+                    @keydown.enter.prevent="addDraftSymbol(field)"
+                  />
+                  <button type="button" class="action-button ghost compact" @click="addDraftSymbol(field)">
+                    Add symbol
+                  </button>
+                </div>
                 <template v-else-if="field.inputType === 'number'">
                   <div class="config-slider-shell">
                     <input
@@ -2291,7 +2407,7 @@ onUnmounted(() => {
                 v-if="version.status !== 'active'"
                 type="button"
                 class="action-button ghost"
-                :disabled="!firestoreAvailable"
+                :disabled="!liveDataAvailable"
                 @click.stop="applySelectedVersion(version)"
               >
                 {{ version.status === 'candidate' ? 'Promote' : version.status === 'archived' ? 'Rollback' : 'Apply' }}

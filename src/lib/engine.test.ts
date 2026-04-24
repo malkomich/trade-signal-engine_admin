@@ -9,8 +9,8 @@ describe('signal classification', () => {
     expect(classifySignal(sampleSignals[2])).toBe('exit')
   })
 
-  it('ignores accepted windows in the signal queue', () => {
-    expect(classifySignal({ ...sampleSignals[0], state: 'ACCEPTED_OPEN' })).toBe('hold')
+  it('counts accepted windows as entry signals', () => {
+    expect(classifySignal({ ...sampleSignals[0], state: 'ACCEPTED_OPEN' })).toBe('entry')
   })
 
   it('marks rejected signals as hold', () => {

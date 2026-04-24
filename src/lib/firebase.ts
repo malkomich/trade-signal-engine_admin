@@ -1,11 +1,12 @@
 import { FirebaseApp, getApp, getApps, initializeApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
-import { getFirestore } from 'firebase/firestore'
+import { getDatabase } from 'firebase/database'
 
 export type FirebaseWebConfig = {
   apiKey: string
   authDomain: string
   projectId: string
+  databaseURL: string
   storageBucket: string
   messagingSenderId: string
   appId: string
@@ -28,6 +29,10 @@ function resolveFirebaseConfig(): FirebaseWebConfig {
     apiKey: pick(import.meta.env.VITE_FIREBASE_API_KEY, runtimeConfig?.apiKey, 'apiKey'),
     authDomain: pick(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN, runtimeConfig?.authDomain, 'authDomain'),
     projectId: pick(import.meta.env.VITE_FIREBASE_PROJECT_ID, runtimeConfig?.projectId, 'projectId'),
+    databaseURL:
+      import.meta.env.VITE_FIREBASE_DATABASE_URL?.trim() ||
+      runtimeConfig?.databaseURL?.trim() ||
+      `https://${pick(import.meta.env.VITE_FIREBASE_PROJECT_ID, runtimeConfig?.projectId, 'projectId')}-default-rtdb.firebaseio.com/`,
     storageBucket: pick(
       import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
       runtimeConfig?.storageBucket,
@@ -55,7 +60,7 @@ export function getFirebaseApp(): FirebaseApp {
 
 export const firebaseApp = getFirebaseApp()
 export const auth = getAuth(firebaseApp)
-export const db = getFirestore(firebaseApp)
+export const rtdb = getDatabase(firebaseApp)
 
 export const firebaseMessagingConfig = {
   vapidKey:

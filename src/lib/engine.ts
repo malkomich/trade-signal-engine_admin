@@ -364,6 +364,7 @@ export const configFields: ConfigField[] = [
 export function classifySignal(signal: AdminSignal): 'entry' | 'exit' | 'hold' {
   switch (signal.state) {
     case 'ENTRY_SIGNALLED':
+    case 'ACCEPTED_OPEN':
       return 'entry'
     case 'EXIT_SIGNALLED':
       return 'exit'

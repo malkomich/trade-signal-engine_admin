@@ -1,5 +1,5 @@
-import { collection, doc, getDocs, query, runTransaction, Timestamp, where, writeBatch } from 'firebase/firestore'
-import { db } from './firebase'
+import { get, ref, runTransaction, set, update } from 'firebase/database'
+import { rtdb } from './firebase'
 import {
   CONFIG_VERSIONS_COLLECTION,
   MARKET_SESSIONS_COLLECTION,
@@ -10,6 +10,7 @@ import {
 } from './schema'
 import {
   configFields,
+  classifySignal,
   type AdminSignal,
   type ConfigField,
   type ConfigFieldValue,
@@ -113,7 +114,24 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function formatFirestoreTimestamp(value: unknown, fallback: string): string {
+type RealtimeCollectionDoc<T = Record<string, unknown>> = {
+  id: string
+  data: () => T
+}
+
+async function loadRealtimeCollection<T extends Record<string, unknown>>(collectionPath: string): Promise<Array<RealtimeCollectionDoc<T>>> {
+  const snapshot = await get(ref(rtdb, collectionPath))
+  const value = snapshot.val()
+  if (!value || typeof value !== 'object') {
+    return []
+  }
+  return Object.entries(value as Record<string, T>).map(([id, item]) => ({
+    id,
+    data: () => item,
+  }))
+}
+
+function formatRealtimeTimestamp(value: unknown, fallback: string): string {
   if (typeof value === 'string' && value.trim()) {
     return value
   }
@@ -290,65 +308,62 @@ function nextVersionLabel(baseVersion: string, existingVersions: Iterable<string
 
 export async function saveConfigCandidate(sessionId: string, baseVersion: string, fields: ConfigField[], summary: string) {
   const now = new Date().toISOString()
-  const versionDocs = await getDocs(query(collection(db, CONFIG_VERSIONS_COLLECTION), where('session_id', '==', sessionId)))
-  const existingVersions = versionDocs.docs.flatMap((docSnap) => {
-    const data = docSnap.data() as Record<string, unknown>
-    return [docSnap.id, String(data.version ?? '')]
-  })
+  const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(CONFIG_VERSIONS_COLLECTION)
+  const existingVersions = versionDocs
+    .filter((docSnap) => (docSnap.data().session_id ?? docSnap.data().sessionId ?? '') === sessionId)
+    .flatMap((docSnap) => [docSnap.id, String(docSnap.data().version ?? '')])
   const versionPrefix = nextVersionLabel(baseVersion, existingVersions)
-  const sessionRef = doc(db, MARKET_SESSIONS_COLLECTION, sessionId)
-  return runTransaction(db, async (transaction) => {
-    const sessionSnap = await transaction.get(sessionRef)
-    const currentSequence = Number((sessionSnap.data() as Record<string, unknown> | undefined)?.config_candidate_sequence ?? 0)
-    const nextSequence = currentSequence + 1
-    const version = `${versionPrefix}-${nextSequence}`
-    const id = `${sessionId}:${version}`
-    transaction.set(doc(db, CONFIG_VERSIONS_COLLECTION, id), {
-      version,
-      status: 'candidate',
-      summary,
-      fields,
-      base_version: baseVersion,
-      session_id: sessionId,
-      created_at: now,
-      updated_at: now,
-    })
-    transaction.set(sessionRef, { config_candidate_sequence: nextSequence, updated_at: now }, { merge: true })
+  const sessionRef = ref(rtdb, `${MARKET_SESSIONS_COLLECTION}/${sessionId}`)
+  let nextSequence = 0
+  await runTransaction(sessionRef, (sessionState) => {
+    const currentSession = (sessionState as Record<string, unknown> | null) ?? {}
+    const currentSequence = Number(currentSession.config_candidate_sequence ?? 0)
+    nextSequence = currentSequence + 1
     return {
-      id,
-      version,
-      status: 'candidate',
-      updatedAt: now,
-      summary,
-      fields,
-    } satisfies ConfigVersionRecord
+      ...currentSession,
+      config_candidate_sequence: nextSequence,
+      updated_at: now,
+    }
   })
+  const version = `${versionPrefix}-${nextSequence}`
+  const id = `${sessionId}:${version}`
+  const payload = {
+    version,
+    status: 'candidate',
+    summary,
+    fields,
+    base_version: baseVersion,
+    session_id: sessionId,
+    created_at: now,
+    updated_at: now,
+  }
+  await set(ref(rtdb, `${CONFIG_VERSIONS_COLLECTION}/${id}`), payload)
+  return {
+    id,
+    version,
+    status: 'candidate',
+    updatedAt: now,
+    summary,
+    fields,
+  } satisfies ConfigVersionRecord
 }
 
 export async function applyConfigVersion(sessionId: string, currentVersion: string, targetVersion: string) {
   const now = new Date().toISOString()
-  const batch = writeBatch(db)
-  const currentRef = doc(db, CONFIG_VERSIONS_COLLECTION, `${sessionId}:${currentVersion}`)
-  const targetRef = doc(db, CONFIG_VERSIONS_COLLECTION, `${sessionId}:${targetVersion}`)
   if (currentVersion && currentVersion !== targetVersion) {
-    batch.set(currentRef, {
+    await update(ref(rtdb, `${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${currentVersion}`), {
       status: 'archived',
       updated_at: now,
-    }, { merge: true })
+    })
   }
-  batch.update(targetRef, {
+  await update(ref(rtdb, `${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${targetVersion}`), {
     status: 'active',
     updated_at: now,
   })
-  batch.set(
-    doc(db, MARKET_SESSIONS_COLLECTION, sessionId),
-    {
-      config_version: targetVersion,
-      updated_at: now,
-    },
-    { merge: true },
-  )
-  await batch.commit()
+  await update(ref(rtdb, `${MARKET_SESSIONS_COLLECTION}/${sessionId}`), {
+    config_version: targetVersion,
+    updated_at: now,
+  })
 }
 
 export async function saveWindowOptimization(
@@ -404,17 +419,11 @@ export async function saveWindowOptimization(
     optimizerBiasCap,
     now,
   )
-  const batch = writeBatch(db)
-  batch.set(doc(db, WINDOW_OPTIMIZATIONS_COLLECTION, id), payload)
-  batch.set(
-    doc(db, MARKET_SESSIONS_COLLECTION, sessionId),
-    {
-      optimization_summary: summary,
-      updated_at: now,
-    },
-    { merge: true },
-  )
-  await batch.commit()
+  await set(ref(rtdb, `${WINDOW_OPTIMIZATIONS_COLLECTION}/${id}`), payload)
+  await update(ref(rtdb, `${MARKET_SESSIONS_COLLECTION}/${sessionId}`), {
+    optimization_summary: summary,
+    updated_at: now,
+  })
   return normalizedRecord
 }
 
@@ -505,8 +514,8 @@ function finalizeOptimizationProfile(totals: Map<string, number>, counts: Map<st
   return profile
 }
 
-export async function loadDashboardSnapshot(options: { allowFirestore?: boolean; marketDayKey?: string } = {}): Promise<DashboardSnapshotResult> {
-  if (options.allowFirestore === false) {
+export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; marketDayKey?: string } = {}): Promise<DashboardSnapshotResult> {
+  if (options.allowLiveData === false) {
     return {
       source: 'empty',
       warning: 'Live data is unavailable, so the dashboard is showing an empty live state.',
@@ -515,25 +524,22 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
   }
 
   try {
-    const sessionDocs = await getDocs(collection(db, MARKET_SESSIONS_COLLECTION))
+    const sessionDocs = await loadRealtimeCollection<Record<string, unknown>>(MARKET_SESSIONS_COLLECTION)
 
-    const latestSessionDoc = selectLatestFirestoreDoc(sessionDocs.docs, ['updated_at', 'updatedAt'])
+    const latestSessionDoc = selectLatestRealtimeDoc(sessionDocs, ['updated_at', 'updatedAt'])
     const latestSession = latestSessionDoc?.data() as Record<string, unknown> | undefined
     const latestSessionId = String(
       latestSessionDoc?.id ??
         latestSession?.session_id ??
         'nasdaq-live',
     )
-    const signalDocs = await getDocs(query(collection(db, SIGNAL_EVENTS_COLLECTION), where('session_id', '==', latestSessionId)))
-    let versionDocs = await getDocs(query(collection(db, CONFIG_VERSIONS_COLLECTION), where('session_id', '==', latestSessionId)))
-    if (versionDocs.empty) {
-      versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
-    }
-    const windowDocs = await getDocs(query(collection(db, TRADE_WINDOWS_COLLECTION), where('session_id', '==', latestSessionId)))
-    const optimizationDocs = await getDocs(query(collection(db, WINDOW_OPTIMIZATIONS_COLLECTION), where('session_id', '==', latestSessionId)))
-    const latestSignalDoc = selectLatestFirestoreDoc(signalDocs.docs, ['timestamp', 'updated_at', 'updatedAt'])
+    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(SIGNAL_EVENTS_COLLECTION)
+    const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(CONFIG_VERSIONS_COLLECTION)
+    const windowDocs = await loadRealtimeCollection<Record<string, unknown>>(TRADE_WINDOWS_COLLECTION)
+    const optimizationDocs = await loadRealtimeCollection<Record<string, unknown>>(WINDOW_OPTIMIZATIONS_COLLECTION)
+    const latestSignalDoc = selectLatestRealtimeDoc(signalDocs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
-    const latestVersionDoc = selectLatestFirestoreDoc(versionDocs.docs, ['updatedAt', 'updated_at', 'created_at'])
+    const latestVersionDoc = selectLatestRealtimeDoc(versionDocs, ['updatedAt', 'updated_at', 'created_at'])
     const latestVersion = latestVersionDoc?.data() as Record<string, unknown> | undefined
 
     const marketDayKey = options.marketDayKey ?? new Intl.DateTimeFormat('en-CA', {
@@ -544,13 +550,13 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
     }).format(new Date())
     const marketBounds = marketDayBounds(marketDayKey)
 
-    const sessionWindows = windowDocs.docs.filter((doc) => {
-      const data = doc.data() as Record<string, unknown>
+    const sessionWindows = windowDocs.filter((doc) => {
+      const data = doc.data()
       const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
       return sessionId === latestSessionId
     })
     const windows = [...sessionWindows]
-      .sort((left, right) => compareFirestoreDoc(left, right, ['updated_at', 'updatedAt', 'opened_at', 'openedAt', 'closed_at', 'closedAt']))
+      .sort((left, right) => compareRealtimeDoc(left, right, ['updated_at', 'updatedAt', 'opened_at', 'openedAt', 'closed_at', 'closedAt']))
       .map((doc) => {
         const data = doc.data() as Record<string, unknown>
         return {
@@ -559,25 +565,25 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
           windowId: String(data.window_id ?? data.windowId ?? ''),
           symbol: String(data.symbol ?? doc.id),
           status: String(data.status ?? 'open'),
-          openedAt: formatFirestoreTimestamp(data.opened_at ?? data.openedAt ?? data.created_at ?? data.timestamp, new Date().toISOString()),
-          closedAt: formatNullableFirestoreTimestamp(data.closed_at ?? data.closedAt),
+          openedAt: formatRealtimeTimestamp(data.opened_at ?? data.openedAt ?? data.created_at ?? data.timestamp, new Date().toISOString()),
+          closedAt: formatNullableRealtimeTimestamp(data.closed_at ?? data.closedAt),
           entryDecisionId: String(data.entry_decision_id ?? data.entryDecisionId ?? ''),
           exitDecisionId: String(data.exit_decision_id ?? data.exitDecisionId ?? ''),
           entryScore: Number(data.entry_score ?? data.entryScore ?? 0),
           exitScore: Number(data.exit_score ?? data.exitScore ?? 0),
-          updatedAt: formatFirestoreTimestamp(data.updated_at ?? data.updatedAt ?? data.opened_at ?? data.openedAt, new Date().toISOString()),
+          updatedAt: formatRealtimeTimestamp(data.updated_at ?? data.updatedAt ?? data.opened_at ?? data.openedAt, new Date().toISOString()),
         }
       })
 
-    const sessionSignals = signalDocs.docs.filter((doc) => {
-      const data = doc.data() as Record<string, unknown>
+    const sessionSignals = signalDocs.filter((doc) => {
+      const data = doc.data()
       const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
       return sessionId === latestSessionId
     })
     const selectedDaySignals = sessionSignals
-      .sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
+      .sort((left, right) => compareRealtimeDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
       .map((doc) => {
-        const data = doc.data() as Record<string, unknown>
+        const data = doc.data()
         return {
           symbol: String(data.symbol ?? doc.id),
           windowId: String(data.window_id ?? data.windowId ?? ''),
@@ -585,30 +591,33 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
           entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
           exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
           regime: String(data.regime ?? 'Live market session'),
-          updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.timestamp, new Date().toISOString()),
+          updatedAt: formatRealtimeTimestamp(data.updatedAt ?? data.timestamp, new Date().toISOString()),
           reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
         } satisfies AdminSignal
       })
-    const decisionSignals = selectedDaySignals.filter((signal) => signal.state === 'ENTRY_SIGNALLED' || signal.state === 'EXIT_SIGNALLED')
+    const decisionSignals = selectedDaySignals.filter((signal) => classifySignal(signal) !== 'hold')
 
-    const marketSnapshots = (await getDocs(
-      marketBounds
-        ? query(
-            collection(db, MARKET_SNAPSHOTS_COLLECTION),
-            where('session_id', '==', latestSessionId),
-            where('timestamp', '>=', Timestamp.fromDate(marketBounds.start)),
-            where('timestamp', '<', Timestamp.fromDate(marketBounds.end)),
-          )
-        : query(collection(db, MARKET_SNAPSHOTS_COLLECTION), where('session_id', '==', latestSessionId)),
-    ))
-      .docs.map((doc) => {
-        const data = doc.data() as Record<string, unknown>
+    let marketSnapshots = (await loadRealtimeCollection<Record<string, unknown>>(MARKET_SNAPSHOTS_COLLECTION))
+      .filter((doc) => {
+        const data = doc.data()
+        const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
+        if (sessionId !== latestSessionId) {
+          return false
+        }
+        if (!marketBounds) {
+          return true
+        }
+        const timestamp = formatComparableTimestamp(data.timestamp ?? data.created_at ?? data.updated_at)
+        return timestamp !== null && timestamp >= marketBounds.start.getTime() && timestamp < marketBounds.end.getTime()
+      })
+      .map((doc) => {
+        const data = doc.data()
         return {
           id: doc.id,
           sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
           windowId: String(data.window_id ?? data.windowId ?? ''),
           symbol: String(data.symbol ?? doc.id),
-          timestamp: formatFirestoreTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, new Date().toISOString()),
+          timestamp: formatRealtimeTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, new Date().toISOString()),
           open: Number(data.open ?? 0),
           high: Number(data.high ?? 0),
           low: Number(data.low ?? 0),
@@ -650,15 +659,15 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         }
         return left.id.localeCompare(right.id)
       })
-    const windowOptimizations = optimizationDocs.docs
+    const windowOptimizations = optimizationDocs
       .filter((doc) => {
-        const data = doc.data() as Record<string, unknown>
+        const data = doc.data()
         const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
         return sessionId === latestSessionId
       })
-      .sort((left, right) => compareFirestoreDoc(left, right, ['updated_at', 'updatedAt', 'created_at', 'createdAt']))
+      .sort((left, right) => compareRealtimeDoc(left, right, ['updated_at', 'updatedAt', 'created_at', 'createdAt']))
       .map((doc) => {
-        const data = doc.data() as Record<string, unknown>
+        const data = doc.data()
         return {
           id: doc.id,
           sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
@@ -672,8 +681,8 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
           changePct: Number(data.change_pct ?? data.changePct ?? 0),
           notes: String(data.notes ?? ''),
           requestedBy: String(data.requested_by ?? data.requestedBy ?? ''),
-          createdAt: formatFirestoreTimestamp(data.created_at ?? data.createdAt, new Date().toISOString()),
-          updatedAt: formatFirestoreTimestamp(data.updated_at ?? data.updatedAt ?? data.created_at ?? data.createdAt, new Date().toISOString()),
+          createdAt: formatRealtimeTimestamp(data.created_at ?? data.createdAt, new Date().toISOString()),
+          updatedAt: formatRealtimeTimestamp(data.updated_at ?? data.updatedAt ?? data.created_at ?? data.createdAt, new Date().toISOString()),
         } satisfies WindowOptimizationRecord
       })
 
@@ -686,12 +695,12 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
     const selectedDaySnapshots = marketSnapshots
     const openWindows = selectedDayWindows.filter((window) => window.status === 'open').length
     const closedWindows = selectedDayWindows.filter((window) => window.status === 'closed').length
-    const sessionVersionDocs = versionDocs.docs.filter((doc) => {
-      const data = doc.data() as Record<string, unknown>
+    const sessionVersionDocs = versionDocs.filter((doc) => {
+      const data = doc.data()
       const sessionId = String(data.session_id ?? data.sessionId ?? doc.id.split(':')[0] ?? latestSessionId)
       return sessionId === latestSessionId
     })
-    const latestVersionDocs = [...sessionVersionDocs].sort((left, right) => compareFirestoreDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
+    const latestVersionDocs = [...sessionVersionDocs].sort((left, right) => compareRealtimeDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
     const signals = [...decisionSignals]
     const configVersion = String(latestSession?.config_version ?? latestVersion?.version ?? 'draft')
     const configVersions = latestVersionDocs.map((doc) => {
@@ -700,14 +709,14 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         id: doc.id,
         version: String(data.version ?? doc.id),
         status: String(data.status ?? 'candidate'),
-        updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.updated_at ?? data.created_at, new Date().toISOString()),
+        updatedAt: formatRealtimeTimestamp(data.updatedAt ?? data.updated_at ?? data.created_at, new Date().toISOString()),
         summary: String(data.summary ?? data.notes ?? 'Session-scoped config snapshot'),
         fields: normalizeConfigFields(data.fields, configFields),
       }
     })
 
     const hasLiveData =
-      sessionDocs.docs.length > 0 ||
+      sessionDocs.length > 0 ||
       sessionSignals.length > 0 ||
       sessionVersionDocs.length > 0 ||
       sessionWindows.length > 0 ||
@@ -734,7 +743,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         sessionOverview: {
           sessionId: latestSessionId,
           status: String(latestSession?.status ?? (hasLiveData ? 'live' : 'waiting')),
-          updatedAt: formatFirestoreTimestamp(
+        updatedAt: formatRealtimeTimestamp(
             latestSession?.updatedAt ??
               latestSession?.updated_at ??
               latestSignal?.updatedAt ??
@@ -774,7 +783,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
   }
 }
 
-function compareFirestoreDoc(left: { data: () => unknown }, right: { data: () => unknown }, timestampKeys: string[]): number {
+function compareRealtimeDoc(left: { data: () => unknown }, right: { data: () => unknown }, timestampKeys: string[]): number {
   const leftData = left.data() as Record<string, unknown>
   const rightData = right.data() as Record<string, unknown>
   const leftTimestamp = timestampKeys.map((key) => formatComparableTimestamp(leftData[key])).find((value) => value !== null)
@@ -792,11 +801,11 @@ function compareFirestoreDoc(left: { data: () => unknown }, right: { data: () =>
   return 0
 }
 
-function formatNullableFirestoreTimestamp(value: unknown): string | null {
+function formatNullableRealtimeTimestamp(value: unknown): string | null {
   if (value === null || value === undefined || value === '') {
     return null
   }
-  return formatFirestoreTimestamp(value, new Date().toISOString())
+  return formatRealtimeTimestamp(value, new Date().toISOString())
 }
 
 function toWindowOptimizationSnapshot(value: unknown): WindowOptimizationSnapshot {
@@ -826,7 +835,7 @@ function toWindowOptimizationSnapshot(value: unknown): WindowOptimizationSnapsho
   }
   const data = value as Record<string, unknown>
   return {
-    timestamp: formatFirestoreTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, fallback.timestamp),
+    timestamp: formatRealtimeTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, fallback.timestamp),
     close: Number(data.close ?? 0),
     sma_fast: toNullableNumber(data.sma_fast),
     sma_slow: toNullableNumber(data.sma_slow),
@@ -879,14 +888,14 @@ function calculateWindowChangePct(entrySnapshot: MarketSnapshotRecord, exitSnaps
   return ((exitSnapshot.close - entrySnapshot.close) / entrySnapshot.close) * 100
 }
 
-function selectLatestFirestoreDoc<T extends { data: () => unknown }>(docs: readonly T[], timestampKeys: string[]): T | undefined {
+function selectLatestRealtimeDoc<T extends { data: () => unknown }>(docs: readonly T[], timestampKeys: string[]): T | undefined {
   const timestampedDocs = docs.filter((doc) => {
     const data = doc.data() as Record<string, unknown>
     return timestampKeys.some((key) => formatComparableTimestamp(data[key]) !== null)
   })
 
   if (timestampedDocs.length > 0) {
-    return [...timestampedDocs].sort((left, right) => compareFirestoreDoc(left, right, timestampKeys)).at(-1)
+    return [...timestampedDocs].sort((left, right) => compareRealtimeDoc(left, right, timestampKeys)).at(-1)
   }
 
   return docs.at(-1)
