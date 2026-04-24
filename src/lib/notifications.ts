@@ -45,6 +45,32 @@ function stopCurrentNotifications() {
   currentUnsubscribe = null
 }
 
+function waitForServiceWorkerActivation(registration: ServiceWorkerRegistration, timeoutMs = 8_000): Promise<ServiceWorkerRegistration> {
+  if (registration.active) {
+    return Promise.resolve(registration)
+  }
+
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now()
+
+    const poll = () => {
+      if (registration.active) {
+        resolve(registration)
+        return
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(new Error('Service worker did not become active in time.'))
+        return
+      }
+
+      window.setTimeout(poll, 100)
+    }
+
+    poll()
+  })
+}
+
 async function initializeLiveSignalNotifications(
   onSignal: (payload: MessagePayload) => void,
   requestPermission: boolean,
@@ -111,9 +137,12 @@ async function initializeLiveSignalNotifications(
 
     const messaging = getMessaging(firebaseApp)
     const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
+    await navigator.serviceWorker.ready
+    await registration.update().catch(() => undefined)
+    const activeRegistration = await waitForServiceWorkerActivation(registration)
     const token = await getToken(messaging, {
       vapidKey: firebaseMessagingConfig.vapidKey,
-      serviceWorkerRegistration: registration,
+      serviceWorkerRegistration: activeRegistration,
     }).catch((error) => {
       throw error instanceof Error ? error : new Error('Failed to retrieve the FCM token.')
     })

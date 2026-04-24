@@ -6,9 +6,9 @@ import {
   MARKET_SNAPSHOTS_COLLECTION,
   SIGNAL_EVENTS_COLLECTION,
 } from './schema'
-import { classifySignal, type AdminSignal, type ConfigField, configFields, sampleSignals } from './engine'
+import { classifySignal, configFields, type AdminSignal, type ConfigField, type ConfigFieldValue } from './engine'
 
-export type DashboardSource = 'firestore' | 'partial' | 'sample'
+export type DashboardSource = 'firestore' | 'empty'
 
 export type ConfigVersionRecord = {
   id: string
@@ -30,7 +30,7 @@ export type DashboardSnapshot = {
     rejectedEntries: number
     summary: string
   }
-  selectedSignal: AdminSignal
+  selectedSignal: AdminSignal | null
   signals: AdminSignal[]
   marketSnapshots: MarketSnapshotRecord[]
   configFields: ConfigField[]
@@ -110,93 +110,48 @@ function formatFirestoreTimestamp(value: unknown, fallback: string): string {
   return fallback
 }
 
-function buildFallbackSnapshot(): DashboardSnapshot {
-  return {
-    metrics: [
-      { label: 'Signals today', value: '24' },
-      { label: 'Open windows', value: '3' },
-      { label: 'Rejected entries', value: '7' },
-      { label: 'Config version', value: 'v18' },
-    ],
-    sessionOverview: {
-      sessionId: 'local-session',
-      status: 'live',
-      updatedAt: new Date().toISOString(),
-      configVersion: 'v18',
-      openWindows: 3,
-      rejectedEntries: 7,
-      summary: 'Firebase-hosted shell is running with sample data until a live session is available.',
-    },
-    selectedSignal: sampleSignals[0],
-    signals: sampleSignals,
-    marketSnapshots: buildFallbackMarketSnapshots(),
-    configFields,
-    configVersions: [
-      {
-        id: 'v18',
-        version: 'v18',
-        status: 'active',
-        updatedAt: '2026-04-20 15:45 UTC',
-        summary: 'Frozen session config for the current market window.',
-        fields: configFields,
-      },
-    ],
-  }
+function cloneConfigFields(fields: ConfigField[]): ConfigField[] {
+  return fields.map((field) => ({
+    ...field,
+    value: Array.isArray(field.value) ? [...field.value] : field.value,
+  }))
 }
 
-function buildFallbackMarketSnapshots(): MarketSnapshotRecord[] {
-  const symbols = ['AAPL', 'NVDA']
-  const snapshots: MarketSnapshotRecord[] = []
-  const now = Date.now()
-  for (const [symbolIndex, symbol] of symbols.entries()) {
-    for (let index = 0; index < 24; index += 1) {
-      const price = 180 + symbolIndex * 8 + index * 0.75 + Math.sin(index / 3) * 2
-      const timestamp = new Date(now - (23 - index) * 60_000).toISOString()
-      snapshots.push({
-        id: `${symbol}:${index}`,
-        sessionId: 'local-session',
-        symbol,
-        timestamp,
-        open: price - 0.4,
-        high: price + 0.8,
-        low: price - 1.0,
-        close: price,
-        volume: 1_000 + index * 20,
-        smaFast: price - 0.6,
-        smaSlow: price - 1.1,
-        emaFast: price - 0.3,
-        emaSlow: price - 0.9,
-        vwap: price - 0.8,
-        rsi: Math.min(85, 48 + index * 1.6),
-        atr: 1.2 + index * 0.03,
-        plusDi: 24 + index * 0.4,
-        minusDi: 18 - index * 0.1,
-        adx: 21 + index * 0.35,
-        macd: 0.15 + index * 0.03,
-        macdSignal: 0.1 + index * 0.025,
-        macdHistogram: 0.05 + index * 0.005,
-        stochasticK: 32 + index * 1.1,
-        stochasticD: 30 + index * 1.0,
-        entryScore: Math.min(0.96, 0.48 + index * 0.02),
-        exitScore: Math.max(0.12, 0.38 - index * 0.006),
-        eventType: index % 12 === 0 ? 'buy_alert' : 'market.snapshot',
-        signalAction: index % 12 === 0 ? 'BUY_ALERT' : 'HOLD',
-        signalState: index % 12 === 0 ? 'ENTRY_SIGNALLED' : 'FLAT',
-        signalRegime: 'Sample live market window',
-        benchmarkSymbol: 'IXIC',
-        reasons: index % 12 === 0 ? ['entry-qualified'] : [],
-      })
-    }
+function isConfigFieldValue(value: unknown): value is ConfigFieldValue {
+  return typeof value === 'number' || typeof value === 'string' || Array.isArray(value)
+}
+
+function buildEmptySnapshot(): DashboardSnapshot {
+  return {
+    metrics: [
+      { label: 'Signals today', value: '0' },
+      { label: 'Open windows', value: '0' },
+      { label: 'Rejected entries', value: '0' },
+      { label: 'Config version', value: 'draft' },
+    ],
+    sessionOverview: {
+      sessionId: 'nasdaq-live',
+      status: 'waiting',
+      updatedAt: new Date().toISOString(),
+      configVersion: 'draft',
+      openWindows: 0,
+      rejectedEntries: 0,
+      summary: 'No live Firestore records are available yet.',
+    },
+    selectedSignal: null,
+    signals: [],
+    marketSnapshots: [],
+    configFields: cloneConfigFields(configFields),
+    configVersions: [],
   }
-  return snapshots
 }
 
 function normalizeConfigFields(value: unknown, fallback: ConfigField[]): ConfigField[] {
   if (!Array.isArray(value)) {
-    return fallback
+    return cloneConfigFields(fallback)
   }
 
-  const fallbackByKey = new Map(fallback.map((field) => [field.key, field.value]))
+  const fallbackByKey = new Map(fallback.map((field) => [field.key, field]))
   const fields = value
     .map((item) => {
       if (!item || typeof item !== 'object') {
@@ -207,25 +162,69 @@ function normalizeConfigFields(value: unknown, fallback: ConfigField[]): ConfigF
       if (!key) {
         return null
       }
-      const fallbackValue = fallbackByKey.get(key)
-      const numericValue =
-        typeof raw.value === 'number' && Number.isFinite(raw.value)
-          ? raw.value
-          : typeof raw.value === 'string' && raw.value.trim() && Number.isFinite(Number(raw.value))
-            ? Number(raw.value)
-            : fallbackValue
-      if (typeof numericValue !== 'number' || !Number.isFinite(numericValue)) {
+      const fallbackField = fallbackByKey.get(key)
+      const normalizedValue = normalizeConfigFieldValue(raw.value, fallbackField?.value)
+      if (normalizedValue === null) {
         return null
       }
       return {
         key,
-        value: numericValue,
-        description: String(raw.description ?? ''),
+        label: String(raw.label ?? fallbackField?.label ?? key),
+        value: normalizedValue,
+        description: String(raw.description ?? fallbackField?.description ?? ''),
+        group: String(raw.group ?? fallbackField?.group ?? 'Legacy config'),
+        inputType: (String(raw.inputType ?? fallbackField?.inputType ?? (Array.isArray(normalizedValue) ? 'symbols' : typeof normalizedValue === 'number' ? 'number' : 'text')) as ConfigField['inputType']),
+        ...(fallbackField?.step !== undefined ? { step: fallbackField.step } : {}),
+        ...(fallbackField?.placeholder !== undefined ? { placeholder: fallbackField.placeholder } : {}),
       }
     })
     .filter((field): field is ConfigField => field !== null)
 
   return fields
+}
+
+function normalizeConfigFieldValue(rawValue: unknown, fallbackValue: ConfigFieldValue | undefined): ConfigFieldValue | null {
+  if (Array.isArray(fallbackValue)) {
+    if (Array.isArray(rawValue)) {
+      return rawValue.map((item) => String(item).trim().toUpperCase()).filter(Boolean)
+    }
+    if (typeof rawValue === 'string') {
+      return rawValue
+        .split(/[\n,]/)
+        .map((item) => item.trim().toUpperCase())
+        .filter(Boolean)
+    }
+    return [...fallbackValue]
+  }
+
+  if (typeof fallbackValue === 'number') {
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+      return rawValue
+    }
+    if (typeof rawValue === 'string' && rawValue.trim() && Number.isFinite(Number(rawValue))) {
+      return Number(rawValue)
+    }
+    return fallbackValue
+  }
+
+  if (typeof fallbackValue === 'string') {
+    if (typeof rawValue === 'string') {
+      return rawValue.trim() || fallbackValue
+    }
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+      return String(rawValue)
+    }
+    if (rawValue === null || rawValue === undefined) {
+      return fallbackValue
+    }
+    return String(rawValue)
+  }
+
+  if (isConfigFieldValue(rawValue)) {
+    return Array.isArray(rawValue) ? rawValue.map((item) => String(item).trim()).filter(Boolean) : rawValue
+  }
+
+  return null
 }
 
 function nextVersionLabel(baseVersion: string, existingVersions: Iterable<string>) {
@@ -315,9 +314,9 @@ export async function applyConfigVersion(sessionId: string, currentVersion: stri
 export async function loadDashboardSnapshot(options: { allowFirestore?: boolean } = {}): Promise<DashboardSnapshotResult> {
   if (options.allowFirestore === false) {
     return {
-      source: 'sample',
-      warning: 'Anonymous auth is unavailable, so the dashboard is using sample data.',
-      snapshot: buildFallbackSnapshot(),
+      source: 'empty',
+      warning: 'Anonymous auth is unavailable, so the dashboard is showing an empty live state.',
+      snapshot: buildEmptySnapshot(),
     }
   }
 
@@ -326,131 +325,108 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
     const signalDocs = await getDocs(collection(db, SIGNAL_EVENTS_COLLECTION))
     const versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
 
-    const latestSessionDoc = [...sessionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['updated_at', 'updatedAt']))
-      [0]
-    const latestSignalDocs = [...signalDocs.docs]
-      .sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
-      .slice(0, 3)
-    const latestVersionDocs = [...versionDocs.docs]
-      .sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt']))
-      .slice(0, 5)
-
-    const signals = latestSignalDocs.length
-      ? latestSignalDocs.map((doc) => {
-          const data = doc.data() as Record<string, unknown>
-          return toSignalState({
-            symbol: String(data.symbol ?? doc.id),
-            state: (data.state as AdminSignal['state']) ?? 'ENTRY_SIGNALLED',
-            entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
-            exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
-            regime: String(data.regime ?? 'Live market session'),
-            updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.timestamp, new Date().toISOString()),
-            reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
-          })
-        })
-      : sampleSignals
-
-    const selectedSignal = signals[0] ?? sampleSignals[0]
+    const latestSessionDoc = [...sessionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['updated_at', 'updatedAt']))[0]
     const latestSession = latestSessionDoc?.data() as Record<string, unknown> | undefined
-    const latestSessionId = String(latestSessionDoc?.id ?? latestSession?.session_id ?? 'local-session')
+    const latestSignalDoc = [...signalDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))[0]
+    const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
+    const latestVersionDoc = [...versionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt']))[0]
+    const latestVersion = latestVersionDoc?.data() as Record<string, unknown> | undefined
+    const latestSessionId = String(
+      latestSessionDoc?.id ??
+        latestSession?.session_id ??
+        latestSignal?.session_id ??
+        latestVersion?.session_id ??
+        'nasdaq-live',
+    )
     const marketSnapshotDocs = await getDocs(query(collection(db, MARKET_SNAPSHOTS_COLLECTION), where('session_id', '==', latestSessionId)))
-    const marketSnapshots = marketSnapshotDocs.docs.length
-      ? marketSnapshotDocs.docs
-          .map((doc) => {
-          const data = doc.data() as Record<string, unknown>
-          return {
-            id: doc.id,
-            sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
-            symbol: String(data.symbol ?? doc.id),
-            timestamp: formatFirestoreTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, new Date().toISOString()),
-            open: Number(data.open ?? 0),
-            high: Number(data.high ?? 0),
-            low: Number(data.low ?? 0),
-            close: Number(data.close ?? 0),
-            volume: Number(data.volume ?? 0),
-            smaFast: toNullableNumber(data.sma_fast),
-            smaSlow: toNullableNumber(data.sma_slow),
-            emaFast: toNullableNumber(data.ema_fast),
-            emaSlow: toNullableNumber(data.ema_slow),
-            vwap: toNullableNumber(data.vwap),
-            rsi: toNullableNumber(data.rsi),
-            atr: toNullableNumber(data.atr),
-            plusDi: toNullableNumber(data.plus_di),
-            minusDi: toNullableNumber(data.minus_di),
-            adx: toNullableNumber(data.adx),
-            macd: toNullableNumber(data.macd),
-            macdSignal: toNullableNumber(data.macd_signal),
-            macdHistogram: toNullableNumber(data.macd_histogram),
-            stochasticK: toNullableNumber(data.stochastic_k),
-            stochasticD: toNullableNumber(data.stochastic_d),
-            entryScore: Number(data.entry_score ?? 0),
-            exitScore: Number(data.exit_score ?? 0),
-            eventType: String(data.event_type ?? ''),
-            signalAction: String(data.signal_action ?? data.action ?? 'HOLD'),
-            signalState: String(data.signal_state ?? data.state ?? 'FLAT'),
-            signalRegime: String(data.signal_regime ?? data.regime ?? 'Live market session'),
-            benchmarkSymbol: String(data.benchmark_symbol ?? ''),
-            reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
-          }
+    const latestVersionDocs = [...versionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt']))
+    const signals = [...signalDocs.docs]
+      .sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
+      .map((doc) => {
+        const data = doc.data() as Record<string, unknown>
+        return toSignalState({
+          symbol: String(data.symbol ?? doc.id),
+          state: (data.state as AdminSignal['state']) ?? 'ENTRY_SIGNALLED',
+          entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
+          exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
+          regime: String(data.regime ?? 'Live market session'),
+          updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.timestamp, new Date().toISOString()),
+          reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
         })
-          .sort((left, right) => {
-            const leftTimestamp = Date.parse(left.timestamp)
-            const rightTimestamp = Date.parse(right.timestamp)
-            if (leftTimestamp !== rightTimestamp) {
-              return leftTimestamp - rightTimestamp
-            }
-            if (left.symbol !== right.symbol) {
-              return left.symbol.localeCompare(right.symbol)
-            }
-            return left.id.localeCompare(right.id)
-          })
-          .slice(-240)
-      : buildFallbackMarketSnapshots()
-    const openWindows = Number(latestSession?.open_windows ?? 0)
-    const rejectedEntries = Number(latestSession?.rejected_entries ?? 0)
-    const configVersion = String(latestSession?.config_version ?? 'v18')
-    const hasCoreDashboardData = sessionDocs.docs.length > 0 && signalDocs.docs.length > 0 && versionDocs.docs.length > 0
-    const hasLiveMarketData = marketSnapshotDocs.docs.length > 0
-    const configVersions = latestVersionDocs.length
-      ? latestVersionDocs.map((doc) => {
-          const data = doc.data() as Record<string, unknown>
+      })
+    const marketSnapshots = marketSnapshotDocs.docs
+      .map((doc) => {
+        const data = doc.data() as Record<string, unknown>
         return {
           id: doc.id,
-          version: String(data.version ?? doc.id),
-          status: String(data.status ?? 'candidate'),
-          updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.updated_at ?? data.created_at, new Date().toISOString()),
-          summary: String(data.summary ?? data.notes ?? 'Session-scoped config snapshot'),
-          fields: normalizeConfigFields(data.fields, configFields),
+          sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
+          symbol: String(data.symbol ?? doc.id),
+          timestamp: formatFirestoreTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, new Date().toISOString()),
+          open: Number(data.open ?? 0),
+          high: Number(data.high ?? 0),
+          low: Number(data.low ?? 0),
+          close: Number(data.close ?? 0),
+          volume: Number(data.volume ?? 0),
+          smaFast: toNullableNumber(data.sma_fast),
+          smaSlow: toNullableNumber(data.sma_slow),
+          emaFast: toNullableNumber(data.ema_fast),
+          emaSlow: toNullableNumber(data.ema_slow),
+          vwap: toNullableNumber(data.vwap),
+          rsi: toNullableNumber(data.rsi),
+          atr: toNullableNumber(data.atr),
+          plusDi: toNullableNumber(data.plus_di),
+          minusDi: toNullableNumber(data.minus_di),
+          adx: toNullableNumber(data.adx),
+          macd: toNullableNumber(data.macd),
+          macdSignal: toNullableNumber(data.macd_signal),
+          macdHistogram: toNullableNumber(data.macd_histogram),
+          stochasticK: toNullableNumber(data.stochastic_k),
+          stochasticD: toNullableNumber(data.stochastic_d),
+          entryScore: Number(data.entry_score ?? 0),
+          exitScore: Number(data.exit_score ?? 0),
+          eventType: String(data.event_type ?? ''),
+          signalAction: String(data.signal_action ?? data.action ?? 'HOLD'),
+          signalState: String(data.signal_state ?? data.state ?? 'FLAT'),
+          signalRegime: String(data.signal_regime ?? data.regime ?? 'Live market session'),
+          benchmarkSymbol: String(data.benchmark_symbol ?? ''),
+          reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
         }
       })
-      : [
-          {
-            id: 'v18',
-            version: 'v18',
-            status: 'active',
-            updatedAt: '2026-04-20 15:45 UTC',
-            summary: 'Frozen session config for the current market window.',
-            fields: configFields,
-          },
-          {
-            id: 'v17',
-            version: 'v17',
-            status: 'archived',
-            updatedAt: '2026-04-19 15:45 UTC',
-            summary: 'Previous replay-approved config candidate.',
-            fields: configFields,
-          },
-        ]
+      .sort((left, right) => {
+        const leftTimestamp = Date.parse(left.timestamp)
+        const rightTimestamp = Date.parse(right.timestamp)
+        if (leftTimestamp !== rightTimestamp) {
+          return leftTimestamp - rightTimestamp
+        }
+        if (left.symbol !== right.symbol) {
+          return left.symbol.localeCompare(right.symbol)
+        }
+        return left.id.localeCompare(right.id)
+      })
+    const openWindows = Number(latestSession?.open_windows ?? 0)
+    const rejectedEntries = Number(latestSession?.rejected_entries ?? 0)
+    const configVersion = String(latestSession?.config_version ?? latestVersion?.version ?? 'draft')
+    const configVersions = latestVersionDocs.map((doc) => {
+      const data = doc.data() as Record<string, unknown>
+      return {
+        id: doc.id,
+        version: String(data.version ?? doc.id),
+        status: String(data.status ?? 'candidate'),
+        updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.updated_at ?? data.created_at, new Date().toISOString()),
+        summary: String(data.summary ?? data.notes ?? 'Session-scoped config snapshot'),
+        fields: normalizeConfigFields(data.fields, configFields),
+      }
+    })
 
-    const hasAnyLiveData = sessionDocs.docs.length > 0 || signalDocs.docs.length > 0 || versionDocs.docs.length > 0 || hasLiveMarketData
-    const source = hasCoreDashboardData ? (hasLiveMarketData ? 'firestore' : 'partial') : hasAnyLiveData ? 'partial' : 'sample'
-    const warning = hasCoreDashboardData
-      ? hasLiveMarketData
-        ? null
-        : 'Firestore returned live session data, but no market snapshots were available so the dashboard is showing sample chart data.'
-      : hasAnyLiveData
-        ? 'Firestore returned partial live data, so the dashboard is mixing Firestore-backed sections with sample values where live data is still missing.'
-        : 'Firestore returned incomplete dashboard data, so the dashboard is using sample values for the missing sections.'
+    const hasLiveData = sessionDocs.docs.length > 0 || signalDocs.docs.length > 0 || versionDocs.docs.length > 0 || marketSnapshotDocs.docs.length > 0
+    const source = hasLiveData ? 'firestore' : 'empty'
+    const warning = hasLiveData
+      ? marketSnapshots.length === 0
+        ? 'Firestore is connected, but no live market snapshots are available for the selected session yet.'
+        : signalDocs.docs.length === 0
+          ? 'Firestore is connected, but no live signals have been written for the selected session yet.'
+          : null
+      : 'Firestore is connected, but the live session has not produced records for this day yet.'
 
     return {
       source,
@@ -463,28 +439,33 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
           { label: 'Config version', value: configVersion },
         ],
         sessionOverview: {
-          sessionId: String(sessionDocs.docs[0]?.id ?? 'local-session'),
-          status: String(latestSession?.status ?? 'live'),
-          updatedAt: formatFirestoreTimestamp(latestSession?.updated_at, new Date().toISOString()),
+          sessionId: latestSessionId,
+          status: String(latestSession?.status ?? (hasLiveData ? 'live' : 'waiting')),
+          updatedAt: formatFirestoreTimestamp(latestSession?.updated_at ?? latestSignal?.updated_at ?? latestVersion?.updated_at, new Date().toISOString()),
           configVersion,
           openWindows,
           rejectedEntries,
           summary: latestSession
             ? 'Latest Firestore session snapshot is loaded and ready for triage.'
-            : 'Firebase-hosted shell is running with sample data until a live session is available.',
+            : hasLiveData
+              ? 'Firestore live records are available and ready for triage.'
+              : 'Firestore is connected and waiting for the live session to publish records.',
         },
-        selectedSignal,
+        selectedSignal: signals[0] ?? null,
         signals,
         marketSnapshots,
-        configFields,
+        configFields:
+          configVersions.find((version) => version.version === configVersion)?.fields ??
+          configVersions.at(-1)?.fields ??
+          cloneConfigFields(configFields),
         configVersions,
       },
     }
   } catch (error) {
     return {
-      source: 'sample',
+      source: 'empty',
       warning: error instanceof Error ? error.message : 'Firestore dashboard data is unavailable.',
-      snapshot: buildFallbackSnapshot(),
+      snapshot: buildEmptySnapshot(),
     }
   }
 }

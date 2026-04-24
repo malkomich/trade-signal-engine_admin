@@ -19,22 +19,15 @@ import {
   stopLiveSignalNotifications,
   type NotificationSetupState,
 } from './lib/notifications'
+import { configFields, type AdminSignal, type ConfigField, type ConfigFieldValue } from './lib/engine'
 
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
 const selectedMarketSymbol = ref<string>('')
-const fallbackSessionOverview: DashboardSnapshot['sessionOverview'] = {
-  sessionId: 'local-session',
-  status: 'live',
-  updatedAt: new Date().toISOString(),
-  configVersion: 'v18',
-  openWindows: 0,
-  rejectedEntries: 0,
-  summary: 'Firebase-hosted shell is running with sample data until a live session is available.',
-}
+const selectedMarketDay = ref<string>(currentMarketDayKey())
 const loading = ref(true)
 const authState = ref<'booting' | 'authenticating' | 'authenticated' | 'offline'>('booting')
-const snapshotSource = ref<DashboardSource>('sample')
+const snapshotSource = ref<DashboardSource>('empty')
 const snapshotWarning = ref<string | null>(null)
 const firestoreAvailable = ref(true)
 const notificationState = ref<NotificationSetupState>('unsupported')
@@ -47,13 +40,24 @@ let dashboardVisibilityChangeHandler: (() => void) | null = null
 const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
 const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
 const selectedConfigVersionId = ref<string>('current')
-const configDraft = reactive<Record<string, number>>({})
+const configDraft = reactive<Record<string, string>>({})
 const DASHBOARD_REFRESH_INTERVAL_MS = 30_000
-const sessionOverview = computed(() => snapshot.value?.sessionOverview ?? fallbackSessionOverview)
+const sessionOverview = computed(() => snapshot.value?.sessionOverview ?? emptySessionOverview())
 const marketSnapshots = computed(() => snapshot.value?.marketSnapshots ?? [])
+const availableMarketDays = computed(() => {
+  const days = new Set<string>()
+  for (const snapshotRecord of marketSnapshots.value) {
+    days.add(getMarketDayKey(snapshotRecord.timestamp))
+  }
+  days.add(currentMarketDayKey())
+  return Array.from(days).sort((left, right) => right.localeCompare(left))
+})
+const selectedDaySnapshots = computed(() => {
+  return marketSnapshots.value.filter((record) => getMarketDayKey(record.timestamp) === selectedMarketDay.value)
+})
 const marketSymbols = computed(() => {
   const symbols = new Set<string>()
-  for (const snapshotRecord of marketSnapshots.value) {
+  for (const snapshotRecord of selectedDaySnapshots.value) {
     if (snapshotRecord.symbol) {
       symbols.add(snapshotRecord.symbol)
     }
@@ -62,11 +66,11 @@ const marketSymbols = computed(() => {
 })
 const selectedMarketSnapshots = computed(() => {
   if (!selectedMarketSymbol.value) {
-    return marketSnapshots.value
+    return selectedDaySnapshots.value
   }
-  return marketSnapshots.value.filter((record) => record.symbol === selectedMarketSymbol.value)
+  return selectedDaySnapshots.value.filter((record) => record.symbol === selectedMarketSymbol.value)
 })
-const latestMarketSnapshots = computed(() => selectedMarketSnapshots.value.slice(-6).reverse())
+const latestMarketSnapshots = computed(() => selectedMarketSnapshots.value)
 const marketChartViews = computed(() =>
   marketCharts.map((chart) => ({
     chart,
@@ -77,26 +81,63 @@ const marketChartViews = computed(() =>
 const sourceDisplay = computed(() => {
   if (snapshotSource.value === 'firestore') {
     return {
-      title: 'Authenticated read model',
-      description: 'Firestore access is gated by Firebase Auth and the dashboard is reading live operational data.',
-    }
-  }
-
-  if (snapshotSource.value === 'partial') {
-    return {
-      title: 'Live core data',
-      description:
-        'Firestore is providing live session, signal, and config data, while chart snapshots are temporarily falling back to sample values.',
+      title: 'Live Firestore data',
+      description: 'Firestore is feeding live session, signal, config, and chart data into the dashboard.',
     }
   }
 
   return {
-    title: 'Sample fallback',
-    description: 'Firestore was unavailable, so the dashboard is showing sample data instead of live operational data.',
+    title: 'Waiting for live data',
+    description: 'Firestore is connected, but the selected session has not produced live records yet.',
   }
 })
 
-function signalKey(signal: DashboardSnapshot['selectedSignal']) {
+function currentMarketDayKey(reference = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(reference)
+}
+
+function getMarketDayKey(value: string | Date) {
+  const date = typeof value === 'string' ? new Date(value) : value
+  if (Number.isNaN(date.getTime())) {
+    return currentMarketDayKey()
+  }
+  return currentMarketDayKey(date)
+}
+
+function formatMarketDayLabel(value: string) {
+  const parsed = new Date(`${value}T12:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(parsed)
+}
+
+function emptySessionOverview(): DashboardSnapshot['sessionOverview'] {
+  return {
+    sessionId: 'nasdaq-live',
+    status: 'waiting',
+    updatedAt: new Date().toISOString(),
+    configVersion: 'draft',
+    openWindows: 0,
+    rejectedEntries: 0,
+    summary: 'Firestore is connected, but the live session has not produced records for this day yet.',
+  }
+}
+
+function signalKey(signal: AdminSignal | null) {
+  if (!signal) {
+    return ''
+  }
   return `${signal.symbol}:${signal.updatedAt}`
 }
 
@@ -129,25 +170,60 @@ const selectedConfigVersion = computed<ConfigVersionRecord | null>(() => {
 })
 
 const selectedConfigFields = computed(() => {
-  return selectedConfigVersion.value?.fields ?? snapshot.value?.configFields ?? []
+  return selectedConfigVersion.value?.fields ?? snapshot.value?.configFields ?? configFields
 })
 
 const editableConfigFields = computed(() => selectedConfigFields.value)
+const configFieldGroups = computed(() => groupConfigFields(editableConfigFields.value))
 
-function syncConfigDraft(fields: DashboardSnapshot['configFields']) {
+function stringifyConfigValue(value: ConfigFieldValue): string {
+  if (Array.isArray(value)) {
+    return value.join('\n')
+  }
+  return String(value)
+}
+
+function parseConfigDraftValue(field: ConfigField, rawValue: string): ConfigFieldValue {
+  if (field.inputType === 'symbols') {
+    return rawValue
+      .split(/[\n,]/)
+      .map((item) => item.trim().toUpperCase())
+      .filter(Boolean)
+  }
+  if (field.inputType === 'number') {
+    const parsed = Number(rawValue)
+    return Number.isFinite(parsed) ? parsed : field.value
+  }
+  return rawValue.trim()
+}
+
+function groupConfigFields(fields: ConfigField[]) {
+  const groups = new Map<string, { label: string; fields: ConfigField[] }>()
+  for (const field of fields) {
+    const group = groups.get(field.group)
+    if (group) {
+      group.fields.push(field)
+    } else {
+      groups.set(field.group, { label: field.group, fields: [field] })
+    }
+  }
+  return Array.from(groups.values())
+}
+
+function syncConfigDraft(fields: ConfigField[]) {
   for (const key of Object.keys(configDraft)) {
     delete configDraft[key]
   }
   for (const field of fields) {
-    configDraft[field.key] = field.value
+    configDraft[field.key] = stringifyConfigValue(field.value)
   }
 }
 
-function sameDraft(fields: DashboardSnapshot['configFields']) {
+function sameDraft(fields: ConfigField[]) {
   if (fields.length !== Object.keys(configDraft).length) {
     return false
   }
-  return fields.every((field) => configDraft[field.key] === field.value)
+  return fields.every((field) => configDraft[field.key] === stringifyConfigValue(field.value))
 }
 
 const isConfigDraftDirty = computed(() => {
@@ -384,8 +460,13 @@ function selectConfigVersion(version: ConfigVersionRecord | null) {
   selectedConfigVersionId.value = version.id
 }
 
-const triageSignals = computed(() => {
+const selectedDaySignals = computed(() => {
   const signals = snapshot.value?.signals ?? []
+  return signals.filter((signal) => getMarketDayKey(signal.updatedAt) === selectedMarketDay.value)
+})
+
+const triageSignals = computed(() => {
+  const signals = selectedDaySignals.value
   if (triageFilter.value === 'all') {
     return signals
   }
@@ -393,7 +474,7 @@ const triageSignals = computed(() => {
 })
 
 const triageCounts = computed(() => {
-  const signals = snapshot.value?.signals ?? []
+  const signals = selectedDaySignals.value
   const counts: Record<(typeof triageFilters)[number], number> = {
     all: signals.length,
     entry: 0,
@@ -439,6 +520,22 @@ watch(
   [marketSymbols, selectedSignal],
   ([symbols]) => {
     syncSelectedMarketSymbol(symbols)
+  },
+  { immediate: true },
+)
+
+watch(
+  selectedDaySignals,
+  (signals) => {
+    if (signals.length === 0) {
+      selectedSignal.value = null
+      return
+    }
+
+    const activeSignal = selectedSignal.value
+    if (!activeSignal || !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))) {
+      selectedSignal.value = signals[0]
+    }
   },
   { immediate: true },
 )
@@ -515,14 +612,14 @@ async function enableLiveNotifications() {
 }
 
 async function saveConfigVersion() {
-  if (!snapshot.value || snapshotSource.value === 'sample') {
+  if (!snapshot.value || !firestoreAvailable.value) {
     return
   }
 
   try {
     const fields = editableConfigFields.value.map((field) => ({
       ...field,
-      value: Number.isFinite(configDraft[field.key]) ? configDraft[field.key] : field.value,
+      value: parseConfigDraftValue(field, configDraft[field.key] ?? stringifyConfigValue(field.value)),
     }))
     const baseVersion = selectedConfigVersion.value?.version ?? currentConfigVersion.value
     const candidate = await saveConfigCandidate(
@@ -543,7 +640,7 @@ async function saveConfigVersion() {
 }
 
 async function applySelectedVersion(version: ConfigVersionRecord) {
-  if (!snapshot.value || snapshotSource.value === 'sample') {
+  if (!snapshot.value || !firestoreAvailable.value) {
     return
   }
 
@@ -721,11 +818,23 @@ onUnmounted(() => {
         <article class="panel shell-placeholder" data-slot="chart">
           <div class="panel-header">
             <h2>Live market charts</h2>
-            <span>{{ selectedMarketSymbol || 'No symbol selected' }}</span>
+            <span>{{ formatMarketDayLabel(selectedMarketDay) }} · {{ selectedMarketSymbol || 'No symbol selected' }}</span>
           </div>
           <p>
-            Close price and indicators update in real time for the selected symbol. Entry and exit points are marked on the time axis.
+            Close price and indicators update in real time for the selected symbol and market day. Entry and exit points are marked on the time axis.
           </p>
+          <div class="day-tabs">
+            <button
+              v-for="day in availableMarketDays"
+              :key="day"
+              type="button"
+              class="symbol-tab"
+              :class="{ active: selectedMarketDay === day }"
+              @click="selectedMarketDay = day"
+            >
+              {{ day === currentMarketDayKey() ? 'Today' : formatMarketDayLabel(day) }}
+            </button>
+          </div>
           <div class="symbol-tabs">
             <button
               v-for="symbol in marketSymbols"
@@ -738,7 +847,7 @@ onUnmounted(() => {
               {{ symbol }}
             </button>
           </div>
-          <div v-if="marketChartViews.length" class="chart-grid">
+          <div v-if="selectedMarketSnapshots.length" class="chart-grid">
             <article v-for="item in marketChartViews" :key="item.chart.id" class="chart-card">
               <div class="chart-card-header">
                 <div>
@@ -785,6 +894,7 @@ onUnmounted(() => {
               </svg>
             </article>
           </div>
+          <p v-else class="empty-state">No live market snapshots are available for the selected stock and day yet.</p>
         </article>
 
         <article class="panel shell-placeholder" data-slot="table">
@@ -795,7 +905,7 @@ onUnmounted(() => {
           <p>
             This ledger highlights the latest marker state for the selected symbol. It refreshes alongside the charts so the graph and the decision trail stay aligned.
           </p>
-          <div class="signal-list compact">
+          <div v-if="latestMarketSnapshots.length" class="signal-list compact">
             <div v-for="snapshotPoint in latestMarketSnapshots" :key="snapshotPoint.id" class="signal-row ledger-row">
               <div>
                 <strong>{{ formatLocaleTimestamp(snapshotPoint.timestamp) }}</strong>
@@ -807,6 +917,7 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+          <p v-else class="empty-state">No live snapshots have been written for the selected day.</p>
         </article>
       </section>
 
@@ -830,7 +941,7 @@ onUnmounted(() => {
               <strong>{{ triageCounts[filter] }}</strong>
             </button>
           </div>
-          <div class="signal-list">
+          <div v-if="triageSignals.length" class="signal-list">
             <button
               v-for="signal in triageSignals"
               :key="signalKey(signal)"
@@ -848,6 +959,7 @@ onUnmounted(() => {
               </div>
             </button>
           </div>
+          <p v-else class="empty-state">No live signals have been written for the selected day.</p>
         </article>
 
         <article class="panel">
@@ -887,18 +999,40 @@ onUnmounted(() => {
             Current session version: <strong>{{ currentConfigVersion }}</strong>
             <span v-if="selectedConfigVersion">Selected: {{ selectedConfigVersion.version }}</span>
           </p>
-          <button type="button" class="action-button" :disabled="snapshotSource !== 'firestore'" @click="saveConfigVersion">
+          <button type="button" class="action-button" :disabled="!firestoreAvailable" @click="saveConfigVersion">
             Save candidate
           </button>
         </div>
         <p v-if="isConfigDraftDirty" class="status-warning config-dirty-warning">
           Unsaved draft changes are active. Save before switching versions.
         </p>
-        <div class="config-grid">
-          <article v-for="field in editableConfigFields" :key="field.key" class="config-card">
-            <label :for="field.key">{{ field.key }}</label>
-            <input :id="field.key" v-model.number="configDraft[field.key]" type="number" step="0.01" />
-            <p>{{ field.description }}</p>
+        <div class="config-section-list">
+          <article v-for="group in configFieldGroups" :key="group.label" class="config-group">
+            <div class="panel-header compact">
+              <h3>{{ group.label }}</h3>
+              <span>{{ group.fields.length }} fields</span>
+            </div>
+            <div class="config-grid">
+              <article v-for="field in group.fields" :key="field.key" class="config-card">
+                <label :for="field.key">{{ field.label }}</label>
+                <textarea
+                  v-if="field.inputType === 'symbols'"
+                  :id="field.key"
+                  v-model="configDraft[field.key]"
+                  rows="4"
+                  :placeholder="field.placeholder"
+                />
+                <input
+                  v-else
+                  :id="field.key"
+                  v-model="configDraft[field.key]"
+                  :type="field.inputType === 'number' ? 'number' : 'text'"
+                  :step="field.inputType === 'number' ? field.step ?? 0.01 : undefined"
+                  :placeholder="field.placeholder"
+                />
+                <p>{{ field.description }}</p>
+              </article>
+            </div>
           </article>
         </div>
       </section>
@@ -927,7 +1061,7 @@ onUnmounted(() => {
                 v-if="version.status !== 'active'"
                 type="button"
                 class="action-button ghost"
-                :disabled="snapshotSource !== 'firestore'"
+                :disabled="!firestoreAvailable"
                 @click.stop="applySelectedVersion(version)"
               >
                 {{ version.status === 'candidate' ? 'Promote' : version.status === 'archived' ? 'Rollback' : 'Apply' }}
