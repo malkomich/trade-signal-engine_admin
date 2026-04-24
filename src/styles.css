@@ -598,7 +598,7 @@ h1 {
 
 .config-current-value strong {
   color: #ecf3ff;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .config-card input {

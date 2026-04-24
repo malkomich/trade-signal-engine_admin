@@ -17,6 +17,7 @@ import {
   type WindowOptimizationSnapshot,
   type WindowOptimizationRecord,
 } from './engine'
+import { currentMarketDayKey, marketDayBounds, marketDayKeyForTimestamp } from './market-day'
 
 export type DashboardSource = 'live' | 'empty'
 
@@ -147,86 +148,6 @@ function cloneConfigFields(fields: ConfigField[]): ConfigField[] {
 
 function isConfigFieldValue(value: unknown): value is ConfigFieldValue {
   return typeof value === 'number' || typeof value === 'string' || Array.isArray(value)
-}
-
-function marketDayBounds(dayKey: string) {
-  const parsed = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey)
-  if (!parsed) {
-    return null
-  }
-
-  const year = Number(parsed[1])
-  const month = Number(parsed[2])
-  const day = Number(parsed[3])
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-    return null
-  }
-
-  const start = zonedTimeToUtc(year, month, day, 0, 0, 0, 'America/New_York')
-  const end = zonedTimeToUtc(year, month, day + 1, 0, 0, 0, 'America/New_York')
-  return { start, end }
-}
-
-function marketDayKeyForTimestamp(value: unknown) {
-  if (value === null || value === undefined) {
-    return ''
-  }
-
-  const date = value instanceof Date ? value : value && typeof value === 'object' && 'toDate' in value && typeof (value as { toDate: () => Date }).toDate === 'function'
-    ? (value as { toDate: () => Date }).toDate()
-    : typeof value === 'string'
-      ? new Date(value)
-      : typeof value === 'number'
-        ? new Date(value)
-        : null
-
-  if (!date || Number.isNaN(date.getTime())) {
-    return ''
-  }
-
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date)
-}
-
-function zonedTimeToUtc(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  second: number,
-  timeZone: string,
-) {
-  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, second)
-  const offset = timezoneOffset(new Date(utcGuess), timeZone)
-  return new Date(utcGuess - offset)
-}
-
-function timezoneOffset(date: Date, timeZone: string) {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-  const parts = formatter.formatToParts(date)
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
-  return Date.UTC(
-    Number(values.year),
-    Number(values.month) - 1,
-    Number(values.day),
-    Number(values.hour),
-    Number(values.minute),
-    Number(values.second),
-  ) - date.getTime()
 }
 
 function buildEmptySnapshot(): DashboardSnapshot {
@@ -434,16 +355,33 @@ export async function saveWindowOptimization(
   entrySnapshot: MarketSnapshotRecord,
   exitSnapshot: MarketSnapshotRecord,
   notes: string,
+  currentOptimizations: WindowOptimizationRecord[],
+  now = new Date().toISOString(),
 ): Promise<WindowOptimizationRecord> {
-  const now = new Date().toISOString()
   const id = `${sessionId}:${review.id}:${entrySnapshot.id}:${exitSnapshot.id}`
   const changePct = calculateWindowChangePct(entrySnapshot, exitSnapshot)
+  const normalizedRecord: WindowOptimizationRecord = {
+    id,
+    sessionId,
+    windowId: review.id,
+    symbol: review.symbol,
+    day: marketDayKeyForTimestamp(review.openedAt) || currentMarketDayKey(),
+    entrySnapshot: snapshotToOptimizationPayload(entrySnapshot),
+    exitSnapshot: snapshotToOptimizationPayload(exitSnapshot),
+    entryScore: entrySnapshot.entryScore,
+    exitScore: exitSnapshot.exitScore,
+    changePct,
+    notes: notes.trim(),
+    requestedBy: 'admin',
+    createdAt: now,
+    updatedAt: now,
+  }
   const payload = {
     id,
     session_id: sessionId,
     window_id: review.id,
     symbol: review.symbol,
-    day: marketDayKeyForTimestamp(review.openedAt) || getLocalDayKey(review.openedAt),
+    day: normalizedRecord.day,
     entry_snapshot: snapshotToOptimizationPayload(entrySnapshot),
     exit_snapshot: snapshotToOptimizationPayload(exitSnapshot),
     entry_score: entrySnapshot.entryScore,
@@ -454,25 +392,104 @@ export async function saveWindowOptimization(
     created_at: now,
     updated_at: now,
   }
+  const summary = summarizeWindowOptimizations(
+    sessionId,
+    [...currentOptimizations.filter((item) => item.id !== id), normalizedRecord],
+    now,
+  )
   const batch = writeBatch(db)
   batch.set(doc(db, WINDOW_OPTIMIZATIONS_COLLECTION, id), payload)
+  batch.set(
+    doc(db, MARKET_SESSIONS_COLLECTION, sessionId),
+    {
+      optimization_summary: summary,
+      updated_at: now,
+    },
+    { merge: true },
+  )
   await batch.commit()
-  return {
-    id,
-    sessionId,
-    windowId: review.id,
-    symbol: review.symbol,
-    day: marketDayKeyForTimestamp(review.openedAt) || getLocalDayKey(review.openedAt),
-    entrySnapshot: toWindowOptimizationSnapshot(payload.entry_snapshot),
-    exitSnapshot: toWindowOptimizationSnapshot(payload.exit_snapshot),
-    entryScore: entrySnapshot.entryScore,
-    exitScore: exitSnapshot.exitScore,
-    changePct,
-    notes: notes.trim(),
-    requestedBy: 'admin',
-    createdAt: now,
-    updatedAt: now,
+  return normalizedRecord
+}
+
+function summarizeWindowOptimizations(sessionId: string, optimizations: WindowOptimizationRecord[], updatedAt: string) {
+  const entryTotals = new Map<string, number>()
+  const entryCounts = new Map<string, number>()
+  const exitTotals = new Map<string, number>()
+  const exitCounts = new Map<string, number>()
+  const symbols = new Set<string>()
+  let totalChangePct = 0
+  let totalEntryScore = 0
+  let totalExitScore = 0
+  for (const optimization of optimizations) {
+    totalChangePct += optimization.changePct
+    totalEntryScore += optimization.entryScore
+    totalExitScore += optimization.exitScore
+    if (optimization.symbol) {
+      symbols.add(optimization.symbol)
+    }
+    accumulateOptimizationProfile(entryTotals, entryCounts, optimization.entrySnapshot)
+    accumulateOptimizationProfile(exitTotals, exitCounts, optimization.exitSnapshot)
   }
+
+  const sampleCount = optimizations.length
+  return {
+    session_id: sessionId,
+    sample_count: sampleCount,
+    average_change_pct: sampleCount > 0 ? totalChangePct / sampleCount : 0,
+    average_entry_score: sampleCount > 0 ? totalEntryScore / sampleCount : 0,
+    average_exit_score: sampleCount > 0 ? totalExitScore / sampleCount : 0,
+    symbols: Array.from(symbols).sort(),
+    entry_profile: finalizeOptimizationProfile(entryTotals, entryCounts),
+    exit_profile: finalizeOptimizationProfile(exitTotals, exitCounts),
+    optimizer_learning_rate: 0.12,
+    optimizer_bias_cap: 0.08,
+    updated_at: updatedAt,
+  }
+}
+
+function accumulateOptimizationProfile(
+  totals: Map<string, number>,
+  counts: Map<string, number>,
+  snapshot: WindowOptimizationSnapshot,
+) {
+  const profile = {
+    close: snapshot.close,
+    sma_fast: snapshot.sma_fast,
+    sma_slow: snapshot.sma_slow,
+    ema_fast: snapshot.ema_fast,
+    ema_slow: snapshot.ema_slow,
+    vwap: snapshot.vwap,
+    rsi: snapshot.rsi,
+    atr: snapshot.atr,
+    plus_di: snapshot.plus_di,
+    minus_di: snapshot.minus_di,
+    adx: snapshot.adx,
+    macd: snapshot.macd,
+    macd_signal: snapshot.macd_signal,
+    macd_histogram: snapshot.macd_histogram,
+    stochastic_k: snapshot.stochastic_k,
+    stochastic_d: snapshot.stochastic_d,
+    entry_score: snapshot.entry_score,
+    exit_score: snapshot.exit_score,
+  } satisfies Record<string, number | null>
+  for (const [key, value] of Object.entries(profile)) {
+    if (value === null || value === undefined || Number.isNaN(value) || !Number.isFinite(value)) {
+      continue
+    }
+    totals.set(key, (totals.get(key) ?? 0) + value)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+}
+
+function finalizeOptimizationProfile(totals: Map<string, number>, counts: Map<string, number>) {
+  const profile: Record<string, number> = {}
+  for (const [key, total] of totals.entries()) {
+    const count = counts.get(key) ?? 0
+    if (count > 0) {
+      profile[key] = total / count
+    }
+  }
+  return profile
 }
 
 export async function loadDashboardSnapshot(options: { allowFirestore?: boolean; marketDayKey?: string } = {}): Promise<DashboardSnapshotResult> {
@@ -494,10 +511,13 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         latestSession?.session_id ??
         'nasdaq-live',
     )
-    const signalDocs = await getDocs(collection(db, SIGNAL_EVENTS_COLLECTION))
-    const versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
-    const windowDocs = await getDocs(collection(db, TRADE_WINDOWS_COLLECTION))
-    const optimizationDocs = await getDocs(collection(db, WINDOW_OPTIMIZATIONS_COLLECTION))
+    const signalDocs = await getDocs(query(collection(db, SIGNAL_EVENTS_COLLECTION), where('session_id', '==', latestSessionId)))
+    let versionDocs = await getDocs(query(collection(db, CONFIG_VERSIONS_COLLECTION), where('session_id', '==', latestSessionId)))
+    if (versionDocs.empty) {
+      versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
+    }
+    const windowDocs = await getDocs(query(collection(db, TRADE_WINDOWS_COLLECTION), where('session_id', '==', latestSessionId)))
+    const optimizationDocs = await getDocs(query(collection(db, WINDOW_OPTIMIZATIONS_COLLECTION), where('session_id', '==', latestSessionId)))
     const latestSignalDoc = selectLatestFirestoreDoc(signalDocs.docs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
     const latestVersionDoc = selectLatestFirestoreDoc(versionDocs.docs, ['updatedAt', 'updated_at', 'created_at'])
@@ -630,7 +650,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
           sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
           windowId: String(data.window_id ?? data.windowId ?? ''),
           symbol: String(data.symbol ?? doc.id),
-          day: String(data.day ?? marketDayKeyForTimestamp(data.created_at ?? data.createdAt) ?? marketDayKey),
+          day: String(data.day ?? (marketDayKeyForTimestamp(data.created_at ?? data.createdAt) || marketDayKey)),
           entrySnapshot: toWindowOptimizationSnapshot(data.entry_snapshot ?? data.entrySnapshot),
           exitSnapshot: toWindowOptimizationSnapshot(data.exit_snapshot ?? data.exitSnapshot),
           entryScore: Number(data.entry_score ?? data.entryScore ?? 0),
@@ -666,6 +686,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         const data = doc.data() as Record<string, unknown>
         return toSignalState({
           symbol: String(data.symbol ?? doc.id),
+          windowId: String(data.window_id ?? data.windowId ?? ''),
           state: (data.state as AdminSignal['state']) ?? 'ENTRY_SIGNALLED',
           entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
           exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
@@ -859,19 +880,6 @@ function calculateWindowChangePct(entrySnapshot: MarketSnapshotRecord, exitSnaps
     return 0
   }
   return ((exitSnapshot.close - entrySnapshot.close) / entrySnapshot.close) * 100
-}
-
-function getLocalDayKey(value: string | Date) {
-  const date = typeof value === 'string' ? new Date(value) : value
-  if (Number.isNaN(date.getTime())) {
-    return ''
-  }
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date)
 }
 
 function selectLatestFirestoreDoc<T extends { data: () => unknown }>(docs: readonly T[], timestampKeys: string[]): T | undefined {

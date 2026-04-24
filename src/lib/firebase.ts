@@ -19,7 +19,7 @@ function resolveFirebaseConfig(): FirebaseWebConfig {
   const pick = (envValue: string | undefined, runtimeValue: string | undefined, name: string) => {
     const candidate = (envValue?.trim() || runtimeValue?.trim() || '').trim()
     if (!candidate) {
-      throw new Error(`Live configuration value ${name} is required.`)
+      throw new Error(`Firebase configuration value ${name} is required.`)
     }
     return candidate
   }

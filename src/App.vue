@@ -15,6 +15,7 @@ import {
   type MarketSnapshotRecord,
   type TradeWindowRecord,
 } from './lib/dashboard'
+import { currentMarketDayKey, formatMarketDayLabel, marketDayKeyForTimestamp } from './lib/market-day'
 import {
   probeLiveSignalNotifications,
   setupLiveSignalNotifications,
@@ -54,7 +55,9 @@ const optimizationEntrySnapshotId = ref<string>('')
 const optimizationExitSnapshotId = ref<string>('')
 const optimizationNotes = ref('')
 const optimizationSaving = ref(false)
+const optimizationError = ref<string | null>(null)
 const DASHBOARD_REFRESH_INTERVAL_MS = 30_000
+const getMarketDayKey = (value: string | Date) => marketDayKeyForTimestamp(value) || currentMarketDayKey()
 const sessionOverview = computed(() => snapshot.value?.sessionOverview ?? emptySessionOverview())
 const marketSnapshots = computed(() => snapshot.value?.marketSnapshots ?? [])
 const tradeWindows = computed(() => snapshot.value?.windows ?? [])
@@ -220,36 +223,6 @@ const sourceDisplay = computed(() => {
     description: 'The dashboard is connected, but the selected session has not produced live records yet.',
   }
 })
-
-function currentMarketDayKey(reference = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(reference)
-}
-
-function getMarketDayKey(value: string | Date) {
-  const date = typeof value === 'string' ? new Date(value) : value
-  if (Number.isNaN(date.getTime())) {
-    return currentMarketDayKey()
-  }
-  return currentMarketDayKey(date)
-}
-
-function formatMarketDayLabel(value: string) {
-  const parsed = new Date(`${value}T12:00:00Z`)
-  if (Number.isNaN(parsed.getTime())) {
-    return value
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone: 'America/New_York',
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  }).format(parsed)
-}
 
 function emptySessionOverview(): DashboardSnapshot['sessionOverview'] {
   return {
@@ -820,34 +793,6 @@ function findWindowSnapshots(window: TradeWindowRecord) {
   })
 }
 
-function findNearestSnapshot(symbol: string, timestamp: string, direction: 'before' | 'after') {
-  const target = Date.parse(timestamp)
-  if (!Number.isFinite(target)) {
-    return null
-  }
-  const snapshots = selectedDaySnapshots.value.filter((snapshot) => snapshot.symbol === symbol)
-  if (snapshots.length === 0) {
-    return null
-  }
-
-  const ordered = snapshots
-  if (direction === 'before') {
-    for (let index = ordered.length - 1; index >= 0; index -= 1) {
-      if (Date.parse(ordered[index].timestamp) <= target) {
-        return ordered[index]
-      }
-    }
-    return null
-  }
-
-  for (const snapshot of ordered) {
-    if (Date.parse(snapshot.timestamp) >= target) {
-      return snapshot
-    }
-  }
-  return ordered.at(-1) ?? null
-}
-
 function summarizeSnapshotReason(snapshot: MarketSnapshotRecord) {
   const reasons = snapshot.reasons.slice(0, 2)
   if (reasons.length > 0) {
@@ -1124,8 +1069,18 @@ async function saveWindowReviewOptimization() {
   }
 
   optimizationSaving.value = true
+  optimizationError.value = null
   try {
-    const record = await saveWindowOptimization(sessionOverview.value.sessionId, review, entrySnapshot, exitSnapshot, optimizationNotes.value)
+    const now = new Date().toISOString()
+    const record = await saveWindowOptimization(
+      sessionOverview.value.sessionId,
+      review,
+      entrySnapshot,
+      exitSnapshot,
+      optimizationNotes.value,
+      snapshot.value.windowOptimizations ?? [],
+      now,
+    )
     snapshot.value = {
       ...snapshot.value,
       windowOptimizations: [record, ...(snapshot.value.windowOptimizations ?? []).filter((item) => item.id !== record.id)],
@@ -1133,6 +1088,7 @@ async function saveWindowReviewOptimization() {
     optimizationNotes.value = ''
   } catch (error) {
     console.error('Failed to save window optimization:', error)
+    optimizationError.value = error instanceof Error ? error.message : 'Failed to save window optimization.'
   } finally {
     optimizationSaving.value = false
   }
@@ -1930,10 +1886,9 @@ onUnmounted(() => {
             <p>{{ windowChartMarkers }}</p>
           </div>
           <div class="optimizer-point-list">
-            <button
+            <div
               v-for="snapshotPoint in selectedWindowSnapshots"
               :key="`${selectedWindowReview.id}:${snapshotPoint.id}`"
-              type="button"
               class="signal-row ledger-row optimizer-row"
               :class="{ active: optimizationEntrySnapshotId === snapshotPoint.id || optimizationExitSnapshotId === snapshotPoint.id }"
             >
@@ -1952,7 +1907,7 @@ onUnmounted(() => {
                   Exit
                 </button>
               </div>
-            </button>
+            </div>
           </div>
           <div class="optimizer-footer">
             <textarea
@@ -1960,6 +1915,7 @@ onUnmounted(() => {
               rows="3"
               placeholder="Optional notes for this review"
             />
+            <p v-if="optimizationError" class="status-warning">{{ optimizationError }}</p>
             <button
               type="button"
               class="action-button"
