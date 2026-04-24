@@ -146,6 +146,17 @@ function cloneConfigFields(fields: ConfigField[]): ConfigField[] {
   }))
 }
 
+function configNumberValue(fields: ConfigField[] | undefined, key: string, fallback: number) {
+  if (!fields || fields.length === 0) {
+    return fallback
+  }
+  const match = fields.find((field) => field.key === key)
+  if (!match || typeof match.value !== 'number' || !Number.isFinite(match.value)) {
+    return fallback
+  }
+  return match.value
+}
+
 function isConfigFieldValue(value: unknown): value is ConfigFieldValue {
   return typeof value === 'number' || typeof value === 'string' || Array.isArray(value)
 }
@@ -355,11 +366,14 @@ export async function saveWindowOptimization(
   entrySnapshot: MarketSnapshotRecord,
   exitSnapshot: MarketSnapshotRecord,
   notes: string,
+  currentConfigFields: ConfigField[],
   currentOptimizations: WindowOptimizationRecord[],
   now = new Date().toISOString(),
 ): Promise<WindowOptimizationRecord> {
   const id = `${sessionId}:${review.id}:${entrySnapshot.id}:${exitSnapshot.id}`
   const changePct = calculateWindowChangePct(entrySnapshot, exitSnapshot)
+  const optimizerLearningRate = configNumberValue(currentConfigFields, 'optimizer_learning_rate', 0.12)
+  const optimizerBiasCap = configNumberValue(currentConfigFields, 'optimizer_bias_cap', 0.08)
   const normalizedRecord: WindowOptimizationRecord = {
     id,
     sessionId,
@@ -395,6 +409,8 @@ export async function saveWindowOptimization(
   const summary = summarizeWindowOptimizations(
     sessionId,
     [...currentOptimizations.filter((item) => item.id !== id), normalizedRecord],
+    optimizerLearningRate,
+    optimizerBiasCap,
     now,
   )
   const batch = writeBatch(db)
@@ -411,7 +427,13 @@ export async function saveWindowOptimization(
   return normalizedRecord
 }
 
-function summarizeWindowOptimizations(sessionId: string, optimizations: WindowOptimizationRecord[], updatedAt: string) {
+function summarizeWindowOptimizations(
+  sessionId: string,
+  optimizations: WindowOptimizationRecord[],
+  optimizerLearningRate: number,
+  optimizerBiasCap: number,
+  updatedAt: string,
+) {
   const entryTotals = new Map<string, number>()
   const entryCounts = new Map<string, number>()
   const exitTotals = new Map<string, number>()
@@ -441,8 +463,8 @@ function summarizeWindowOptimizations(sessionId: string, optimizations: WindowOp
     symbols: Array.from(symbols).sort(),
     entry_profile: finalizeOptimizationProfile(entryTotals, entryCounts),
     exit_profile: finalizeOptimizationProfile(exitTotals, exitCounts),
-    optimizer_learning_rate: 0.12,
-    optimizer_bias_cap: 0.08,
+    optimizer_learning_rate: optimizerLearningRate,
+    optimizer_bias_cap: optimizerBiasCap,
     updated_at: updatedAt,
   }
 }

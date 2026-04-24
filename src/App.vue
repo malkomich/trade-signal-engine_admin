@@ -1078,6 +1078,7 @@ async function saveWindowReviewOptimization() {
       entrySnapshot,
       exitSnapshot,
       optimizationNotes.value,
+      snapshot.value?.configFields ?? configFields,
       snapshot.value.windowOptimizations ?? [],
       now,
     )

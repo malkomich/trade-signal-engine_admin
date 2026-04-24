@@ -77,7 +77,7 @@ function zonedTimeToUtc(
 function timezoneOffset(date: Date, timeZone: string) {
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone,
-    hour12: false,
+    hourCycle: 'h23',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
