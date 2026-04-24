@@ -491,6 +491,11 @@ function syncSelectedWindowSymbol(symbols: string[]) {
     return
   }
 
+  if (!selectedWindowSymbol.value) {
+    selectedWindowSymbol.value = symbols[0] ?? ''
+    return
+  }
+
   if (symbols.includes(selectedWindowSymbol.value)) {
     return
   }
@@ -501,6 +506,11 @@ function syncSelectedWindowSymbol(symbols: string[]) {
 function syncSelectedOptimizationSymbol(symbols: string[]) {
   if (symbols.length === 0) {
     selectedOptimizationSymbol.value = ''
+    return
+  }
+
+  if (!selectedOptimizationSymbol.value) {
+    selectedOptimizationSymbol.value = symbols[0] ?? ''
     return
   }
 
@@ -686,6 +696,9 @@ function syncConfigDraft(fields: ConfigField[]) {
     if (!validKeys.has(key)) {
       delete symbolAddDrafts[key]
     }
+  }
+  for (const key of Object.keys(symbolAddDrafts)) {
+    delete symbolAddDrafts[key]
   }
   for (const field of fields) {
     if (!(field.key in configDraft)) {
@@ -2186,6 +2199,26 @@ onUnmounted(() => {
         <div class="panel-header">
           <h2>Window optimizer</h2>
           <span>{{ selectedOptimizationReview?.symbol ?? 'No window selected' }}</span>
+        </div>
+        <div class="symbol-tabs optimizer-symbol-tabs">
+          <button
+            type="button"
+            class="symbol-tab"
+            :class="{ active: !selectedOptimizationSymbol }"
+            @click="selectedOptimizationSymbol = ''"
+          >
+            All
+          </button>
+          <button
+            v-for="symbol in marketSymbols"
+            :key="`optimization-${symbol}`"
+            type="button"
+            class="symbol-tab"
+            :class="{ active: selectedOptimizationSymbol === symbol }"
+            @click="selectedOptimizationSymbol = symbol"
+          >
+            {{ symbol }}
+          </button>
         </div>
         <div class="symbol-tabs optimizer-symbol-tabs">
           <button
