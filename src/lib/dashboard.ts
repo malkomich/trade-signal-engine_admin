@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, query, runTransaction, where, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDocs, query, runTransaction, Timestamp, where, writeBatch } from 'firebase/firestore'
 import { db } from './firebase'
 import {
   CONFIG_VERSIONS_COLLECTION,
@@ -119,6 +119,61 @@ function cloneConfigFields(fields: ConfigField[]): ConfigField[] {
 
 function isConfigFieldValue(value: unknown): value is ConfigFieldValue {
   return typeof value === 'number' || typeof value === 'string' || Array.isArray(value)
+}
+
+function marketDayBounds(dayKey: string) {
+  const parsed = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey)
+  if (!parsed) {
+    return null
+  }
+
+  const year = Number(parsed[1])
+  const month = Number(parsed[2])
+  const day = Number(parsed[3])
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null
+  }
+
+  const start = zonedTimeToUtc(year, month, day, 0, 0, 0, 'America/New_York')
+  const end = zonedTimeToUtc(year, month, day + 1, 0, 0, 0, 'America/New_York')
+  return { start, end }
+}
+
+function zonedTimeToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  timeZone: string,
+) {
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, second)
+  const offset = timezoneOffset(new Date(utcGuess), timeZone)
+  return new Date(utcGuess - offset)
+}
+
+function timezoneOffset(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+  const parts = formatter.formatToParts(date)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  ) - date.getTime()
 }
 
 function buildEmptySnapshot(): DashboardSnapshot {
@@ -311,7 +366,7 @@ export async function applyConfigVersion(sessionId: string, currentVersion: stri
   await batch.commit()
 }
 
-export async function loadDashboardSnapshot(options: { allowFirestore?: boolean } = {}): Promise<DashboardSnapshotResult> {
+export async function loadDashboardSnapshot(options: { allowFirestore?: boolean; marketDayKey?: string } = {}): Promise<DashboardSnapshotResult> {
   if (options.allowFirestore === false) {
     return {
       source: 'empty',
@@ -325,11 +380,11 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
     const signalDocs = await getDocs(collection(db, SIGNAL_EVENTS_COLLECTION))
     const versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
 
-    const latestSessionDoc = [...sessionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['updated_at', 'updatedAt']))[0]
+    const latestSessionDoc = [...sessionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['updated_at', 'updatedAt'])).at(-1)
     const latestSession = latestSessionDoc?.data() as Record<string, unknown> | undefined
-    const latestSignalDoc = [...signalDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))[0]
+    const latestSignalDoc = [...signalDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt'])).at(-1)
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
-    const latestVersionDoc = [...versionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt']))[0]
+    const latestVersionDoc = [...versionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt'])).at(-1)
     const latestVersion = latestVersionDoc?.data() as Record<string, unknown> | undefined
     const latestSessionId = String(
       latestSessionDoc?.id ??
@@ -338,7 +393,23 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
         latestVersion?.session_id ??
         'nasdaq-live',
     )
-    const marketSnapshotDocs = await getDocs(query(collection(db, MARKET_SNAPSHOTS_COLLECTION), where('session_id', '==', latestSessionId)))
+    const marketDayKey = options.marketDayKey ?? new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date())
+    const marketBounds = marketDayBounds(marketDayKey)
+    const marketSnapshotDocs = marketBounds
+      ? await getDocs(
+          query(
+            collection(db, MARKET_SNAPSHOTS_COLLECTION),
+            where('session_id', '==', latestSessionId),
+            where('timestamp', '>=', Timestamp.fromDate(marketBounds.start)),
+            where('timestamp', '<', Timestamp.fromDate(marketBounds.end)),
+          ),
+        )
+      : await getDocs(query(collection(db, MARKET_SNAPSHOTS_COLLECTION), where('session_id', '==', latestSessionId)))
     const latestVersionDocs = [...versionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt']))
     const signals = [...signalDocs.docs]
       .sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
@@ -441,7 +512,17 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
         sessionOverview: {
           sessionId: latestSessionId,
           status: String(latestSession?.status ?? (hasLiveData ? 'live' : 'waiting')),
-          updatedAt: formatFirestoreTimestamp(latestSession?.updated_at ?? latestSignal?.updated_at ?? latestVersion?.updated_at, new Date().toISOString()),
+          updatedAt: formatFirestoreTimestamp(
+            latestSession?.updatedAt ??
+              latestSession?.updated_at ??
+              latestSignal?.updatedAt ??
+              latestSignal?.updated_at ??
+              latestSignal?.timestamp ??
+              latestVersion?.updatedAt ??
+              latestVersion?.updated_at ??
+              latestVersion?.created_at,
+            new Date().toISOString(),
+          ),
           configVersion,
           openWindows,
           rejectedEntries,
@@ -451,7 +532,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean 
               ? 'Firestore live records are available and ready for triage.'
               : 'Firestore is connected and waiting for the live session to publish records.',
         },
-        selectedSignal: signals[0] ?? null,
+        selectedSignal: signals.at(-1) ?? null,
         signals,
         marketSnapshots,
         configFields:

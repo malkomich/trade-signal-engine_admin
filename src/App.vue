@@ -46,8 +46,8 @@ const sessionOverview = computed(() => snapshot.value?.sessionOverview ?? emptyS
 const marketSnapshots = computed(() => snapshot.value?.marketSnapshots ?? [])
 const availableMarketDays = computed(() => {
   const days = new Set<string>()
-  for (const snapshotRecord of marketSnapshots.value) {
-    days.add(getMarketDayKey(snapshotRecord.timestamp))
+  for (const signal of snapshot.value?.signals ?? []) {
+    days.add(getMarketDayKey(signal.updatedAt))
   }
   days.add(currentMarketDayKey())
   return Array.from(days).sort((left, right) => right.localeCompare(left))
@@ -70,7 +70,7 @@ const selectedMarketSnapshots = computed(() => {
   }
   return selectedDaySnapshots.value.filter((record) => record.symbol === selectedMarketSymbol.value)
 })
-const latestMarketSnapshots = computed(() => selectedMarketSnapshots.value)
+const latestMarketSnapshots = computed(() => selectedMarketSnapshots.value.slice(-50).reverse())
 const marketChartViews = computed(() =>
   marketCharts.map((chart) => ({
     chart,
@@ -178,7 +178,7 @@ const configFieldGroups = computed(() => groupConfigFields(editableConfigFields.
 
 function stringifyConfigValue(value: ConfigFieldValue): string {
   if (Array.isArray(value)) {
-    return value.join('\n')
+    return value.map((item) => item.toUpperCase()).join('\n')
   }
   return String(value)
 }
@@ -191,7 +191,8 @@ function parseConfigDraftValue(field: ConfigField, rawValue: string): ConfigFiel
       .filter(Boolean)
   }
   if (field.inputType === 'number') {
-    const parsed = Number(rawValue)
+    const trimmed = rawValue.trim()
+    const parsed = trimmed ? Number(trimmed) : Number.NaN
     return Number.isFinite(parsed) ? parsed : field.value
   }
   return rawValue.trim()
@@ -499,7 +500,7 @@ watch(
 
     const activeSignal = selectedSignal.value
     if (!activeSignal || !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))) {
-      selectedSignal.value = signals[0]
+      selectedSignal.value = signals.at(-1) ?? null
     }
   },
   { immediate: true },
@@ -516,26 +517,14 @@ watch(
   { immediate: true },
 )
 
+watch(selectedMarketDay, () => {
+  void refreshDashboard()
+})
+
 watch(
   [marketSymbols, selectedSignal],
   ([symbols]) => {
     syncSelectedMarketSymbol(symbols)
-  },
-  { immediate: true },
-)
-
-watch(
-  selectedDaySignals,
-  (signals) => {
-    if (signals.length === 0) {
-      selectedSignal.value = null
-      return
-    }
-
-    const activeSignal = selectedSignal.value
-    if (!activeSignal || !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))) {
-      selectedSignal.value = signals[0]
-    }
   },
   { immediate: true },
 )
@@ -562,7 +551,7 @@ async function refreshDashboard() {
   dashboardRefreshInFlight = true
   const preserveSelectedConfig = selectedConfigVersionId.value
   try {
-    const result = await loadDashboardSnapshot({ allowFirestore: true })
+    const result = await loadDashboardSnapshot({ allowFirestore: true, marketDayKey: selectedMarketDay.value })
     snapshot.value = result.snapshot
     selectedSignal.value = result.snapshot.selectedSignal
     snapshotSource.value = result.source
@@ -669,7 +658,7 @@ onMounted(async () => {
 
   firestoreAvailable.value = allowFirestore
   try {
-    const result = await loadDashboardSnapshot({ allowFirestore })
+    const result = await loadDashboardSnapshot({ allowFirestore, marketDayKey: selectedMarketDay.value })
     snapshot.value = result.snapshot
     selectedSignal.value = result.snapshot.selectedSignal
     snapshotSource.value = result.source
