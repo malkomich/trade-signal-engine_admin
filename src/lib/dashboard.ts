@@ -1,4 +1,4 @@
-import { equalTo, get, query, orderByChild, ref, runTransaction, set, update } from 'firebase/database'
+import { get, ref, runTransaction, set, update } from 'firebase/database'
 import { rtdb } from './firebase'
 import {
   CONFIG_VERSIONS_COLLECTION,
@@ -121,12 +121,8 @@ type RealtimeCollectionDoc<T = Record<string, unknown>> = {
 
 async function loadRealtimeCollection<T extends Record<string, unknown>>(
   collectionPath: string,
-  sessionID?: string,
 ): Promise<Array<RealtimeCollectionDoc<T>>> {
-  const collectionRef = sessionID
-    ? query(ref(rtdb, collectionPath), orderByChild('session_id'), equalTo(sessionID))
-    : ref(rtdb, collectionPath)
-  const snapshot = await get(collectionRef)
+  const snapshot = await get(ref(rtdb, collectionPath))
   const value = snapshot.val()
   if (!value || typeof value !== 'object') {
     return []
@@ -314,7 +310,7 @@ function nextVersionLabel(baseVersion: string, existingVersions: Iterable<string
 
 export async function saveConfigCandidate(sessionId: string, baseVersion: string, fields: ConfigField[], summary: string) {
   const now = new Date().toISOString()
-  const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(CONFIG_VERSIONS_COLLECTION, sessionId)
+  const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(`${CONFIG_VERSIONS_COLLECTION}/${sessionId}`)
   const existingVersions = versionDocs
     .flatMap((docSnap) => [docSnap.id, String(docSnap.data().version ?? '')])
   const versionPrefix = nextVersionLabel(baseVersion, existingVersions)
@@ -342,7 +338,7 @@ export async function saveConfigCandidate(sessionId: string, baseVersion: string
     created_at: now,
     updated_at: now,
   }
-  await set(ref(rtdb, `${CONFIG_VERSIONS_COLLECTION}/${id}`), payload)
+  await set(ref(rtdb, `${CONFIG_VERSIONS_COLLECTION}/${sessionId}/${id}`), payload)
   return {
     id,
     version,
@@ -356,14 +352,14 @@ export async function saveConfigCandidate(sessionId: string, baseVersion: string
 export async function applyConfigVersion(sessionId: string, currentVersion: string, targetVersion: string) {
   const now = new Date().toISOString()
   const updates: Record<string, unknown> = {
-    [`${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${targetVersion}/status`]: 'active',
-    [`${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${targetVersion}/updated_at`]: now,
+    [`${CONFIG_VERSIONS_COLLECTION}/${sessionId}/${sessionId}:${targetVersion}/status`]: 'active',
+    [`${CONFIG_VERSIONS_COLLECTION}/${sessionId}/${sessionId}:${targetVersion}/updated_at`]: now,
     [`${MARKET_SESSIONS_COLLECTION}/${sessionId}/config_version`]: targetVersion,
     [`${MARKET_SESSIONS_COLLECTION}/${sessionId}/updated_at`]: now,
   }
   if (currentVersion && currentVersion !== targetVersion) {
-    updates[`${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${currentVersion}/status`] = 'archived'
-    updates[`${CONFIG_VERSIONS_COLLECTION}/${sessionId}:${currentVersion}/updated_at`] = now
+    updates[`${CONFIG_VERSIONS_COLLECTION}/${sessionId}/${sessionId}:${currentVersion}/status`] = 'archived'
+    updates[`${CONFIG_VERSIONS_COLLECTION}/${sessionId}/${sessionId}:${currentVersion}/updated_at`] = now
   }
   await update(ref(rtdb), updates)
 }
@@ -422,7 +418,7 @@ export async function saveWindowOptimization(
     now,
   )
   await update(ref(rtdb), {
-    [`${WINDOW_OPTIMIZATIONS_COLLECTION}/${id}`]: payload,
+    [`${WINDOW_OPTIMIZATIONS_COLLECTION}/${sessionId}/${id}`]: payload,
     [`${MARKET_SESSIONS_COLLECTION}/${sessionId}/optimization_summary`]: summary,
     [`${MARKET_SESSIONS_COLLECTION}/${sessionId}/updated_at`]: now,
   })
@@ -535,10 +531,10 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         latestSession?.session_id ??
         'nasdaq-live',
     )
-    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(SIGNAL_EVENTS_COLLECTION, latestSessionId)
-    const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(CONFIG_VERSIONS_COLLECTION, latestSessionId)
-    const windowDocs = await loadRealtimeCollection<Record<string, unknown>>(TRADE_WINDOWS_COLLECTION, latestSessionId)
-    const optimizationDocs = await loadRealtimeCollection<Record<string, unknown>>(WINDOW_OPTIMIZATIONS_COLLECTION, latestSessionId)
+    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(`${SIGNAL_EVENTS_COLLECTION}/${latestSessionId}`)
+    const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(`${CONFIG_VERSIONS_COLLECTION}/${latestSessionId}`)
+    const windowDocs = await loadRealtimeCollection<Record<string, unknown>>(`${TRADE_WINDOWS_COLLECTION}/${latestSessionId}`)
+    const optimizationDocs = await loadRealtimeCollection<Record<string, unknown>>(`${WINDOW_OPTIMIZATIONS_COLLECTION}/${latestSessionId}`)
     const latestSignalDoc = selectLatestRealtimeDoc(signalDocs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
     const latestVersionDoc = selectLatestRealtimeDoc(versionDocs, ['updatedAt', 'updated_at', 'created_at'])
@@ -575,11 +571,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         }
       })
 
-    const sessionSignals = signalDocs.filter((doc) => {
-      const data = doc.data()
-      const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
-      return sessionId === latestSessionId
-    })
+    const sessionSignals = signalDocs
     const selectedDaySignals = sessionSignals
       .sort((left, right) => compareRealtimeDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
       .map((doc) => {
@@ -650,11 +642,6 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         return left.id.localeCompare(right.id)
       })
     const windowOptimizations = optimizationDocs
-      .filter((doc) => {
-        const data = doc.data()
-        const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
-        return sessionId === latestSessionId
-      })
       .sort((left, right) => compareRealtimeDoc(left, right, ['updated_at', 'updatedAt', 'created_at', 'createdAt']))
       .map((doc) => {
         const data = doc.data()
@@ -685,12 +672,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     const selectedDaySnapshots = marketSnapshots
     const openWindows = selectedDayWindows.filter((window) => window.status === 'open').length
     const closedWindows = selectedDayWindows.filter((window) => window.status === 'closed').length
-    const sessionVersionDocs = versionDocs.filter((doc) => {
-      const data = doc.data()
-      const sessionId = String(data.session_id ?? data.sessionId ?? doc.id.split(':')[0] ?? latestSessionId)
-      return sessionId === latestSessionId
-    })
-    const latestVersionDocs = [...sessionVersionDocs].sort((left, right) => compareRealtimeDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
+    const latestVersionDocs = [...versionDocs].sort((left, right) => compareRealtimeDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
     const signals = [...decisionSignals]
     const configVersion = String(latestSession?.config_version ?? latestVersion?.version ?? 'draft')
     const configVersions = latestVersionDocs.map((doc) => {
@@ -708,8 +690,8 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     const hasLiveData =
       sessionDocs.length > 0 ||
       sessionSignals.length > 0 ||
-      sessionVersionDocs.length > 0 ||
-      sessionWindows.length > 0 ||
+      versionDocs.length > 0 ||
+      windowDocs.length > 0 ||
       selectedDaySnapshots.length > 0
     const source = hasLiveData ? 'live' : 'empty'
     const warning = hasLiveData
