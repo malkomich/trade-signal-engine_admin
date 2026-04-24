@@ -1269,7 +1269,7 @@ watch(
 )
 
 watch(
-  selectedWindowSnapshots,
+  selectedOptimizationSnapshots,
   (snapshots) => {
     if (!snapshots.length) {
       optimizationEntrySnapshotId.value = ''
