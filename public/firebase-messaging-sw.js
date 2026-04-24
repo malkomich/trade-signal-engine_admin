@@ -28,8 +28,8 @@ messaging.onBackgroundMessage((payload) => {
   if (payload?.notification) {
     return
   }
-  const title = payload?.notification?.title || payload?.data?.title || DEFAULT_NOTIFICATION_TITLE
-  const body = payload?.notification?.body || payload?.data?.body || DEFAULT_NOTIFICATION_BODY
+  const title = payload?.data?.title || DEFAULT_NOTIFICATION_TITLE
+  const body = payload?.data?.body || DEFAULT_NOTIFICATION_BODY
   self.registration.showNotification(title, {
     body,
     tag: notificationTag(payload),

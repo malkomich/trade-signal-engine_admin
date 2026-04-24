@@ -729,7 +729,7 @@ function findNearestSnapshot(symbol: string, timestamp: string, direction: 'befo
     return null
   }
 
-  const ordered = snapshots.slice().sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
+  const ordered = snapshots
   if (direction === 'before') {
     for (let index = ordered.length - 1; index >= 0; index -= 1) {
       if (Date.parse(ordered[index].timestamp) <= target) {
@@ -821,6 +821,7 @@ watch(
   [selectedMarketDay, selectedMarketSymbol],
   () => {
     marketLedgerPage.value = 0
+    triagePage.value = 0
     windowReviewPage.value = 0
     selectedLedgerSnapshotId.value = ''
     selectedWindowReviewId.value = ''

@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, query, runTransaction, Timestamp, where, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDocs, limit, orderBy, query, runTransaction, Timestamp, where, writeBatch } from 'firebase/firestore'
 import { db } from './firebase'
 import {
   CONFIG_VERSIONS_COLLECTION,
@@ -427,24 +427,22 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
   }
 
   try {
-    const sessionDocs = await getDocs(collection(db, MARKET_SESSIONS_COLLECTION))
-    const signalDocs = await getDocs(collection(db, SIGNAL_EVENTS_COLLECTION))
-    const versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
-    const windowDocs = await getDocs(collection(db, TRADE_WINDOWS_COLLECTION))
+    const sessionDocs = await getDocs(query(collection(db, MARKET_SESSIONS_COLLECTION), orderBy('updated_at', 'desc'), limit(25)))
 
     const latestSessionDoc = selectLatestFirestoreDoc(sessionDocs.docs, ['updated_at', 'updatedAt'])
     const latestSession = latestSessionDoc?.data() as Record<string, unknown> | undefined
+    const latestSessionId = String(
+      latestSessionDoc?.id ??
+        latestSession?.session_id ??
+        'nasdaq-live',
+    )
+    const signalDocs = await getDocs(query(collection(db, SIGNAL_EVENTS_COLLECTION), where('session_id', '==', latestSessionId)))
+    const versionDocs = await getDocs(query(collection(db, CONFIG_VERSIONS_COLLECTION), where('session_id', '==', latestSessionId)))
+    const windowDocs = await getDocs(query(collection(db, TRADE_WINDOWS_COLLECTION), where('session_id', '==', latestSessionId)))
     const latestSignalDoc = selectLatestFirestoreDoc(signalDocs.docs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
     const latestVersionDoc = selectLatestFirestoreDoc(versionDocs.docs, ['updatedAt', 'updated_at', 'created_at'])
     const latestVersion = latestVersionDoc?.data() as Record<string, unknown> | undefined
-    const latestSessionId = String(
-      latestSessionDoc?.id ??
-        latestSession?.session_id ??
-        latestSignal?.session_id ??
-        latestVersion?.session_id ??
-        'nasdaq-live',
-    )
 
     const marketDayKey = options.marketDayKey ?? new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/New_York',
@@ -564,13 +562,10 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
     const selectedDaySnapshots = marketSnapshots
     const openWindows = windows.filter((window) => window.status === 'open').length
     const closedWindows = selectedDayWindows.filter((window) => window.status === 'closed').length
-    const rejectedEntries = Number(
-      latestSession?.rejected_entries ??
-        selectedDaySignalsForMetrics.filter((signal) => {
-          const state = String((signal as Record<string, unknown>).state ?? '')
-          return state === 'REJECTED' || state === 'EXPIRED'
-        }).length,
-    )
+    const rejectedEntries = selectedDaySignalsForMetrics.filter((signal) => {
+      const state = String((signal as Record<string, unknown>).state ?? '')
+      return state === 'REJECTED' || state === 'EXPIRED'
+    }).length
     const sessionVersionDocs = versionDocs.docs.filter((doc) => {
       const data = doc.data() as Record<string, unknown>
       const sessionId = String(data.session_id ?? data.sessionId ?? doc.id.split(':')[0] ?? latestSessionId)
