@@ -89,7 +89,7 @@ async function initializeLiveSignalNotifications(
     return {
       state: 'unsupported',
       token: null,
-      error: 'Firebase messaging is not supported by this browser.',
+      error: 'Live notifications are not supported by this browser.',
       stop: null,
     }
   }
@@ -98,7 +98,7 @@ async function initializeLiveSignalNotifications(
     return {
       state: 'failed',
       token: null,
-      error: 'VAPID key is required to register browser push notifications.',
+      error: 'Browser push notifications are not configured.',
       stop: null,
     }
   }
@@ -138,21 +138,26 @@ async function initializeLiveSignalNotifications(
     const messaging = getMessaging(firebaseApp)
     const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
     await registration.update().catch(() => undefined)
-    const activeRegistration = (await Promise.race([
-      navigator.serviceWorker.ready,
-      waitForServiceWorkerActivation(registration),
-    ])) as ServiceWorkerRegistration
+    const activeRegistration = await waitForServiceWorkerActivation(registration)
+    if (!activeRegistration.active) {
+      return {
+        state: 'failed',
+        token: null,
+        error: 'Service worker is not active yet. Reload the page and try again.',
+        stop: null,
+      }
+    }
     const token = await getToken(messaging, {
       vapidKey: firebaseMessagingConfig.vapidKey,
       serviceWorkerRegistration: activeRegistration,
     }).catch((error) => {
-      throw error instanceof Error ? error : new Error('Failed to retrieve the FCM token.')
+      throw error instanceof Error ? error : new Error('Failed to enable browser push notifications.')
     })
     if (!token) {
       return {
         state: 'failed',
         token: null,
-        error: 'FCM did not return a web token.',
+        error: 'Browser push notifications could not be enabled.',
         stop: null,
       }
     }

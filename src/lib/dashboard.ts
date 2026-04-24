@@ -5,11 +5,20 @@ import {
   MARKET_SESSIONS_COLLECTION,
   MARKET_SNAPSHOTS_COLLECTION,
   SIGNAL_EVENTS_COLLECTION,
+  WINDOW_OPTIMIZATIONS_COLLECTION,
   TRADE_WINDOWS_COLLECTION,
 } from './schema'
-import { classifySignal, configFields, type AdminSignal, type ConfigField, type ConfigFieldValue } from './engine'
+import {
+  classifySignal,
+  configFields,
+  type AdminSignal,
+  type ConfigField,
+  type ConfigFieldValue,
+  type WindowOptimizationSnapshot,
+  type WindowOptimizationRecord,
+} from './engine'
 
-export type DashboardSource = 'firestore' | 'empty'
+export type DashboardSource = 'live' | 'empty'
 
 export type ConfigVersionRecord = {
   id: string
@@ -35,6 +44,7 @@ export type DashboardSnapshot = {
   signals: AdminSignal[]
   windows: TradeWindowRecord[]
   marketSnapshots: MarketSnapshotRecord[]
+  windowOptimizations: WindowOptimizationRecord[]
   configFields: ConfigField[]
   configVersions: ConfigVersionRecord[]
 }
@@ -56,6 +66,7 @@ export type TradeWindowRecord = {
 export type MarketSnapshotRecord = {
   id: string
   sessionId: string
+  windowId: string
   symbol: string
   timestamp: string
   open: number
@@ -224,7 +235,6 @@ function buildEmptySnapshot(): DashboardSnapshot {
       { label: 'Signals today', value: '0' },
       { label: 'Open windows', value: '0' },
       { label: 'Rejected entries', value: '0' },
-      { label: 'Config version', value: 'draft' },
     ],
     sessionOverview: {
       sessionId: 'nasdaq-live',
@@ -233,12 +243,13 @@ function buildEmptySnapshot(): DashboardSnapshot {
       configVersion: 'draft',
       openWindows: 0,
       rejectedEntries: 0,
-      summary: 'No live Firestore records are available yet.',
+      summary: 'No live records are available yet.',
     },
     selectedSignal: null,
     signals: [],
     windows: [],
     marketSnapshots: [],
+    windowOptimizations: [],
     configFields: cloneConfigFields(configFields),
     configVersions: [],
   }
@@ -417,11 +428,58 @@ export async function applyConfigVersion(sessionId: string, currentVersion: stri
   await batch.commit()
 }
 
+export async function saveWindowOptimization(
+  sessionId: string,
+  review: TradeWindowRecord,
+  entrySnapshot: MarketSnapshotRecord,
+  exitSnapshot: MarketSnapshotRecord,
+  notes: string,
+): Promise<WindowOptimizationRecord> {
+  const now = new Date().toISOString()
+  const id = `${sessionId}:${review.id}:${entrySnapshot.id}:${exitSnapshot.id}`
+  const changePct = calculateWindowChangePct(entrySnapshot, exitSnapshot)
+  const payload = {
+    id,
+    session_id: sessionId,
+    window_id: review.id,
+    symbol: review.symbol,
+    day: marketDayKeyForTimestamp(review.openedAt) || getLocalDayKey(review.openedAt),
+    entry_snapshot: snapshotToOptimizationPayload(entrySnapshot),
+    exit_snapshot: snapshotToOptimizationPayload(exitSnapshot),
+    entry_score: entrySnapshot.entryScore,
+    exit_score: exitSnapshot.exitScore,
+    change_pct: changePct,
+    notes: notes.trim(),
+    requested_by: 'admin',
+    created_at: now,
+    updated_at: now,
+  }
+  const batch = writeBatch(db)
+  batch.set(doc(db, WINDOW_OPTIMIZATIONS_COLLECTION, id), payload)
+  await batch.commit()
+  return {
+    id,
+    sessionId,
+    windowId: review.id,
+    symbol: review.symbol,
+    day: marketDayKeyForTimestamp(review.openedAt) || getLocalDayKey(review.openedAt),
+    entrySnapshot: toWindowOptimizationSnapshot(payload.entry_snapshot),
+    exitSnapshot: toWindowOptimizationSnapshot(payload.exit_snapshot),
+    entryScore: entrySnapshot.entryScore,
+    exitScore: exitSnapshot.exitScore,
+    changePct,
+    notes: notes.trim(),
+    requestedBy: 'admin',
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 export async function loadDashboardSnapshot(options: { allowFirestore?: boolean; marketDayKey?: string } = {}): Promise<DashboardSnapshotResult> {
   if (options.allowFirestore === false) {
     return {
       source: 'empty',
-      warning: 'Anonymous auth is unavailable, so the dashboard is showing an empty live state.',
+      warning: 'Live data is unavailable, so the dashboard is showing an empty live state.',
       snapshot: buildEmptySnapshot(),
     }
   }
@@ -436,9 +494,10 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         latestSession?.session_id ??
         'nasdaq-live',
     )
-    const signalDocs = await getDocs(query(collection(db, SIGNAL_EVENTS_COLLECTION), where('session_id', '==', latestSessionId)))
+    const signalDocs = await getDocs(collection(db, SIGNAL_EVENTS_COLLECTION))
     const versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
-    const windowDocs = await getDocs(query(collection(db, TRADE_WINDOWS_COLLECTION), where('session_id', '==', latestSessionId)))
+    const windowDocs = await getDocs(collection(db, TRADE_WINDOWS_COLLECTION))
+    const optimizationDocs = await getDocs(collection(db, WINDOW_OPTIMIZATIONS_COLLECTION))
     const latestSignalDoc = selectLatestFirestoreDoc(signalDocs.docs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
     const latestVersionDoc = selectLatestFirestoreDoc(versionDocs.docs, ['updatedAt', 'updated_at', 'created_at'])
@@ -464,6 +523,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         return {
           id: doc.id,
           sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
+          windowId: String(data.window_id ?? data.windowId ?? ''),
           symbol: String(data.symbol ?? doc.id),
           status: String(data.status ?? 'open'),
           openedAt: formatFirestoreTimestamp(data.opened_at ?? data.openedAt ?? data.created_at ?? data.timestamp, new Date().toISOString()),
@@ -487,6 +547,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         const data = doc.data() as Record<string, unknown>
         return toSignalState({
           symbol: String(data.symbol ?? doc.id),
+          windowId: String(data.window_id ?? data.windowId ?? ''),
           state: (data.state as AdminSignal['state']) ?? 'ENTRY_SIGNALLED',
           entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
           exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
@@ -511,6 +572,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         return {
           id: doc.id,
           sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
+          windowId: String(data.window_id ?? data.windowId ?? ''),
           symbol: String(data.symbol ?? doc.id),
           timestamp: formatFirestoreTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, new Date().toISOString()),
           open: Number(data.open ?? 0),
@@ -554,13 +616,39 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         }
         return left.id.localeCompare(right.id)
       })
+    const windowOptimizations = optimizationDocs.docs
+      .filter((doc) => {
+        const data = doc.data() as Record<string, unknown>
+        const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
+        return sessionId === latestSessionId
+      })
+      .sort((left, right) => compareFirestoreDoc(left, right, ['updated_at', 'updatedAt', 'created_at', 'createdAt']))
+      .map((doc) => {
+        const data = doc.data() as Record<string, unknown>
+        return {
+          id: doc.id,
+          sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
+          windowId: String(data.window_id ?? data.windowId ?? ''),
+          symbol: String(data.symbol ?? doc.id),
+          day: String(data.day ?? marketDayKeyForTimestamp(data.created_at ?? data.createdAt) ?? marketDayKey),
+          entrySnapshot: toWindowOptimizationSnapshot(data.entry_snapshot ?? data.entrySnapshot),
+          exitSnapshot: toWindowOptimizationSnapshot(data.exit_snapshot ?? data.exitSnapshot),
+          entryScore: Number(data.entry_score ?? data.entryScore ?? 0),
+          exitScore: Number(data.exit_score ?? data.exitScore ?? 0),
+          changePct: Number(data.change_pct ?? data.changePct ?? 0),
+          notes: String(data.notes ?? ''),
+          requestedBy: String(data.requested_by ?? data.requestedBy ?? ''),
+          createdAt: formatFirestoreTimestamp(data.created_at ?? data.createdAt, new Date().toISOString()),
+          updatedAt: formatFirestoreTimestamp(data.updated_at ?? data.updatedAt ?? data.created_at ?? data.createdAt, new Date().toISOString()),
+        } satisfies WindowOptimizationRecord
+      })
 
     const selectedDaySignalsForMetrics = selectedDaySignals.filter((signal) => marketDayKeyForTimestamp(signal.updatedAt) === marketDayKey)
     const selectedDayWindows = windows.filter((window) => {
       return marketDayKeyForTimestamp(window.openedAt) === marketDayKey || marketDayKeyForTimestamp(window.closedAt) === marketDayKey
     })
     const selectedDaySnapshots = marketSnapshots
-    const openWindows = windows.filter((window) => window.status === 'open').length
+    const openWindows = selectedDayWindows.filter((window) => window.status === 'open').length
     const closedWindows = selectedDayWindows.filter((window) => window.status === 'closed').length
     const rejectedEntries = selectedDaySignalsForMetrics.filter((signal) => {
       const state = String((signal as Record<string, unknown>).state ?? '')
@@ -571,7 +659,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
       const sessionId = String(data.session_id ?? data.sessionId ?? doc.id.split(':')[0] ?? latestSessionId)
       return sessionId === latestSessionId
     })
-    const latestVersionDocs = [...sessionVersionDocs].sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt']))
+    const latestVersionDocs = [...sessionVersionDocs].sort((left, right) => compareFirestoreDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
     const signals = [...sessionSignals]
       .sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
       .map((doc) => {
@@ -605,14 +693,14 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
       sessionVersionDocs.length > 0 ||
       sessionWindows.length > 0 ||
       selectedDaySnapshots.length > 0
-    const source = hasLiveData ? 'firestore' : 'empty'
+    const source = hasLiveData ? 'live' : 'empty'
     const warning = hasLiveData
       ? selectedDaySnapshots.length === 0
-        ? 'Firestore is connected, but no live market snapshots are available for the selected day yet.'
+            ? 'No live market snapshots are available for the selected day yet.'
         : selectedDaySignalsForMetrics.length === 0
-          ? 'Firestore is connected, but no live signals have been written for the selected day yet.'
+          ? 'No live signal events have been written for the selected day yet.'
           : null
-      : 'Firestore is connected, but the live session has not produced records for this day yet.'
+      : 'Live data is connected, but the selected session has not produced records for this day yet.'
 
     return {
       source,
@@ -623,7 +711,6 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
           { label: 'Open windows now', value: String(openWindows) },
           { label: 'Closed windows today', value: String(closedWindows) },
           { label: 'Rejected entries today', value: String(rejectedEntries) },
-          { label: 'Config version', value: configVersion },
         ],
         sessionOverview: {
           sessionId: latestSessionId,
@@ -643,15 +730,16 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
           openWindows,
           rejectedEntries,
           summary: latestSession
-            ? `Latest Firestore session snapshot is loaded for ${selectedDaySignalsForMetrics.length} signals and ${openWindows} open windows today.`
+            ? 'Live session snapshot loaded for the selected day.'
             : hasLiveData
-              ? `Firestore live records are available for ${selectedDaySignalsForMetrics.length} signals and ${openWindows} open windows today.`
-              : 'Firestore is connected and waiting for the live session to publish records.',
+              ? 'Live records are available for the selected day.'
+              : 'No live records are available for the selected day yet.',
         },
         selectedSignal: selectedDaySignalsForMetrics.at(-1) ?? signals.at(-1) ?? null,
         signals,
         windows,
         marketSnapshots: selectedDaySnapshots,
+        windowOptimizations,
         configFields:
           configVersions.find((version) => version.version === configVersion)?.fields ??
           configVersions.at(-1)?.fields ??
@@ -662,7 +750,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
   } catch (error) {
     return {
       source: 'empty',
-      warning: error instanceof Error ? error.message : 'Firestore dashboard data is unavailable.',
+      warning: 'Live dashboard data is unavailable.',
       snapshot: buildEmptySnapshot(),
     }
   }
@@ -691,6 +779,99 @@ function formatNullableFirestoreTimestamp(value: unknown): string | null {
     return null
   }
   return formatFirestoreTimestamp(value, new Date().toISOString())
+}
+
+function toWindowOptimizationSnapshot(value: unknown): WindowOptimizationSnapshot {
+  const fallback = {
+    timestamp: new Date().toISOString(),
+    close: 0,
+    sma_fast: null,
+    sma_slow: null,
+    ema_fast: null,
+    ema_slow: null,
+    vwap: null,
+    rsi: null,
+    atr: null,
+    plus_di: null,
+    minus_di: null,
+    adx: null,
+    macd: null,
+    macd_signal: null,
+    macd_histogram: null,
+    stochastic_k: null,
+    stochastic_d: null,
+    entry_score: 0,
+    exit_score: 0,
+  }
+  if (!value || typeof value !== 'object') {
+    return fallback
+  }
+  const data = value as Record<string, unknown>
+  return {
+    timestamp: formatFirestoreTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, fallback.timestamp),
+    close: Number(data.close ?? 0),
+    sma_fast: toNullableNumber(data.sma_fast),
+    sma_slow: toNullableNumber(data.sma_slow),
+    ema_fast: toNullableNumber(data.ema_fast),
+    ema_slow: toNullableNumber(data.ema_slow),
+    vwap: toNullableNumber(data.vwap),
+    rsi: toNullableNumber(data.rsi),
+    atr: toNullableNumber(data.atr),
+    plus_di: toNullableNumber(data.plus_di),
+    minus_di: toNullableNumber(data.minus_di),
+    adx: toNullableNumber(data.adx),
+    macd: toNullableNumber(data.macd),
+    macd_signal: toNullableNumber(data.macd_signal),
+    macd_histogram: toNullableNumber(data.macd_histogram),
+    stochastic_k: toNullableNumber(data.stochastic_k),
+    stochastic_d: toNullableNumber(data.stochastic_d),
+    entry_score: Number(data.entry_score ?? data.entryScore ?? 0),
+    exit_score: Number(data.exit_score ?? data.exitScore ?? 0),
+  }
+}
+
+function snapshotToOptimizationPayload(snapshot: MarketSnapshotRecord) {
+  return {
+    timestamp: snapshot.timestamp,
+    close: snapshot.close,
+    sma_fast: snapshot.smaFast,
+    sma_slow: snapshot.smaSlow,
+    ema_fast: snapshot.emaFast,
+    ema_slow: snapshot.emaSlow,
+    vwap: snapshot.vwap,
+    rsi: snapshot.rsi,
+    atr: snapshot.atr,
+    plus_di: snapshot.plusDi,
+    minus_di: snapshot.minusDi,
+    adx: snapshot.adx,
+    macd: snapshot.macd,
+    macd_signal: snapshot.macdSignal,
+    macd_histogram: snapshot.macdHistogram,
+    stochastic_k: snapshot.stochasticK,
+    stochastic_d: snapshot.stochasticD,
+    entry_score: snapshot.entryScore,
+    exit_score: snapshot.exitScore,
+  }
+}
+
+function calculateWindowChangePct(entrySnapshot: MarketSnapshotRecord, exitSnapshot: MarketSnapshotRecord) {
+  if (entrySnapshot.close <= 0 || !Number.isFinite(entrySnapshot.close) || !Number.isFinite(exitSnapshot.close)) {
+    return 0
+  }
+  return ((exitSnapshot.close - entrySnapshot.close) / entrySnapshot.close) * 100
+}
+
+function getLocalDayKey(value: string | Date) {
+  const date = typeof value === 'string' ? new Date(value) : value
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
 }
 
 function selectLatestFirestoreDoc<T extends { data: () => unknown }>(docs: readonly T[], timestampKeys: string[]): T | undefined {

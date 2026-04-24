@@ -2,6 +2,7 @@ export type SignalState = 'FLAT' | 'ENTRY_SIGNALLED' | 'ACCEPTED_OPEN' | 'EXIT_S
 
 export type AdminSignal = {
   symbol: string
+  windowId?: string
   state: SignalState
   entryScore: number
   exitScore: number
@@ -24,6 +25,45 @@ export type ConfigField = {
   step?: number
   placeholder?: string
   options?: string[]
+}
+
+export type WindowOptimizationSnapshot = {
+  timestamp: string
+  close: number
+  sma_fast: number | null
+  sma_slow: number | null
+  ema_fast: number | null
+  ema_slow: number | null
+  vwap: number | null
+  rsi: number | null
+  atr: number | null
+  plus_di: number | null
+  minus_di: number | null
+  adx: number | null
+  macd: number | null
+  macd_signal: number | null
+  macd_histogram: number | null
+  stochastic_k: number | null
+  stochastic_d: number | null
+  entry_score: number
+  exit_score: number
+}
+
+export type WindowOptimizationRecord = {
+  id: string
+  sessionId: string
+  windowId: string
+  symbol: string
+  day: string
+  entrySnapshot: WindowOptimizationSnapshot
+  exitSnapshot: WindowOptimizationSnapshot
+  entryScore: number
+  exitScore: number
+  changePct: number
+  notes: string
+  requestedBy: string
+  createdAt: string
+  updatedAt: string
 }
 
 export const sampleSignals: AdminSignal[] = [
@@ -69,237 +109,255 @@ export const configFields: ConfigField[] = [
   },
   {
     key: 'benchmark_symbol',
-    label: 'Benchmark proxy',
+    label: 'Reference symbol',
     value: 'QQQ',
-    description: 'Benchmark proxy used to compare the live market context. QQQ is the default live proxy.',
+    description: 'Market reference used to compare the tracked stock against broader movement.',
     group: 'Trading universe',
     inputType: 'text',
     placeholder: 'QQQ',
   },
   {
     key: 'session_timezone',
-    label: 'Market timezone',
+    label: 'Trading day timezone',
     value: 'America/New_York',
-    description: 'Timezone used to anchor the active trading day and the market calendar.',
+    description: 'Timezone used to anchor the active trading day and the market calendar. Keep it aligned with the market you trade.',
     group: 'Trading universe',
     inputType: 'text',
     placeholder: 'America/New_York',
   },
   {
     key: 'buy_score_threshold',
-    label: 'Buy score threshold',
+    label: 'Entry score threshold',
     value: 0.65,
-    description: 'Minimum aggregated score required to emit a buy alert. Raise it to make entries stricter; lower it to allow more entries.',
-    group: 'Buy decision rules',
+    description: 'Minimum aggregated score required to emit an entry cue. Raise it to make entries stricter; lower it to allow more entries.',
+    group: 'Entry rules',
     inputType: 'number',
     step: 0.01,
   },
   {
     key: 'sell_score_threshold',
-    label: 'Sell score threshold',
+    label: 'Exit score threshold',
     value: 0.55,
-    description: 'Minimum aggregated score required to emit a sell alert. Raise it to require stronger exit evidence; lower it to close positions sooner.',
-    group: 'Sell decision rules',
+    description: 'Minimum aggregated score required to emit an exit cue. Raise it to require stronger exit evidence; lower it to close positions sooner.',
+    group: 'Exit rules',
     inputType: 'number',
     step: 0.01,
   },
   {
     key: 'buy_weight_sma',
-    label: 'Buy SMA weight',
+    label: 'Entry SMA weight',
     value: 1.6,
-    description: 'How much the SMA stack contributes to buy decisions. Increase it if trend alignment should matter more for entries.',
-    group: 'Buy indicator weights',
+    description: 'How much the SMA stack contributes to entry decisions. Increase it if trend alignment should matter more for entries.',
+    group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_ema',
-    label: 'Buy EMA weight',
+    label: 'Entry EMA weight',
     value: 1.4,
     description: 'How much the EMA stack contributes to buy decisions.',
-    group: 'Buy indicator weights',
+    group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_vwap',
-    label: 'Buy VWAP weight',
+    label: 'Entry VWAP weight',
     value: 1.1,
     description: 'How much VWAP alignment influences buy decisions.',
-    group: 'Buy indicator weights',
+    group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_rsi',
-    label: 'Buy RSI weight',
+    label: 'Entry RSI weight',
     value: 1.0,
     description: 'How much RSI momentum influences buy decisions.',
-    group: 'Buy indicator weights',
+    group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_atr',
-    label: 'Buy ATR weight',
+    label: 'Entry ATR weight',
     value: 0.7,
     description: 'How much ATR volatility contributes to buy decisions.',
-    group: 'Buy indicator weights',
+    group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_dm',
-    label: 'Buy directional movement weight',
+    label: 'Entry directional movement weight',
     value: 0.8,
     description: 'How much DMI and ADX influence buy decisions.',
-    group: 'Buy indicator weights',
+    group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_macd',
-    label: 'Buy MACD weight',
+    label: 'Entry MACD weight',
     value: 1.2,
     description: 'How much MACD momentum influences buy decisions.',
-    group: 'Buy indicator weights',
+    group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_stochastic',
-    label: 'Buy stochastic weight',
+    label: 'Entry stochastic weight',
     value: 0.8,
     description: 'How much stochastic turning points influence buy decisions.',
-    group: 'Buy indicator weights',
+    group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_1m',
-    label: 'Buy 1-minute weight',
+    label: 'Entry 1-minute weight',
     value: 1.0,
-    description: 'How much the 1-minute window contributes to buy scoring.',
-    group: 'Buy timeframe weights',
+    description: 'How much the 1-minute window contributes to entry scoring.',
+    group: 'Entry timeframe weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_5m',
-    label: 'Buy 5-minute weight',
+    label: 'Entry 5-minute weight',
     value: 0.75,
-    description: 'How much the 5-minute window contributes to buy scoring.',
-    group: 'Buy timeframe weights',
+    description: 'How much the 5-minute window contributes to entry scoring.',
+    group: 'Entry timeframe weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'buy_weight_15m',
-    label: 'Buy 15-minute weight',
+    label: 'Entry 15-minute weight',
     value: 0.5,
-    description: 'How much the 15-minute window contributes to buy scoring.',
-    group: 'Buy timeframe weights',
+    description: 'How much the 15-minute window contributes to entry scoring.',
+    group: 'Entry timeframe weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_sma',
-    label: 'Sell SMA weight',
+    label: 'Exit SMA weight',
     value: 1.6,
     description: 'How much the SMA stack contributes to sell decisions.',
-    group: 'Sell indicator weights',
+    group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_ema',
-    label: 'Sell EMA weight',
+    label: 'Exit EMA weight',
     value: 1.4,
     description: 'How much the EMA stack contributes to sell decisions.',
-    group: 'Sell indicator weights',
+    group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_vwap',
-    label: 'Sell VWAP weight',
+    label: 'Exit VWAP weight',
     value: 1.1,
     description: 'How much VWAP alignment influences sell decisions.',
-    group: 'Sell indicator weights',
+    group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_rsi',
-    label: 'Sell RSI weight',
+    label: 'Exit RSI weight',
     value: 1.0,
     description: 'How much RSI momentum influences sell decisions.',
-    group: 'Sell indicator weights',
+    group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_atr',
-    label: 'Sell ATR weight',
+    label: 'Exit ATR weight',
     value: 0.7,
     description: 'How much ATR volatility contributes to sell decisions.',
-    group: 'Sell indicator weights',
+    group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_dm',
-    label: 'Sell directional movement weight',
+    label: 'Exit directional movement weight',
     value: 0.8,
     description: 'How much DMI and ADX influence sell decisions.',
-    group: 'Sell indicator weights',
+    group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_macd',
-    label: 'Sell MACD weight',
+    label: 'Exit MACD weight',
     value: 1.2,
     description: 'How much MACD momentum influences sell decisions.',
-    group: 'Sell indicator weights',
+    group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_stochastic',
-    label: 'Sell stochastic weight',
+    label: 'Exit stochastic weight',
     value: 0.8,
     description: 'How much stochastic turning points influence sell decisions.',
-    group: 'Sell indicator weights',
+    group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_1m',
-    label: 'Sell 1-minute weight',
+    label: 'Exit 1-minute weight',
     value: 1.0,
-    description: 'How much the 1-minute window contributes to sell scoring.',
-    group: 'Sell timeframe weights',
+    description: 'How much the 1-minute window contributes to exit scoring.',
+    group: 'Exit timeframe weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_5m',
-    label: 'Sell 5-minute weight',
+    label: 'Exit 5-minute weight',
     value: 0.75,
-    description: 'How much the 5-minute window contributes to sell scoring.',
-    group: 'Sell timeframe weights',
+    description: 'How much the 5-minute window contributes to exit scoring.',
+    group: 'Exit timeframe weights',
     inputType: 'number',
     step: 0.1,
   },
   {
     key: 'sell_weight_15m',
-    label: 'Sell 15-minute weight',
+    label: 'Exit 15-minute weight',
     value: 0.5,
-    description: 'How much the 15-minute window contributes to sell scoring.',
-    group: 'Sell timeframe weights',
+    description: 'How much the 15-minute window contributes to exit scoring.',
+    group: 'Exit timeframe weights',
     inputType: 'number',
     step: 0.1,
+  },
+  {
+    key: 'optimizer_learning_rate',
+    label: 'Optimizer learning rate',
+    value: 0.12,
+    description: 'How strongly saved window reviews should nudge future scores. Keep it low for stability.',
+    group: 'Optimization controls',
+    inputType: 'number',
+    step: 0.01,
+  },
+  {
+    key: 'optimizer_bias_cap',
+    label: 'Optimizer bias cap',
+    value: 0.08,
+    description: 'Maximum per-run adjustment applied from the saved review history. Smaller values keep the engine steadier.',
+    group: 'Optimization controls',
+    inputType: 'number',
+    step: 0.01,
   },
 ]
 
