@@ -139,6 +139,14 @@ async function initializeLiveSignalNotifications(
     const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
     await registration.update().catch(() => undefined)
     const activeRegistration = await waitForServiceWorkerActivation(registration)
+    if (!activeRegistration.active) {
+      return {
+        state: 'failed',
+        token: null,
+        error: 'Service worker is not active yet. Reload the page and try again.',
+        stop: null,
+      }
+    }
     const token = await getToken(messaging, {
       vapidKey: firebaseMessagingConfig.vapidKey,
       serviceWorkerRegistration: activeRegistration,

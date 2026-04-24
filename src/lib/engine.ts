@@ -156,7 +156,7 @@ export const configFields: ConfigField[] = [
     key: 'buy_weight_ema',
     label: 'Entry EMA weight',
     value: 1.4,
-    description: 'How much the EMA stack contributes to entry decisions.',
+    description: 'How much the EMA stack contributes to buy decisions.',
     group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -165,7 +165,7 @@ export const configFields: ConfigField[] = [
     key: 'buy_weight_vwap',
     label: 'Entry VWAP weight',
     value: 1.1,
-    description: 'How much VWAP alignment influences entry decisions.',
+    description: 'How much VWAP alignment influences buy decisions.',
     group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -174,7 +174,7 @@ export const configFields: ConfigField[] = [
     key: 'buy_weight_rsi',
     label: 'Entry RSI weight',
     value: 1.0,
-    description: 'How much RSI momentum influences entry decisions.',
+    description: 'How much RSI momentum influences buy decisions.',
     group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -183,7 +183,7 @@ export const configFields: ConfigField[] = [
     key: 'buy_weight_atr',
     label: 'Entry ATR weight',
     value: 0.7,
-    description: 'How much ATR volatility contributes to entry decisions.',
+    description: 'How much ATR volatility contributes to buy decisions.',
     group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -192,7 +192,7 @@ export const configFields: ConfigField[] = [
     key: 'buy_weight_dm',
     label: 'Entry directional movement weight',
     value: 0.8,
-    description: 'How much DMI and ADX influence entry decisions.',
+    description: 'How much DMI and ADX influence buy decisions.',
     group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -201,7 +201,7 @@ export const configFields: ConfigField[] = [
     key: 'buy_weight_macd',
     label: 'Entry MACD weight',
     value: 1.2,
-    description: 'How much MACD momentum influences entry decisions.',
+    description: 'How much MACD momentum influences buy decisions.',
     group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -210,7 +210,7 @@ export const configFields: ConfigField[] = [
     key: 'buy_weight_stochastic',
     label: 'Entry stochastic weight',
     value: 0.8,
-    description: 'How much stochastic turning points influence entry decisions.',
+    description: 'How much stochastic turning points influence buy decisions.',
     group: 'Entry indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -246,7 +246,7 @@ export const configFields: ConfigField[] = [
     key: 'sell_weight_sma',
     label: 'Exit SMA weight',
     value: 1.6,
-    description: 'How much the SMA stack contributes to exit decisions.',
+    description: 'How much the SMA stack contributes to sell decisions.',
     group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -255,7 +255,7 @@ export const configFields: ConfigField[] = [
     key: 'sell_weight_ema',
     label: 'Exit EMA weight',
     value: 1.4,
-    description: 'How much the EMA stack contributes to exit decisions.',
+    description: 'How much the EMA stack contributes to sell decisions.',
     group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -264,7 +264,7 @@ export const configFields: ConfigField[] = [
     key: 'sell_weight_vwap',
     label: 'Exit VWAP weight',
     value: 1.1,
-    description: 'How much VWAP alignment influences exit decisions.',
+    description: 'How much VWAP alignment influences sell decisions.',
     group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -273,7 +273,7 @@ export const configFields: ConfigField[] = [
     key: 'sell_weight_rsi',
     label: 'Exit RSI weight',
     value: 1.0,
-    description: 'How much RSI momentum influences exit decisions.',
+    description: 'How much RSI momentum influences sell decisions.',
     group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -282,7 +282,7 @@ export const configFields: ConfigField[] = [
     key: 'sell_weight_atr',
     label: 'Exit ATR weight',
     value: 0.7,
-    description: 'How much ATR volatility contributes to exit decisions.',
+    description: 'How much ATR volatility contributes to sell decisions.',
     group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -291,7 +291,7 @@ export const configFields: ConfigField[] = [
     key: 'sell_weight_dm',
     label: 'Exit directional movement weight',
     value: 0.8,
-    description: 'How much DMI and ADX influence exit decisions.',
+    description: 'How much DMI and ADX influence sell decisions.',
     group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -300,7 +300,7 @@ export const configFields: ConfigField[] = [
     key: 'sell_weight_macd',
     label: 'Exit MACD weight',
     value: 1.2,
-    description: 'How much MACD momentum influences exit decisions.',
+    description: 'How much MACD momentum influences sell decisions.',
     group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -309,7 +309,7 @@ export const configFields: ConfigField[] = [
     key: 'sell_weight_stochastic',
     label: 'Exit stochastic weight',
     value: 0.8,
-    description: 'How much stochastic turning points influence exit decisions.',
+    description: 'How much stochastic turning points influence sell decisions.',
     group: 'Exit indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -362,14 +362,12 @@ export const configFields: ConfigField[] = [
 ]
 
 export function classifySignal(signal: AdminSignal): 'entry' | 'exit' | 'hold' {
-  if (signal.state === 'REJECTED' || signal.state === 'EXPIRED') {
-    return 'hold'
+  switch (signal.state) {
+    case 'ENTRY_SIGNALLED':
+      return 'entry'
+    case 'EXIT_SIGNALLED':
+      return 'exit'
+    default:
+      return 'hold'
   }
-  if (signal.state === 'EXIT_SIGNALLED' || signal.exitScore >= 0.7) {
-    return 'exit'
-  }
-  if (signal.state === 'ENTRY_SIGNALLED' || signal.entryScore >= 0.7) {
-    return 'entry'
-  }
-  return 'hold'
 }
