@@ -8,5 +8,12 @@ describe('signal classification', () => {
   it('marks exit signals as exit', () => {
     expect(classifySignal(sampleSignals[2])).toBe('exit')
   })
-})
 
+  it('marks rejected signals as hold', () => {
+    expect(classifySignal({ ...sampleSignals[0], state: 'REJECTED' })).toBe('hold')
+  })
+
+  it('marks expired signals as hold', () => {
+    expect(classifySignal({ ...sampleSignals[0], state: 'EXPIRED' })).toBe('hold')
+  })
+})

@@ -1,4 +1,5 @@
 export const MARKET_SESSIONS_COLLECTION = 'market_sessions'
 export const SIGNAL_EVENTS_COLLECTION = 'signal_events'
 export const MARKET_SNAPSHOTS_COLLECTION = 'market_snapshots'
+export const TRADE_WINDOWS_COLLECTION = 'trade_windows'
 export const CONFIG_VERSIONS_COLLECTION = 'config_versions'
