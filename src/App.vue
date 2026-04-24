@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { signInAnonymously } from 'firebase/auth'
 import { type MessagePayload } from 'firebase/messaging'
 import { classifySignal } from './lib/engine'
@@ -36,6 +36,9 @@ const notificationMessage = ref<string | null>(null)
 const selectedLedgerSnapshotId = ref<string>('')
 const selectedWindowReviewId = ref<string>('')
 const expandedChartId = ref<string | null>(null)
+const chartModalCardRef = ref<HTMLElement | null>(null)
+const chartModalCloseButton = ref<HTMLButtonElement | null>(null)
+let chartModalPreviousFocus: HTMLElement | null = null
 let notificationSetupGeneration = 0
 let isMounted = true
 let dashboardRefreshTimer: number | null = null
@@ -156,6 +159,10 @@ const expandedChartView = computed(() => {
   }
   return marketChartViews.value.find((item) => item.chart.id === expandedChartId.value) ?? null
 })
+
+function clampPage(page: { value: number }, pageCount: number) {
+  page.value = Math.min(page.value, Math.max(0, pageCount - 1))
+}
 
 const sourceDisplay = computed(() => {
   if (snapshotSource.value === 'firestore') {
@@ -729,7 +736,7 @@ function findNearestSnapshot(symbol: string, timestamp: string, direction: 'befo
         return ordered[index]
       }
     }
-    return ordered[0] ?? null
+    return null
   }
 
   for (const snapshot of ordered) {
@@ -835,6 +842,14 @@ watch(selectedMarketDay, () => {
   void requestDashboardRefresh()
 })
 
+watch(marketLedgerPageCount, (pageCount) => {
+  clampPage(marketLedgerPage, pageCount)
+})
+
+watch(windowReviewPageCount, (pageCount) => {
+  clampPage(windowReviewPage, pageCount)
+})
+
 watch(
   [marketSymbols, selectedSignal],
   ([symbols]) => {
@@ -900,12 +915,76 @@ function previousWindowPage() {
 }
 
 function openExpandedChart(chartId: string) {
+  chartModalPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   expandedChartId.value = chartId
 }
 
 function closeExpandedChart() {
   expandedChartId.value = null
 }
+
+function getFocusableElements(root: HTMLElement) {
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => !element.hasAttribute('disabled') && element.tabIndex >= 0)
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (!expandedChartId.value) {
+    return
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeExpandedChart()
+    return
+  }
+
+  if (event.key !== 'Tab') {
+    return
+  }
+
+  const modalCard = chartModalCardRef.value
+  if (!modalCard) {
+    return
+  }
+
+  const focusable = getFocusableElements(modalCard)
+  if (focusable.length === 0) {
+    event.preventDefault()
+    chartModalCloseButton.value?.focus()
+    return
+  }
+
+  const currentIndex = focusable.findIndex((element) => element === document.activeElement)
+  const nextIndex = event.shiftKey
+    ? currentIndex <= 0
+      ? focusable.length - 1
+      : currentIndex - 1
+    : currentIndex === -1 || currentIndex === focusable.length - 1
+      ? 0
+      : currentIndex + 1
+
+  event.preventDefault()
+  focusable[nextIndex]?.focus()
+}
+
+watch(
+  expandedChartId,
+  async (chartId) => {
+    if (chartId) {
+      await nextTick()
+      chartModalCloseButton.value?.focus()
+      return
+    }
+
+    chartModalPreviousFocus?.focus?.()
+    chartModalPreviousFocus = null
+  },
+  { immediate: true },
+)
 
 function handleConfigVersionClick(version: ConfigVersionRecord) {
   if (isConfigDraftDirty.value && selectedConfigVersion.value?.id !== version.id) {
@@ -1080,6 +1159,7 @@ onMounted(async () => {
 
   dashboardVisibilityChangeHandler = handleVisibilityChange
   document.addEventListener('visibilitychange', dashboardVisibilityChangeHandler)
+  window.addEventListener('keydown', handleGlobalKeydown)
   scheduleDashboardRefresh()
   loading.value = false
 })
@@ -1094,6 +1174,7 @@ onUnmounted(() => {
     document.removeEventListener('visibilitychange', dashboardVisibilityChangeHandler)
     dashboardVisibilityChangeHandler = null
   }
+  window.removeEventListener('keydown', handleGlobalKeydown)
   stopLiveSignalNotifications()
 })
 </script>
@@ -1616,13 +1697,23 @@ onUnmounted(() => {
       </section>
 
       <div v-if="expandedChartView" class="chart-modal" @click.self="closeExpandedChart">
-        <article class="panel chart-modal-card">
+        <article
+          ref="chartModalCardRef"
+          class="panel chart-modal-card"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="`expanded-chart-title-${expandedChartView.chart.id}`"
+          :aria-describedby="`expanded-chart-desc-${expandedChartView.chart.id}`"
+          tabindex="-1"
+        >
           <div class="panel-header">
             <div>
-              <h2>{{ expandedChartView.chart.title }}</h2>
+              <h2 :id="`expanded-chart-title-${expandedChartView.chart.id}`">{{ expandedChartView.chart.title }}</h2>
               <p>{{ expandedChartView.chart.subtitle }}</p>
             </div>
-            <button type="button" class="action-button ghost compact" @click="closeExpandedChart">Close</button>
+            <button ref="chartModalCloseButton" type="button" class="action-button ghost compact" @click="closeExpandedChart">
+              Close
+            </button>
           </div>
           <div class="chart-legend">
             <span v-for="line in expandedChartView.view.lines" :key="line.label" :title="`${line.label}: ${line.latestValue}`">
@@ -1660,7 +1751,7 @@ onUnmounted(() => {
               />
             </g>
           </svg>
-          <p class="status-warning">
+          <p :id="`expanded-chart-desc-${expandedChartView.chart.id}`" class="status-warning">
             {{ formatLocaleTimestamp(expandedChartView.view.latestTimestamp) }}
           </p>
         </article>

@@ -661,6 +661,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .grid > .panel {
+    grid-column: auto;
+  }
+
   .overview-panel,
   .shell-placeholder[data-slot='chart'],
   .shell-placeholder[data-slot='table'] {

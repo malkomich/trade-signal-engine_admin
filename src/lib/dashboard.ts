@@ -613,9 +613,9 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
     const source = hasLiveData ? 'firestore' : 'empty'
     const warning = hasLiveData
       ? selectedDaySnapshots.length === 0
-        ? 'Firestore is connected, but no live market snapshots are available for the selected session yet.'
+        ? 'Firestore is connected, but no live market snapshots are available for the selected day yet.'
         : selectedDaySignalsForMetrics.length === 0
-          ? 'Firestore is connected, but no live signals have been written for the selected session yet.'
+          ? 'Firestore is connected, but no live signals have been written for the selected day yet.'
           : null
       : 'Firestore is connected, but the live session has not produced records for this day yet.'
 
