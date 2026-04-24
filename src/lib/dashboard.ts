@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, limit, orderBy, query, runTransaction, Timestamp, where, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDocs, query, runTransaction, Timestamp, where, writeBatch } from 'firebase/firestore'
 import { db } from './firebase'
 import {
   CONFIG_VERSIONS_COLLECTION,
@@ -427,7 +427,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
   }
 
   try {
-    const sessionDocs = await getDocs(query(collection(db, MARKET_SESSIONS_COLLECTION), orderBy('updated_at', 'desc'), limit(25)))
+    const sessionDocs = await getDocs(collection(db, MARKET_SESSIONS_COLLECTION))
 
     const latestSessionDoc = selectLatestFirestoreDoc(sessionDocs.docs, ['updated_at', 'updatedAt'])
     const latestSession = latestSessionDoc?.data() as Record<string, unknown> | undefined
@@ -437,7 +437,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
         'nasdaq-live',
     )
     const signalDocs = await getDocs(query(collection(db, SIGNAL_EVENTS_COLLECTION), where('session_id', '==', latestSessionId)))
-    const versionDocs = await getDocs(query(collection(db, CONFIG_VERSIONS_COLLECTION), where('session_id', '==', latestSessionId)))
+    const versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
     const windowDocs = await getDocs(query(collection(db, TRADE_WINDOWS_COLLECTION), where('session_id', '==', latestSessionId)))
     const latestSignalDoc = selectLatestFirestoreDoc(signalDocs.docs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
