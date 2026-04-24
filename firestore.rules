@@ -40,5 +40,24 @@ service cloud.firestore {
         "updated_at"
       ]);
     }
+
+    match /window_optimizations/{optimizationId} {
+      allow create, update: if isAuthenticated() && hasOnlyKeys([
+        "id",
+        "session_id",
+        "window_id",
+        "symbol",
+        "day",
+        "entry_snapshot",
+        "exit_snapshot",
+        "entry_score",
+        "exit_score",
+        "change_pct",
+        "notes",
+        "requested_by",
+        "created_at",
+        "updated_at"
+      ]);
+    }
   }
 }
