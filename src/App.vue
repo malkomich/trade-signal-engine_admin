@@ -36,6 +36,7 @@ let notificationSetupGeneration = 0
 let isMounted = true
 let dashboardRefreshTimer: number | null = null
 let dashboardRefreshInFlight = false
+let dashboardRefreshQueued = false
 let dashboardVisibilityChangeHandler: (() => void) | null = null
 const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
 const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
@@ -48,6 +49,9 @@ const availableMarketDays = computed(() => {
   const days = new Set<string>()
   for (const signal of snapshot.value?.signals ?? []) {
     days.add(getMarketDayKey(signal.updatedAt))
+  }
+  for (const marketSnapshot of marketSnapshots.value) {
+    days.add(getMarketDayKey(marketSnapshot.timestamp))
   }
   days.add(currentMarketDayKey())
   return Array.from(days).sort((left, right) => right.localeCompare(left))
@@ -518,7 +522,7 @@ watch(
 )
 
 watch(selectedMarketDay, () => {
-  void refreshDashboard()
+  void requestDashboardRefresh()
 })
 
 watch(
@@ -540,11 +544,12 @@ function handleConfigVersionClick(version: ConfigVersionRecord) {
   selectConfigVersion(version)
 }
 
-async function refreshDashboard() {
+async function requestDashboardRefresh() {
   if (!firestoreAvailable.value) {
     return
   }
   if (dashboardRefreshInFlight) {
+    dashboardRefreshQueued = true
     return
   }
 
@@ -567,13 +572,17 @@ async function refreshDashboard() {
     console.error('Failed to refresh dashboard:', error)
   } finally {
     dashboardRefreshInFlight = false
+    if (dashboardRefreshQueued) {
+      dashboardRefreshQueued = false
+      void requestDashboardRefresh()
+    }
   }
 }
 
 async function refreshOnRelevantSignal(payload: MessagePayload) {
   const type = payload.data?.type?.trim().toLowerCase()
   if (type === 'decision.accepted' || type === 'decision.exited') {
-    await refreshDashboard()
+    await requestDashboardRefresh()
   }
 }
 
@@ -639,7 +648,7 @@ async function applySelectedVersion(version: ConfigVersionRecord) {
       currentConfigVersion.value,
       version.version,
     )
-    await refreshDashboard()
+    await requestDashboardRefresh()
   } catch (error) {
     console.error('Failed to apply config version:', error)
   }
@@ -680,7 +689,7 @@ onMounted(async () => {
     dashboardRefreshTimer = window.setTimeout(async () => {
       dashboardRefreshTimer = null
       try {
-        await refreshDashboard()
+        await requestDashboardRefresh()
       } finally {
         if (isMounted && firestoreAvailable.value && !document.hidden) {
           scheduleDashboardRefresh()

@@ -380,11 +380,11 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
     const signalDocs = await getDocs(collection(db, SIGNAL_EVENTS_COLLECTION))
     const versionDocs = await getDocs(collection(db, CONFIG_VERSIONS_COLLECTION))
 
-    const latestSessionDoc = [...sessionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['updated_at', 'updatedAt'])).at(-1)
+    const latestSessionDoc = selectLatestFirestoreDoc(sessionDocs.docs, ['updated_at', 'updatedAt'])
     const latestSession = latestSessionDoc?.data() as Record<string, unknown> | undefined
-    const latestSignalDoc = [...signalDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt'])).at(-1)
+    const latestSignalDoc = selectLatestFirestoreDoc(signalDocs.docs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
-    const latestVersionDoc = [...versionDocs.docs].sort((left, right) => compareFirestoreDoc(left, right, ['created_at', 'updated_at', 'updatedAt'])).at(-1)
+    const latestVersionDoc = selectLatestFirestoreDoc(versionDocs.docs, ['created_at', 'updated_at', 'updatedAt'])
     const latestVersion = latestVersionDoc?.data() as Record<string, unknown> | undefined
     const latestSessionId = String(
       latestSessionDoc?.id ??
@@ -567,6 +567,19 @@ function compareFirestoreDoc(left: { data: () => unknown }, right: { data: () =>
     return 1
   }
   return 0
+}
+
+function selectLatestFirestoreDoc<T extends { data: () => unknown }>(docs: readonly T[], timestampKeys: string[]): T | undefined {
+  const timestampedDocs = docs.filter((doc) => {
+    const data = doc.data() as Record<string, unknown>
+    return timestampKeys.some((key) => formatComparableTimestamp(data[key]) !== null)
+  })
+
+  if (timestampedDocs.length > 0) {
+    return [...timestampedDocs].sort((left, right) => compareFirestoreDoc(left, right, timestampKeys)).at(-1)
+  }
+
+  return docs.at(-1)
 }
 
 function formatComparableTimestamp(value: unknown): number | null {
