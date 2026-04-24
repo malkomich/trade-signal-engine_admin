@@ -9,7 +9,6 @@ import {
   TRADE_WINDOWS_COLLECTION,
 } from './schema'
 import {
-  classifySignal,
   configFields,
   type AdminSignal,
   type ConfigField,
@@ -38,7 +37,6 @@ export type DashboardSnapshot = {
     updatedAt: string
     configVersion: string
     openWindows: number
-    rejectedEntries: number
     summary: string
   }
   selectedSignal: AdminSignal | null
@@ -115,13 +113,6 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function toSignalState(signal: AdminSignal): AdminSignal {
-  return {
-    ...signal,
-    state: classifySignal(signal) === 'exit' ? 'EXIT_SIGNALLED' : classifySignal(signal) === 'entry' ? 'ENTRY_SIGNALLED' : signal.state,
-  }
-}
-
 function formatFirestoreTimestamp(value: unknown, fallback: string): string {
   if (typeof value === 'string' && value.trim()) {
     return value
@@ -175,7 +166,6 @@ function buildEmptySnapshot(): DashboardSnapshot {
       updatedAt: new Date().toISOString(),
       configVersion: 'draft',
       openWindows: 0,
-      rejectedEntries: 0,
       summary: 'No live records are available yet.',
     },
     selectedSignal: null,
@@ -588,7 +578,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
       .sort((left, right) => compareFirestoreDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
       .map((doc) => {
         const data = doc.data() as Record<string, unknown>
-        return toSignalState({
+        return {
           symbol: String(data.symbol ?? doc.id),
           windowId: String(data.window_id ?? data.windowId ?? ''),
           state: (data.state as AdminSignal['state']) ?? 'ENTRY_SIGNALLED',
@@ -597,7 +587,7 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
           regime: String(data.regime ?? 'Live market session'),
           updatedAt: formatFirestoreTimestamp(data.updatedAt ?? data.timestamp, new Date().toISOString()),
           reasons: Array.isArray(data.reasons) ? data.reasons.map(String) : [],
-        })
+        } satisfies AdminSignal
       })
     const decisionSignals = selectedDaySignals.filter((signal) => signal.state === 'ENTRY_SIGNALLED' || signal.state === 'EXIT_SIGNALLED')
 
@@ -696,17 +686,13 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
     const selectedDaySnapshots = marketSnapshots
     const openWindows = selectedDayWindows.filter((window) => window.status === 'open').length
     const closedWindows = selectedDayWindows.filter((window) => window.status === 'closed').length
-    const rejectedEntries = selectedDaySignalsForMetrics.filter((signal) => {
-      const state = String((signal as Record<string, unknown>).state ?? '')
-      return state === 'REJECTED' || state === 'EXPIRED'
-    }).length
     const sessionVersionDocs = versionDocs.docs.filter((doc) => {
       const data = doc.data() as Record<string, unknown>
       const sessionId = String(data.session_id ?? data.sessionId ?? doc.id.split(':')[0] ?? latestSessionId)
       return sessionId === latestSessionId
     })
     const latestVersionDocs = [...sessionVersionDocs].sort((left, right) => compareFirestoreDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
-    const signals = [...decisionSignals].sort((left, right) => Date.parse(left.updatedAt) - Date.parse(right.updatedAt))
+    const signals = [...decisionSignals]
     const configVersion = String(latestSession?.config_version ?? latestVersion?.version ?? 'draft')
     const configVersions = latestVersionDocs.map((doc) => {
       const data = doc.data() as Record<string, unknown>
@@ -761,7 +747,6 @@ export async function loadDashboardSnapshot(options: { allowFirestore?: boolean;
           ),
           configVersion,
           openWindows,
-          rejectedEntries,
           summary: latestSession
             ? 'Live session snapshot loaded for the selected day.'
             : hasLiveData

@@ -53,7 +53,7 @@ let dashboardVisibilityChangeHandler: (() => void) | null = null
 const triageFilter = ref<'all' | 'entry' | 'exit'>('all')
 const triageFilters = ['all', 'entry', 'exit'] as const
 const selectedConfigVersionId = ref<string>('current')
-const configDraft = reactive<Record<string, string>>({})
+const configDraft = reactive<Record<string, string | number>>({})
 const optimizationEntrySnapshotId = ref<string>('')
 const optimizationExitSnapshotId = ref<string>('')
 const optimizationNotes = ref('')
@@ -160,8 +160,7 @@ const marketLedgerPageCount = computed(() => Math.max(1, Math.ceil(Math.min(50, 
 const liveSignals = computed(() => {
   return selectedDaySignals.value
     .filter((signal) => classifySignal(signal) !== 'hold')
-    .slice()
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+    .reverse()
 })
 const liveSignalPageSignals = computed(() => {
   const start = liveSignalPage.value * LIVE_SIGNAL_PAGE_SIZE
@@ -273,7 +272,6 @@ function emptySessionOverview(): DashboardSnapshot['sessionOverview'] {
     updatedAt: new Date().toISOString(),
     configVersion: 'draft',
     openWindows: 0,
-    rejectedEntries: 0,
     summary: 'No live records are available for the selected day yet.',
   }
 }
@@ -494,19 +492,22 @@ function stringifyConfigValue(value: ConfigFieldValue): string {
   return String(value)
 }
 
-function parseConfigDraftValue(field: ConfigField, rawValue: string): ConfigFieldValue {
+function parseConfigDraftValue(field: ConfigField, rawValue: string | number): ConfigFieldValue {
   if (field.inputType === 'symbols') {
-    return rawValue
+    return String(rawValue)
       .split(/[\n,]/)
       .map((item) => item.trim().toUpperCase())
       .filter(Boolean)
   }
   if (field.inputType === 'number') {
-    const trimmed = rawValue.trim()
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+      return rawValue
+    }
+    const trimmed = String(rawValue).trim()
     const parsed = trimmed ? Number(trimmed) : Number.NaN
     return Number.isFinite(parsed) ? parsed : field.value
   }
-  return rawValue.trim()
+  return String(rawValue).trim()
 }
 
 function configFieldBounds(field: ConfigField) {
@@ -525,7 +526,9 @@ function configFieldBounds(field: ConfigField) {
     return { min: 1, max: 500, step: 1 }
   }
   if (typeof field.value === 'number' && Number.isFinite(field.value)) {
-    return { min: Math.max(0, Math.floor(field.value * 0.25)), max: Math.max(field.value * 2, field.value + 1), step }
+    const min = Math.min(Math.floor(field.value * 0.25), field.value)
+    const max = Math.max(field.value * 2, field.value + 1, min + step)
+    return { min, max, step }
   }
   return { min: 0, max: 100, step }
 }
@@ -565,7 +568,7 @@ function draftNumberValue(field: ConfigField) {
 
 function readDraftSymbols(field: ConfigField) {
   const raw = configDraft[field.key] ?? stringifyConfigValue(field.value)
-  return raw
+  return String(raw)
     .split(/[\n,]/)
     .map((item) => item.trim().toUpperCase())
     .filter(Boolean)
@@ -606,7 +609,7 @@ function syncConfigDraft(fields: ConfigField[]) {
     delete configDraft[key]
   }
   for (const field of fields) {
-    configDraft[field.key] = stringifyConfigValue(field.value)
+    configDraft[field.key] = typeof field.value === 'number' ? field.value : stringifyConfigValue(field.value)
   }
 }
 
@@ -614,7 +617,18 @@ function sameDraft(fields: ConfigField[]) {
   if (fields.length !== Object.keys(configDraft).length) {
     return false
   }
-  return fields.every((field) => configDraft[field.key] === stringifyConfigValue(field.value))
+  return fields.every((field) => {
+    const draftValue = configDraft[field.key]
+    if (field.inputType === 'number' && typeof field.value === 'number') {
+      const value = typeof draftValue === 'number' ? draftValue : Number(draftValue)
+      return Number.isFinite(value) && value === field.value
+    }
+    if (field.inputType === 'symbols') {
+      const parsed = parseConfigDraftValue(field, draftValue ?? stringifyConfigValue(field.value))
+      return Array.isArray(parsed) && stringifyConfigValue(parsed) === stringifyConfigValue(field.value)
+    }
+    return String(draftValue ?? '').trim() === stringifyConfigValue(field.value)
+  })
 }
 
 const isConfigDraftDirty = computed(() => {
@@ -920,6 +934,7 @@ function resampleSnapshots(records: MarketSnapshotRecord[], intervalMinutes: num
   }
   const intervalMs = intervalMinutes * 60 * 1000
   const buckets = new Map<number, MarketSnapshotRecord>()
+  // Expects ascending timestamps and keeps the latest sample per interval bucket.
   for (const record of records) {
     const timestamp = Date.parse(record.timestamp)
     if (!Number.isFinite(timestamp)) {
@@ -1059,15 +1074,18 @@ watch(
 )
 
 watch(
-  selectedMarketDay,
-  () => {
-    liveSignalPage.value = 0
+  [selectedMarketDay, selectedDecisionSymbol],
+  ([nextDay, nextSymbol], [previousDay, previousSymbol]) => {
+    if (nextDay !== previousDay) {
+      liveSignalPage.value = 0
+      triagePage.value = 0
+      void requestDashboardRefresh()
+    }
+    if (nextSymbol !== previousSymbol) {
+      triagePage.value = 0
+    }
   },
 )
-
-watch(selectedDecisionSymbol, () => {
-  triagePage.value = 0
-})
 
 watch(
   selectedConfigVersion,
@@ -1079,10 +1097,6 @@ watch(
   },
   { immediate: true },
 )
-
-watch(selectedMarketDay, () => {
-  void requestDashboardRefresh()
-})
 
 watch(marketLedgerPageCount, (pageCount) => {
   clampPage(marketLedgerPage, pageCount)
@@ -1240,14 +1254,6 @@ function optimizationSnapshotLabel(snapshotPoint: MarketSnapshotRecord | null) {
   const action = snapshotPoint.signalAction === 'BUY_ALERT' ? 'Entry' : snapshotPoint.signalAction === 'SELL_ALERT' ? 'Exit' : 'Market'
   return `${action} · ${formatLocaleTimestamp(snapshotPoint.timestamp)}`
 }
-
-const decisionSymbolOptions = computed(() => {
-  const symbols = new Set<string>()
-  for (const symbol of decisionSymbols.value) {
-    symbols.add(symbol)
-  }
-  return Array.from(symbols).sort()
-})
 
 function nextLedgerPage() {
   marketLedgerPage.value = Math.min(marketLedgerPage.value + 1, marketLedgerPageCount.value - 1)
@@ -1867,7 +1873,7 @@ onUnmounted(() => {
               All
             </button>
             <button
-              v-for="symbol in decisionSymbolOptions"
+              v-for="symbol in decisionSymbols"
               :key="symbol"
               type="button"
               class="symbol-tab"
@@ -2221,7 +2227,7 @@ onUnmounted(() => {
                   <div class="config-slider-shell">
                     <input
                       :id="field.key"
-                      v-model="configDraft[field.key]"
+                      v-model.number="configDraft[field.key]"
                       type="range"
                       :min="configFieldBounds(field).min"
                       :max="configFieldBounds(field).max"
@@ -2230,7 +2236,7 @@ onUnmounted(() => {
                       class="config-slider"
                     />
                     <input
-                      v-model="configDraft[field.key]"
+                      v-model.number="configDraft[field.key]"
                       type="number"
                       :min="configFieldBounds(field).min"
                       :max="configFieldBounds(field).max"
