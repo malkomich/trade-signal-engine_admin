@@ -27,7 +27,9 @@ import { configFields, type AdminSignal, type ConfigField, type ConfigFieldValue
 const snapshot = ref<DashboardSnapshot | null>(null)
 const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
 const selectedMarketSymbol = ref<string>('')
+const selectedDecisionSymbol = ref<string>('')
 const selectedMarketDay = ref<string>(currentMarketDayKey())
+const chartIntervalMinutes = ref<1 | 5 | 10 | 30 | 60>(1)
 const loading = ref(true)
 const authState = ref<'booting' | 'authenticating' | 'authenticated' | 'offline'>('booting')
 const snapshotSource = ref<DashboardSource>('empty')
@@ -37,6 +39,7 @@ const notificationState = ref<NotificationSetupState>('unsupported')
 const notificationMessage = ref<string | null>(null)
 const selectedLedgerSnapshotId = ref<string>('')
 const selectedWindowReviewId = ref<string>('')
+const liveSignalPage = ref(0)
 const expandedChartId = ref<string | null>(null)
 const chartModalCardRef = ref<HTMLElement | null>(null)
 const chartModalCloseButton = ref<HTMLButtonElement | null>(null)
@@ -47,16 +50,17 @@ let dashboardRefreshTimer: number | null = null
 let dashboardRefreshInFlight = false
 let dashboardRefreshQueued = false
 let dashboardVisibilityChangeHandler: (() => void) | null = null
-const triageFilter = ref<'all' | 'entry' | 'exit' | 'hold'>('all')
-const triageFilters = ['all', 'entry', 'exit', 'hold'] as const
+const triageFilter = ref<'all' | 'entry' | 'exit'>('all')
+const triageFilters = ['all', 'entry', 'exit'] as const
 const selectedConfigVersionId = ref<string>('current')
-const configDraft = reactive<Record<string, string>>({})
+const configDraft = reactive<Record<string, string | number>>({})
 const optimizationEntrySnapshotId = ref<string>('')
 const optimizationExitSnapshotId = ref<string>('')
 const optimizationNotes = ref('')
 const optimizationSaving = ref(false)
 const optimizationError = ref<string | null>(null)
 const DASHBOARD_REFRESH_INTERVAL_MS = 30_000
+const LIVE_SIGNAL_PAGE_SIZE = 20
 const getMarketDayKey = (value: string | Date) => marketDayKeyForTimestamp(value) || currentMarketDayKey()
 const sessionOverview = computed(() => snapshot.value?.sessionOverview ?? emptySessionOverview())
 const marketSnapshots = computed(() => snapshot.value?.marketSnapshots ?? [])
@@ -80,6 +84,10 @@ const availableMarketDays = computed(() => {
 })
 const selectedDaySnapshots = computed(() => {
   return marketSnapshots.value.filter((record) => getMarketDayKey(record.timestamp) === selectedMarketDay.value)
+})
+const selectedDaySignals = computed(() => {
+  const signals = snapshot.value?.signals ?? []
+  return signals.filter((signal) => getMarketDayKey(signal.updatedAt) === selectedMarketDay.value)
 })
 const marketSymbols = computed(() => {
   const symbols = new Set<string>()
@@ -116,11 +124,26 @@ const marketSymbols = computed(() => {
   }
   return Array.from(symbols).sort()
 })
+const decisionSymbols = computed(() => {
+  const symbols = new Set<string>()
+  for (const signal of selectedDaySignals.value) {
+    if (classifySignal(signal) === 'hold') {
+      continue
+    }
+    if (signal.symbol) {
+      symbols.add(signal.symbol)
+    }
+  }
+  return Array.from(symbols).sort()
+})
 const selectedMarketSnapshots = computed(() => {
   if (!selectedMarketSymbol.value) {
     return selectedDaySnapshots.value
   }
   return selectedDaySnapshots.value.filter((record) => record.symbol === selectedMarketSymbol.value)
+})
+const selectedChartSnapshots = computed(() => {
+  return resampleSnapshots(selectedWindowSnapshots.value, chartIntervalMinutes.value)
 })
 const marketLedgerPageSize = 12
 const marketLedgerPage = ref(0)
@@ -134,6 +157,17 @@ const latestMarketSnapshots = computed(() => {
   return selectedMarketSnapshots.value.slice(-50).reverse().slice(start, end)
 })
 const marketLedgerPageCount = computed(() => Math.max(1, Math.ceil(Math.min(50, selectedMarketSnapshots.value.length) / marketLedgerPageSize)))
+const liveSignals = computed(() => {
+  return selectedDaySignals.value
+    .filter((signal) => classifySignal(signal) !== 'hold')
+    .reverse()
+})
+const liveSignalPageSignals = computed(() => {
+  const start = liveSignalPage.value * LIVE_SIGNAL_PAGE_SIZE
+  const end = start + LIVE_SIGNAL_PAGE_SIZE
+  return liveSignals.value.slice(start, end)
+})
+const liveSignalPageCount = computed(() => Math.max(1, Math.ceil(liveSignals.value.length / LIVE_SIGNAL_PAGE_SIZE)))
 const selectedLedgerSnapshot = computed(() => {
   const snapshotId = selectedLedgerSnapshotId.value
   if (!snapshotId) {
@@ -173,7 +207,7 @@ const windowReviewPageCount = computed(() => {
 const marketChartViews = computed(() =>
   marketCharts.map((chart) => ({
     chart,
-    view: buildChartView(selectedWindowSnapshots.value, chart),
+    view: buildChartView(selectedChartSnapshots.value, chart, selectedWindowSnapshots.value),
   })),
 )
 
@@ -197,6 +231,13 @@ const windowOptimizationHistory = computed(() => {
     .filter((item) => !selectedMarketSymbol.value || item.symbol === selectedMarketSymbol.value)
     .slice()
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+})
+
+const selectedWindowOptimization = computed(() => {
+  if (!selectedWindowReview.value) {
+    return null
+  }
+  return windowOptimizationHistory.value.find((optimization) => optimization.windowId === selectedWindowReview.value?.id) ?? null
 })
 
 const expandedChartView = computed(() => {
@@ -231,7 +272,6 @@ function emptySessionOverview(): DashboardSnapshot['sessionOverview'] {
     updatedAt: new Date().toISOString(),
     configVersion: 'draft',
     openWindows: 0,
-    rejectedEntries: 0,
     summary: 'No live records are available for the selected day yet.',
   }
 }
@@ -266,21 +306,32 @@ function formatSignalActionLabel(action: string) {
 function formatSignalStateLabel(state: string) {
   switch (state) {
     case 'FLAT':
-      return 'Idle'
+      return 'No active window'
     case 'ENTRY_SIGNALLED':
-      return 'Entry queued'
+      return 'Entry signal'
     case 'ACCEPTED_OPEN':
-      return 'Open window'
+      return 'Window open'
     case 'EXIT_SIGNALLED':
-      return 'Exit queued'
+      return 'Exit signal'
     case 'CLOSED':
-      return 'Closed'
+      return 'Window closed'
     case 'REJECTED':
-      return 'Dismissed'
+      return 'Rejected'
     case 'EXPIRED':
-      return 'Timed out'
+      return 'Expired'
     default:
       return state || 'Unknown'
+  }
+}
+
+function formatSignalQueueLabel(signal: AdminSignal) {
+  switch (classifySignal(signal)) {
+    case 'entry':
+      return 'Entry signal'
+    case 'exit':
+      return 'Exit signal'
+    default:
+      return 'Live market signal'
   }
 }
 
@@ -392,6 +443,23 @@ function syncSelectedMarketSymbol(symbols: string[]) {
   selectedMarketSymbol.value = symbols.includes(preferredSymbol) ? preferredSymbol : symbols[0]
 }
 
+function syncSelectedDecisionSymbol(symbols: string[]) {
+  if (symbols.length === 0) {
+    selectedDecisionSymbol.value = ''
+    return
+  }
+
+  if (!selectedDecisionSymbol.value) {
+    return
+  }
+
+  if (symbols.includes(selectedDecisionSymbol.value)) {
+    return
+  }
+
+  selectedDecisionSymbol.value = symbols[0] ?? ''
+}
+
 const currentConfigVersion = computed(() => sessionOverview.value.configVersion)
 
 const configVersions = computed(() => snapshot.value?.configVersions ?? [])
@@ -424,24 +492,83 @@ function stringifyConfigValue(value: ConfigFieldValue): string {
   return String(value)
 }
 
-function parseConfigDraftValue(field: ConfigField, rawValue: string): ConfigFieldValue {
+function parseConfigDraftValue(field: ConfigField, rawValue: string | number): ConfigFieldValue {
   if (field.inputType === 'symbols') {
-    return rawValue
+    return String(rawValue)
       .split(/[\n,]/)
       .map((item) => item.trim().toUpperCase())
       .filter(Boolean)
   }
   if (field.inputType === 'number') {
-    const trimmed = rawValue.trim()
+    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+      return rawValue
+    }
+    const trimmed = String(rawValue).trim()
     const parsed = trimmed ? Number(trimmed) : Number.NaN
     return Number.isFinite(parsed) ? parsed : field.value
   }
-  return rawValue.trim()
+  return String(rawValue).trim()
+}
+
+function configFieldBounds(field: ConfigField) {
+  const key = field.key.toLowerCase()
+  const step = field.step ?? (key.includes('threshold') || key.includes('optimizer') ? 0.01 : 0.05)
+  if (key.includes('threshold')) {
+    return { min: 0, max: 1, step }
+  }
+  if (key.includes('optimizer')) {
+    return { min: 0, max: 1, step }
+  }
+  if (key.includes('weight') || key.includes('bias')) {
+    return { min: 0, max: 4, step }
+  }
+  if (key.includes('bars')) {
+    return { min: 1, max: 500, step: 1 }
+  }
+  if (typeof field.value === 'number' && Number.isFinite(field.value)) {
+    const min = Math.min(Math.floor(field.value * 0.25), field.value)
+    const max = Math.max(field.value * 2, field.value + 1, min + step)
+    return { min, max, step }
+  }
+  return { min: 0, max: 100, step }
+}
+
+function isConfigValueOutsideBounds(field: ConfigField) {
+  if (field.inputType !== 'number') {
+    return false
+  }
+  const bounds = configFieldBounds(field)
+  const draftValue = configDraft[field.key]
+  const value = typeof draftValue === 'number'
+    ? draftValue
+    : typeof draftValue === 'string' && draftValue.trim()
+      ? Number(draftValue)
+      : typeof field.value === 'number'
+        ? field.value
+        : Number.NaN
+  if (!Number.isFinite(value)) {
+    return false
+  }
+  return value < bounds.min || value > bounds.max
+}
+
+function draftNumberValue(field: ConfigField) {
+  const draftValue = configDraft[field.key]
+  if (typeof draftValue === 'number' && Number.isFinite(draftValue)) {
+    return draftValue
+  }
+  if (typeof draftValue === 'string' && draftValue.trim()) {
+    const parsed = Number(draftValue)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return typeof field.value === 'number' ? field.value : 0
 }
 
 function readDraftSymbols(field: ConfigField) {
   const raw = configDraft[field.key] ?? stringifyConfigValue(field.value)
-  return raw
+  return String(raw)
     .split(/[\n,]/)
     .map((item) => item.trim().toUpperCase())
     .filter(Boolean)
@@ -482,7 +609,7 @@ function syncConfigDraft(fields: ConfigField[]) {
     delete configDraft[key]
   }
   for (const field of fields) {
-    configDraft[field.key] = stringifyConfigValue(field.value)
+    configDraft[field.key] = typeof field.value === 'number' ? field.value : stringifyConfigValue(field.value)
   }
 }
 
@@ -490,7 +617,18 @@ function sameDraft(fields: ConfigField[]) {
   if (fields.length !== Object.keys(configDraft).length) {
     return false
   }
-  return fields.every((field) => configDraft[field.key] === stringifyConfigValue(field.value))
+  return fields.every((field) => {
+    const draftValue = configDraft[field.key]
+    if (field.inputType === 'number' && typeof field.value === 'number') {
+      const value = typeof draftValue === 'number' ? draftValue : Number(draftValue)
+      return Number.isFinite(value) && value === field.value
+    }
+    if (field.inputType === 'symbols') {
+      const parsed = parseConfigDraftValue(field, draftValue ?? stringifyConfigValue(field.value))
+      return Array.isArray(parsed) && stringifyConfigValue(parsed) === stringifyConfigValue(field.value)
+    }
+    return String(draftValue ?? '').trim() === stringifyConfigValue(field.value)
+  })
 }
 
 const isConfigDraftDirty = computed(() => {
@@ -547,6 +685,7 @@ type ChartMarker = ChartPoint & {
   id: string
   kind: 'entry' | 'exit'
   snapshotId: string
+  tooltip: string
 }
 
 type ChartView = {
@@ -557,7 +696,10 @@ type ChartView = {
     points: string
   }>
   markers: ChartMarker[]
+  firstTimestamp: string | null
   latestTimestamp: string | null
+  minValue: number
+  maxValue: number
 }
 
 type WindowReviewView = TradeWindowRecord & {
@@ -644,6 +786,8 @@ const marketCharts: ChartDefinition[] = [
   },
 ]
 
+const chartIntervals = [1, 5, 10, 30, 60] as const
+
 function readSeriesValue(record: MarketSnapshotRecord, key: ChartSeriesKey): number | null {
   const value = record[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -672,8 +816,9 @@ function formatLocaleTimestamp(value: string | null | undefined) {
   }).format(parsed)
 }
 
-function buildChartView(records: MarketSnapshotRecord[], chart: ChartDefinition): ChartView {
+function buildChartView(records: MarketSnapshotRecord[], chart: ChartDefinition, markerRecords: MarketSnapshotRecord[] = records): ChartView {
   const usableRecords = records.length > 0 ? records : []
+  const firstTimestamp = usableRecords.at(0)?.timestamp ?? null
   const latestTimestamp = usableRecords.at(-1)?.timestamp ?? null
   const values = chart.series
     .flatMap((series) => usableRecords.map((record) => readSeriesValue(record, series.key)))
@@ -709,41 +854,98 @@ function buildChartView(records: MarketSnapshotRecord[], chart: ChartDefinition)
   })
 
   const markers: ChartMarker[] = []
-  const entryIndex = usableRecords.findIndex((record) => record.signalAction === 'BUY_ALERT')
-  const exitIndex = (() => {
-    for (let index = usableRecords.length - 1; index >= 0; index -= 1) {
-      if (usableRecords[index].signalAction === 'SELL_ALERT') {
-        return index
-      }
-    }
-    return -1
-  })()
+  const entrySnapshot = [...markerRecords].find((record) => record.signalAction === 'BUY_ALERT') ?? null
+  const exitSnapshot = [...markerRecords].reverse().find((record) => record.signalAction === 'SELL_ALERT') ?? null
 
-  if (entryIndex >= 0) {
+  if (entrySnapshot) {
+    const entryIndex = findSnapshotIndexForChart(usableRecords, entrySnapshot)
     markers.push({
-      id: `${usableRecords[entryIndex].id}:entry`,
-      snapshotId: usableRecords[entryIndex].id,
+      id: `${entrySnapshot.id}:entry`,
+      snapshotId: entrySnapshot.id,
       x: usableRecords.length > 1 ? (entryIndex / width) * 100 : 50,
       y: 12,
       kind: 'entry',
+      tooltip: [
+        'Entry signal',
+        formatLocaleTimestamp(entrySnapshot.timestamp),
+        ...chart.series.map(
+          (series) => `${series.label} ${formatChartValue(readSeriesValue(entrySnapshot, series.key), series.decimals ?? 2)}`,
+        ),
+      ].join(' · '),
     })
   }
 
-  if (exitIndex >= 0) {
+  if (exitSnapshot) {
+    const exitIndex = findSnapshotIndexForChart(usableRecords, exitSnapshot)
     markers.push({
-      id: `${usableRecords[exitIndex].id}:exit`,
-      snapshotId: usableRecords[exitIndex].id,
+      id: `${exitSnapshot.id}:exit`,
+      snapshotId: exitSnapshot.id,
       x: usableRecords.length > 1 ? (exitIndex / width) * 100 : 50,
       y: 88,
       kind: 'exit',
+      tooltip: [
+        'Exit signal',
+        formatLocaleTimestamp(exitSnapshot.timestamp),
+        ...chart.series.map(
+          (series) => `${series.label} ${formatChartValue(readSeriesValue(exitSnapshot, series.key), series.decimals ?? 2)}`,
+        ),
+      ].join(' · '),
     })
   }
 
   return {
     lines,
     markers,
+    firstTimestamp,
     latestTimestamp,
+    minValue,
+    maxValue,
   }
+}
+
+function findSnapshotIndexForChart(records: MarketSnapshotRecord[], target: MarketSnapshotRecord) {
+  const exactIndex = records.findIndex((record) => record.id === target.id)
+  if (exactIndex >= 0) {
+    return exactIndex
+  }
+  const targetTimestamp = Date.parse(target.timestamp)
+  if (!Number.isFinite(targetTimestamp)) {
+    return 0
+  }
+  let bestIndex = 0
+  let bestDistance = Number.POSITIVE_INFINITY
+  records.forEach((record, index) => {
+    const recordTimestamp = Date.parse(record.timestamp)
+    if (!Number.isFinite(recordTimestamp)) {
+      return
+    }
+    const distance = Math.abs(recordTimestamp - targetTimestamp)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestIndex = index
+    }
+  })
+  return bestIndex
+}
+
+function resampleSnapshots(records: MarketSnapshotRecord[], intervalMinutes: number) {
+  if (intervalMinutes <= 1 || records.length <= 1) {
+    return records
+  }
+  const intervalMs = intervalMinutes * 60 * 1000
+  const buckets = new Map<number, MarketSnapshotRecord>()
+  // Expects ascending timestamps and keeps the latest sample per interval bucket.
+  for (const record of records) {
+    const timestamp = Date.parse(record.timestamp)
+    if (!Number.isFinite(timestamp)) {
+      continue
+    }
+    const bucketKey = Math.floor(timestamp / intervalMs)
+    buckets.set(bucketKey, record)
+  }
+  return Array.from(buckets.entries())
+    .sort((left, right) => left[0] - right[0])
+    .map(([, record]) => record)
 }
 
 function decorateWindowReview(window: TradeWindowRecord): WindowReviewView {
@@ -810,13 +1012,8 @@ function selectConfigVersion(version: ConfigVersionRecord | null) {
   selectedConfigVersionId.value = version.id
 }
 
-const selectedDaySignals = computed(() => {
-  const signals = snapshot.value?.signals ?? []
-  return signals.filter((signal) => getMarketDayKey(signal.updatedAt) === selectedMarketDay.value)
-})
-
 const triageSignals = computed(() => {
-  const signals = selectedDaySignals.value.filter((signal) => !selectedMarketSymbol.value || signal.symbol === selectedMarketSymbol.value)
+  const signals = selectedDaySignals.value.filter((signal) => !selectedDecisionSymbol.value || signal.symbol === selectedDecisionSymbol.value)
   if (triageFilter.value === 'all') {
     return signals
   }
@@ -830,16 +1027,19 @@ const triagePageSignals = computed(() => {
 const triagePageCount = computed(() => Math.max(1, Math.ceil(triageSignals.value.length / triagePageSize)))
 
 const triageCounts = computed(() => {
-  const signals = selectedDaySignals.value.filter((signal) => !selectedMarketSymbol.value || signal.symbol === selectedMarketSymbol.value)
+  const signals = selectedDaySignals.value.filter((signal) => !selectedDecisionSymbol.value || signal.symbol === selectedDecisionSymbol.value)
   const counts: Record<(typeof triageFilters)[number], number> = {
     all: signals.length,
     entry: 0,
     exit: 0,
-    hold: 0,
   }
 
   for (const signal of signals) {
-    counts[classifySignal(signal)] += 1
+    const classification = classifySignal(signal)
+    if (classification === 'hold') {
+      continue
+    }
+    counts[classification] += 1
   }
 
   return counts
@@ -867,10 +1067,23 @@ watch(
   [selectedMarketDay, selectedMarketSymbol],
   () => {
     marketLedgerPage.value = 0
-    triagePage.value = 0
     windowReviewPage.value = 0
     selectedLedgerSnapshotId.value = ''
     selectedWindowReviewId.value = ''
+  },
+)
+
+watch(
+  [selectedMarketDay, selectedDecisionSymbol],
+  ([nextDay, nextSymbol], [previousDay, previousSymbol]) => {
+    if (nextDay !== previousDay) {
+      liveSignalPage.value = 0
+      triagePage.value = 0
+      void requestDashboardRefresh()
+    }
+    if (nextSymbol !== previousSymbol) {
+      triagePage.value = 0
+    }
   },
 )
 
@@ -885,10 +1098,6 @@ watch(
   { immediate: true },
 )
 
-watch(selectedMarketDay, () => {
-  void requestDashboardRefresh()
-})
-
 watch(marketLedgerPageCount, (pageCount) => {
   clampPage(marketLedgerPage, pageCount)
 })
@@ -897,10 +1106,23 @@ watch(windowReviewPageCount, (pageCount) => {
   clampPage(windowReviewPage, pageCount)
 })
 
+watch([marketSymbols, selectedSignal], ([symbols]) => {
+  syncSelectedMarketSymbol(symbols)
+}, { immediate: true })
+
+watch([decisionSymbols, selectedSignal], ([symbols]) => {
+  syncSelectedDecisionSymbol(symbols)
+}, { immediate: true })
+
 watch(
-  [marketSymbols, selectedSignal],
-  ([symbols]) => {
-    syncSelectedMarketSymbol(symbols)
+  liveSignals,
+  (signals) => {
+    if (signals.length === 0) {
+      liveSignalPage.value = 0
+      return
+    }
+    const maxPage = Math.max(0, Math.ceil(signals.length / LIVE_SIGNAL_PAGE_SIZE) - 1)
+    liveSignalPage.value = Math.min(liveSignalPage.value, maxPage)
   },
   { immediate: true },
 )
@@ -1451,7 +1673,13 @@ onUnmounted(() => {
         <article class="panel shell-placeholder" data-slot="chart">
           <div class="panel-header">
             <h2>Live market charts</h2>
-            <span>{{ formatMarketDayLabel(selectedMarketDay) }} · {{ selectedMarketSymbol || 'All tracked stocks' }}</span>
+            <div class="panel-header-actions chart-header-actions">
+              <span>{{ formatMarketDayLabel(selectedMarketDay) }} · {{ selectedMarketSymbol || 'All tracked stocks' }}</span>
+              <div class="chart-legend chart-legend-inline">
+                <span><i class="entry"></i>Entry</span>
+                <span><i class="exit"></i>Exit</span>
+              </div>
+            </div>
           </div>
           <p>
             Switch the day and stock filters, then page through windows to inspect price, indicators, and the two markers that belong to each trade window.
@@ -1480,6 +1708,18 @@ onUnmounted(() => {
               {{ symbol }}
             </button>
           </div>
+          <div class="chart-resolution-toolbar">
+            <button
+              v-for="interval in chartIntervals"
+              :key="interval"
+              type="button"
+              class="symbol-tab"
+              :class="{ active: chartIntervalMinutes === interval }"
+              @click="chartIntervalMinutes = interval"
+            >
+              {{ interval }}m
+            </button>
+          </div>
           <div v-if="selectedWindowReviews.length" class="ledger-toolbar window-toolbar">
             <button type="button" class="action-button ghost compact" :disabled="windowReviewPage === 0" @click="previousWindowPage">
               Previous window
@@ -1493,6 +1733,10 @@ onUnmounted(() => {
             >
               Next window
             </button>
+            <div class="window-toolbar-legend">
+              <span><i class="entry"></i>Entry</span>
+              <span><i class="exit"></i>Exit</span>
+            </div>
           </div>
           <div v-if="selectedWindowReview" class="window-context-bar">
             <div>
@@ -1507,16 +1751,6 @@ onUnmounted(() => {
               <span>Marker guide</span>
               <strong>{{ windowChartMarkers }}</strong>
             </div>
-          </div>
-          <div class="chart-legend chart-legend-global">
-            <span>
-              <i class="entry"></i>
-              Entry marker
-            </span>
-            <span>
-              <i class="exit"></i>
-              Exit marker
-            </span>
           </div>
           <div v-if="selectedWindowSnapshots.length" class="chart-grid">
             <article v-for="item in marketChartViews" :key="`${selectedWindowReview?.id ?? 'window'}-${item.chart.id}`" class="chart-card">
@@ -1568,9 +1802,14 @@ onUnmounted(() => {
                     :class="marker.kind"
                     class="signal-marker-dot"
                   />
-                  <title>{{ marker.kind === 'entry' ? 'Click to use as the entry point' : 'Click to use as the exit point' }}</title>
+                  <title>{{ marker.tooltip }}</title>
                 </g>
               </svg>
+              <div class="chart-axis">
+                <span>{{ formatLocaleTimestamp(item.view.firstTimestamp) }}</span>
+                <span>{{ formatLocaleTimestamp(item.view.latestTimestamp) }}</span>
+                <span>{{ formatChartValue(item.view.maxValue, 2) }} / {{ formatChartValue(item.view.minValue, 2) }}</span>
+              </div>
             </article>
           </div>
           <p v-else class="empty-state">Select a window to inspect its chart set.</p>
@@ -1580,79 +1819,41 @@ onUnmounted(() => {
           <div class="panel-header">
             <h2>Live signal stream</h2>
             <div class="panel-header-actions">
-              <span>{{ selectedMarketSnapshots.length }} points</span>
-              <span>{{ marketLedgerPage + 1 }} / {{ marketLedgerPageCount }}</span>
+              <span>{{ liveSignals.length }} signals</span>
+              <span>{{ liveSignalPage + 1 }} / {{ liveSignalPageCount }}</span>
             </div>
           </div>
           <p>
-            This stream shows the latest market snapshots for the selected stock. Click any row to jump to the window that the snapshot belongs to.
+            This stream shows only entry and exit signals across all tracked stocks. Click a signal to open its linked window above.
           </p>
-          <div v-if="latestMarketSnapshots.length" class="ledger-toolbar">
-            <button type="button" class="action-button ghost compact" :disabled="marketLedgerPage === 0" @click="previousLedgerPage">
+          <div v-if="liveSignalPageCount > 1" class="ledger-toolbar">
+            <button type="button" class="action-button ghost compact" :disabled="liveSignalPage === 0" @click="liveSignalPage = Math.max(liveSignalPage - 1, 0)">
               Previous
             </button>
-            <button type="button" class="action-button ghost compact" :disabled="marketLedgerPage >= marketLedgerPageCount - 1" @click="nextLedgerPage">
+            <button type="button" class="action-button ghost compact" :disabled="liveSignalPage >= liveSignalPageCount - 1" @click="liveSignalPage = Math.min(liveSignalPage + 1, liveSignalPageCount - 1)">
               Next
             </button>
           </div>
-          <div v-if="latestMarketSnapshots.length" class="signal-list compact ledger-list">
+          <div v-if="liveSignalPageSignals.length" class="signal-list compact ledger-list live-signal-list">
             <button
-              v-for="snapshotPoint in latestMarketSnapshots"
-              :key="snapshotPoint.id"
+              v-for="signal in liveSignalPageSignals"
+              :key="signalKey(signal)"
               type="button"
               class="signal-row ledger-row"
-              :class="{ active: selectedLedgerSnapshot?.id === snapshotPoint.id }"
-              @click="setLedgerSnapshot(snapshotPoint)"
+              :class="{ active: signalKey(selectedSignal) === signalKey(signal) }"
+              @click="setSelectedSignal(signal)"
             >
               <div>
-                <strong>{{ snapshotPoint.symbol }}</strong>
-                <p>
-                  {{ formatLocaleTimestamp(snapshotPoint.timestamp) }} ·
-                  {{ formatSignalActionLabel(snapshotPoint.signalAction) }} ·
-                  {{ formatSignalStateLabel(snapshotPoint.signalState) }} ·
-                  {{ snapshotPoint.windowId || 'Unassigned window' }} ·
-                  {{ formatSignalRegimeLabel(snapshotPoint) }}
-                </p>
+                <strong>{{ signal.symbol }}</strong>
+                <p>{{ formatLocaleTimestamp(signal.updatedAt) }} · {{ formatSignalQueueLabel(signal) }} · {{ signal.windowId || 'Linked window pending' }}</p>
               </div>
               <div class="scores">
-                <span>{{ snapshotPoint.entryScore.toFixed(2) }}</span>
-                <span>{{ snapshotPoint.exitScore.toFixed(2) }}</span>
+                <span>{{ signal.entryScore.toFixed(2) }}</span>
+                <span>{{ signal.exitScore.toFixed(2) }}</span>
               </div>
             </button>
           </div>
-          <div v-else class="empty-state">No live snapshots have been written for the selected day.</div>
-          <div v-if="selectedLedgerSnapshot" class="detail-card ledger-detail">
-            <div class="detail-title">
-              <strong>{{ selectedLedgerSnapshot.symbol }}</strong>
-              <span>{{ formatLocaleTimestamp(selectedLedgerSnapshot.timestamp) }}</span>
-            </div>
-            <div class="detail-title secondary">
-              <strong>Window</strong>
-              <span>{{ selectedLedgerSnapshot.windowId || 'Unassigned' }}</span>
-            </div>
-            <div class="score-grid">
-              <div>
-                <span>Action</span>
-                <strong>{{ formatSignalActionLabel(selectedLedgerSnapshot.signalAction) }}</strong>
-              </div>
-              <div>
-                <span>State</span>
-                <strong>{{ formatSignalStateLabel(selectedLedgerSnapshot.signalState) }}</strong>
-              </div>
-              <div>
-                <span>Entry score</span>
-                <strong>{{ selectedLedgerSnapshot.entryScore.toFixed(2) }}</strong>
-              </div>
-              <div>
-                <span>Exit score</span>
-                <strong>{{ selectedLedgerSnapshot.exitScore.toFixed(2) }}</strong>
-              </div>
-            </div>
-            <p>{{ formatSignalRegimeLabel(selectedLedgerSnapshot) }}</p>
-            <ul class="reason-list">
-              <li v-for="reason in selectedLedgerSnapshot.reasons" :key="reason">{{ humanizeReason(reason) }}</li>
-            </ul>
-          </div>
+          <div v-else class="empty-state">No live entry or exit signals have been written for the selected day yet.</div>
         </article>
       </section>
 
@@ -1660,7 +1861,27 @@ onUnmounted(() => {
         <article class="panel">
           <div class="panel-header">
             <h2>Decision queue</h2>
-            <span>{{ formatMarketDayLabel(selectedMarketDay) }} · {{ selectedMarketSymbol || 'All tracked stocks' }}</span>
+            <span>{{ formatMarketDayLabel(selectedMarketDay) }} · {{ selectedDecisionSymbol || 'All tracked stocks' }}</span>
+          </div>
+          <div class="symbol-tabs">
+            <button
+              type="button"
+              class="symbol-tab"
+              :class="{ active: !selectedDecisionSymbol }"
+              @click="selectedDecisionSymbol = ''"
+            >
+              All
+            </button>
+            <button
+              v-for="symbol in decisionSymbols"
+              :key="symbol"
+              type="button"
+              class="symbol-tab"
+              :class="{ active: selectedDecisionSymbol === symbol }"
+              @click="selectedDecisionSymbol = symbol"
+            >
+              {{ symbol }}
+            </button>
           </div>
           <div class="triage-toolbar">
             <button
@@ -1672,7 +1893,7 @@ onUnmounted(() => {
               :aria-pressed="triageFilter === filter"
               @click="setTriageFilter(filter)"
             >
-              <span>{{ filter === 'all' ? 'All decisions' : filter === 'entry' ? 'Entry' : filter === 'exit' ? 'Exit' : 'Hold' }}</span>
+              <span>{{ filter === 'all' ? 'All decisions' : filter === 'entry' ? 'Entry' : 'Exit' }}</span>
               <strong>{{ triageCounts[filter] }}</strong>
             </button>
           </div>
@@ -1700,7 +1921,7 @@ onUnmounted(() => {
             >
               <div>
                 <strong>{{ signal.symbol }}</strong>
-                <p>{{ formatSignalRegimeLabel(signal) }} · {{ signal.windowId || 'Unassigned window' }}</p>
+                <p>{{ formatSignalRegimeLabel(signal) }} · {{ signal.windowId || 'Linked window pending' }}</p>
               </div>
               <div class="scores">
                 <span>{{ signal.entryScore.toFixed(2) }}</span>
@@ -1708,7 +1929,7 @@ onUnmounted(() => {
               </div>
             </button>
           </div>
-          <p v-else class="empty-state">No live signals have been written for the selected day.</p>
+          <p v-else class="empty-state">No entry or exit decisions have been written for the selected day.</p>
         </article>
 
         <article class="panel">
@@ -1860,6 +2081,13 @@ onUnmounted(() => {
                 <strong>{{ optimizationSnapshotLabel(selectedOptimizationSnapshot('exit')) }}</strong>
               </div>
             </div>
+            <p class="optimization-status" :class="{ saved: !!selectedWindowOptimization }">
+              {{
+                selectedWindowOptimization
+                  ? `Optimization saved on ${formatLocaleTimestamp(selectedWindowOptimization.updatedAt)}`
+                  : 'This window has not been optimized yet.'
+              }}
+            </p>
             <div class="optimizer-actions-inline">
               <button type="button" class="action-button ghost compact" :disabled="selectedOptimizationSnapshotIndex('entry') <= 0" @click="shiftOptimizationPoint('entry', -1)">
                 Previous entry point
@@ -1923,7 +2151,7 @@ onUnmounted(() => {
               :disabled="optimizationSaving || !selectedWindowSnapshots.length"
               @click="saveWindowReviewOptimization"
             >
-              {{ optimizationSaving ? 'Saving...' : 'Save review' }}
+              {{ optimizationSaving ? 'Saving...' : selectedWindowOptimization ? 'Update optimization' : 'Save optimization' }}
             </button>
           </div>
         </div>
@@ -1969,7 +2197,7 @@ onUnmounted(() => {
               <span>{{ group.fields.length }} fields</span>
             </div>
             <div class="config-grid">
-              <article v-for="field in group.fields" :key="field.key" class="config-card">
+              <article v-for="field in group.fields" :key="field.key" class="config-card" :class="{ warning: isConfigValueOutsideBounds(field) }">
                 <label :for="field.key" :title="field.description">{{ field.label }}</label>
                 <p class="config-current-value">
                   Current value:
@@ -1995,12 +2223,40 @@ onUnmounted(() => {
                   :placeholder="field.placeholder"
                   :title="field.description"
                 />
+                <template v-else-if="field.inputType === 'number'">
+                  <div class="config-slider-shell">
+                    <input
+                      :id="field.key"
+                      v-model.number="configDraft[field.key]"
+                      type="range"
+                      :min="configFieldBounds(field).min"
+                      :max="configFieldBounds(field).max"
+                      :step="configFieldBounds(field).step"
+                      :title="field.description"
+                      class="config-slider"
+                    />
+                    <input
+                      v-model.number="configDraft[field.key]"
+                      type="number"
+                      :min="configFieldBounds(field).min"
+                      :max="configFieldBounds(field).max"
+                      :step="configFieldBounds(field).step"
+                      :placeholder="field.placeholder"
+                      :title="field.description"
+                      class="config-number-input"
+                      :class="{ outOfRange: isConfigValueOutsideBounds(field) }"
+                    />
+                  </div>
+                  <p class="config-range-note" :class="{ outOfRange: isConfigValueOutsideBounds(field) }">
+                    Range {{ configFieldBounds(field).min }} - {{ configFieldBounds(field).max }} · Current draft {{ draftNumberValue(field).toFixed(2) }}
+                    <span v-if="isConfigValueOutsideBounds(field)">Outside the recommended range.</span>
+                  </p>
+                </template>
                 <input
                   v-else
                   :id="field.key"
                   v-model="configDraft[field.key]"
-                  :type="field.inputType === 'number' ? 'number' : 'text'"
-                  :step="field.inputType === 'number' ? field.step ?? 0.01 : undefined"
+                  type="text"
                   :placeholder="field.placeholder"
                   :title="field.description"
                 />

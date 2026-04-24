@@ -109,18 +109,18 @@ export const configFields: ConfigField[] = [
   },
   {
     key: 'benchmark_symbol',
-    label: 'Reference symbol',
+    label: 'Market reference',
     value: 'QQQ',
-    description: 'Market reference used to compare the tracked stock against broader movement.',
+    description: 'Reference index or proxy used to compare the tracked stock against broader market movement.',
     group: 'Trading universe',
     inputType: 'text',
     placeholder: 'QQQ',
   },
   {
     key: 'session_timezone',
-    label: 'Trading day timezone',
+    label: 'Market day timezone',
     value: 'America/New_York',
-    description: 'Timezone used to anchor the active trading day and the market calendar. Keep it aligned with the market you trade.',
+    description: 'Timezone used to anchor the active trading day and the market calendar.',
     group: 'Trading universe',
     inputType: 'text',
     placeholder: 'America/New_York',
@@ -362,14 +362,12 @@ export const configFields: ConfigField[] = [
 ]
 
 export function classifySignal(signal: AdminSignal): 'entry' | 'exit' | 'hold' {
-  if (signal.state === 'REJECTED' || signal.state === 'EXPIRED') {
-    return 'hold'
+  switch (signal.state) {
+    case 'ENTRY_SIGNALLED':
+      return 'entry'
+    case 'EXIT_SIGNALLED':
+      return 'exit'
+    default:
+      return 'hold'
   }
-  if (signal.state === 'EXIT_SIGNALLED' || signal.exitScore >= 0.7) {
-    return 'exit'
-  }
-  if (signal.state === 'ENTRY_SIGNALLED' || signal.entryScore >= 0.7) {
-    return 'entry'
-  }
-  return 'hold'
 }
