@@ -35,9 +35,6 @@ jobs:
 
       - name: Deploy to Firebase Hosting and Realtime Database rules
         env:
-          CLOUDSDK_CORE_PROJECT: trade-signal-engine
-          CLOUDSDK_PROJECT: trade-signal-engine
-          GCLOUD_PROJECT: trade-signal-engine
           GOOGLE_CLOUD_PROJECT: trade-signal-engine
           FIREBASE_PROJECT_ID: trade-signal-engine
         run: npx firebase-tools deploy --only database,hosting:admin --project trade-signal-engine --non-interactive
