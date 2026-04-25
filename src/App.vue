@@ -492,7 +492,6 @@ function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
   }
 
   if (!selection.value) {
-    selection.value = symbols[0]
     return
   }
 
