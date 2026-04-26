@@ -34,4 +34,7 @@ jobs:
         run: npm run build
 
       - name: Deploy to Firebase Hosting and Realtime Database rules
+        env:
+          GOOGLE_CLOUD_PROJECT: trade-signal-engine
+          FIREBASE_PROJECT_ID: trade-signal-engine
         run: npx firebase-tools deploy --only database,hosting:admin --project trade-signal-engine --non-interactive

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch, type Ref } from 'vue'
 import { signInAnonymously } from 'firebase/auth'
 import { type MessagePayload } from 'firebase/messaging'
 import { classifySignal } from './lib/engine'
@@ -485,30 +485,29 @@ function syncSelectedDecisionSymbol(symbols: string[]) {
   selectedDecisionSymbol.value = symbols[0] ?? ''
 }
 
-function syncSelectedWindowSymbol(symbols: string[]) {
+function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
   if (symbols.length === 0) {
-    selectedWindowSymbol.value = ''
+    selection.value = ''
     return
   }
 
-  if (symbols.includes(selectedWindowSymbol.value)) {
+  if (!selection.value) {
     return
   }
 
-  selectedWindowSymbol.value = symbols[0] ?? ''
+  if (symbols.includes(selection.value)) {
+    return
+  }
+
+  selection.value = symbols[0]
+}
+
+function syncSelectedWindowSymbol(symbols: string[]) {
+  syncSelectedSymbol(selectedWindowSymbol, symbols)
 }
 
 function syncSelectedOptimizationSymbol(symbols: string[]) {
-  if (symbols.length === 0) {
-    selectedOptimizationSymbol.value = ''
-    return
-  }
-
-  if (symbols.includes(selectedOptimizationSymbol.value)) {
-    return
-  }
-
-  selectedOptimizationSymbol.value = symbols[0] ?? ''
+  syncSelectedSymbol(selectedOptimizationSymbol, symbols)
 }
 
 const currentConfigVersion = computed(() => sessionOverview.value.configVersion)
