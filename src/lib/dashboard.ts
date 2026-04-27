@@ -175,8 +175,8 @@ function isConfigFieldValue(value: unknown): value is ConfigFieldValue {
 function buildEmptySnapshot(): DashboardSnapshot {
   return {
     metrics: [
-      { label: 'Entry signals today', value: '0' },
-      { label: 'Exit signals today', value: '0' },
+      { label: 'Buy signals today', value: '0' },
+      { label: 'Sell signals today', value: '0' },
       { label: 'Open windows', value: '0' },
       { label: 'Closed windows today', value: '0' },
     ],
@@ -531,21 +531,26 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         latestSession?.session_id ??
         'nasdaq-live',
     )
-    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(`${SIGNAL_EVENTS_COLLECTION}/${latestSessionId}`)
-    const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(`${CONFIG_VERSIONS_COLLECTION}/${latestSessionId}`)
-    const windowDocs = await loadRealtimeCollection<Record<string, unknown>>(`${TRADE_WINDOWS_COLLECTION}/${latestSessionId}`)
-    const optimizationDocs = await loadRealtimeCollection<Record<string, unknown>>(`${WINDOW_OPTIMIZATIONS_COLLECTION}/${latestSessionId}`)
-    const latestSignalDoc = selectLatestRealtimeDoc(signalDocs, ['timestamp', 'updated_at', 'updatedAt'])
-    const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
-    const latestVersionDoc = selectLatestRealtimeDoc(versionDocs, ['updatedAt', 'updated_at', 'created_at'])
-    const latestVersion = latestVersionDoc?.data() as Record<string, unknown> | undefined
-
     const marketDayKey = options.marketDayKey ?? new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/New_York',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
     }).format(new Date())
+    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(`${SIGNAL_EVENTS_COLLECTION}/${latestSessionId}`)
+    const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(`${CONFIG_VERSIONS_COLLECTION}/${latestSessionId}`)
+    const windowDocs = await loadRealtimeCollection<Record<string, unknown>>(`${TRADE_WINDOWS_COLLECTION}/${latestSessionId}`)
+    const optimizationDocs = await loadRealtimeCollection<Record<string, unknown>>(`${WINDOW_OPTIMIZATIONS_COLLECTION}/${latestSessionId}`)
+    const selectedDaySignalDocs = signalDocs.filter((doc) => {
+      const data = doc.data()
+      const signalTimestamp = data.updatedAt ?? data.updated_at ?? data.timestamp ?? data.created_at ?? data.createdAt
+      return marketDayKeyForTimestamp(signalTimestamp) === marketDayKey
+    })
+    const latestSignalDoc = selectLatestRealtimeDoc(selectedDaySignalDocs, ['timestamp', 'updated_at', 'updatedAt'])
+    const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
+    const latestVersionDoc = selectLatestRealtimeDoc(versionDocs, ['updatedAt', 'updated_at', 'created_at'])
+    const latestVersion = latestVersionDoc?.data() as Record<string, unknown> | undefined
+
     const sessionWindows = windowDocs.filter((doc) => {
       const data = doc.data()
       const sessionId = String(data.session_id ?? data.sessionId ?? latestSessionId)
@@ -571,14 +576,14 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         }
       })
 
-    const sessionSignals = signalDocs
-    const selectedDaySignals = sessionSignals
+    const selectedDaySignals = selectedDaySignalDocs
       .sort((left, right) => compareRealtimeDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
       .map((doc) => {
         const data = doc.data()
         return {
           symbol: String(data.symbol ?? doc.id),
           windowId: String(data.window_id ?? data.windowId ?? ''),
+          signalAction: String(data.signal_action ?? data.signalAction ?? data.action ?? ''),
           state: (data.state as AdminSignal['state']) ?? 'ENTRY_SIGNALLED',
           entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
           exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
@@ -663,13 +668,12 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         } satisfies WindowOptimizationRecord
       })
 
-    const selectedDaySignalsForMetrics = decisionSignals.filter((signal) => marketDayKeyForTimestamp(signal.updatedAt) === marketDayKey)
-    const entrySignalCount = selectedDaySignalsForMetrics.filter((signal) => classifySignal(signal) === 'entry').length
-    const exitSignalCount = selectedDaySignalsForMetrics.filter((signal) => signal.state === 'EXIT_SIGNALLED').length
     const selectedDayWindows = windows.filter((window) => {
       return marketDayKeyForTimestamp(window.openedAt) === marketDayKey || marketDayKeyForTimestamp(window.closedAt) === marketDayKey
     })
     const selectedDaySnapshots = marketSnapshots
+    const entrySignalCount = selectedDayWindows.filter((window) => marketDayKeyForTimestamp(window.openedAt) === marketDayKey).length
+    const exitSignalCount = selectedDayWindows.filter((window) => window.closedAt && marketDayKeyForTimestamp(window.closedAt) === marketDayKey).length
     const openWindows = selectedDayWindows.filter((window) => window.status === 'open').length
     const closedWindows = selectedDayWindows.filter((window) => window.status === 'closed').length
     const latestVersionDocs = [...versionDocs].sort((left, right) => compareRealtimeDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
@@ -689,7 +693,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
 
     const hasLiveData =
       sessionDocs.length > 0 ||
-      sessionSignals.length > 0 ||
+      selectedDaySignals.length > 0 ||
       versionDocs.length > 0 ||
       windowDocs.length > 0 ||
       selectedDaySnapshots.length > 0
@@ -697,7 +701,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     const warning = hasLiveData
       ? selectedDaySnapshots.length === 0
             ? 'No live market snapshots are available for the selected day yet.'
-        : selectedDaySignalsForMetrics.length === 0
+        : signals.length === 0
           ? 'No live signal events have been written for the selected day yet.'
           : null
       : 'Live data is connected, but the selected session has not produced records for this day yet.'
@@ -707,8 +711,8 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       warning,
       snapshot: {
         metrics: [
-          { label: 'Entry signals today', value: String(entrySignalCount) },
-          { label: 'Exit signals today', value: String(exitSignalCount) },
+          { label: 'Buy signals today', value: String(entrySignalCount) },
+          { label: 'Sell signals today', value: String(exitSignalCount) },
           { label: 'Open windows now', value: String(openWindows) },
           { label: 'Closed windows today', value: String(closedWindows) },
         ],
@@ -734,7 +738,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
               ? 'Live records are available for the selected day.'
               : 'No live records are available for the selected day yet.',
         },
-        selectedSignal: selectedDaySignalsForMetrics.at(-1) ?? signals.at(-1) ?? null,
+        selectedSignal: signals.at(-1) ?? null,
         signals,
         windows,
         marketSnapshots: selectedDaySnapshots,
