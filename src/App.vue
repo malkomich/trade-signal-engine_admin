@@ -161,7 +161,7 @@ const selectedMarketSnapshots = computed(() => {
 })
 const marketWindowReviews = computed(() => {
   return tradeWindows.value
-    .filter((window) => getMarketDayKey(window.openedAt) === selectedMarketDay.value || (window.closedAt ? getMarketDayKey(window.closedAt) === selectedMarketDay.value : false))
+    .filter((window) => marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value || marketDayKeyForTimestamp(window.closedAt ?? '') === selectedMarketDay.value)
     .filter((window) => !selectedMarketSymbol.value || window.symbol === selectedMarketSymbol.value)
     .slice()
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
@@ -223,7 +223,7 @@ const selectedLedgerSnapshot = computed(() => {
 })
 const allWindowReviews = computed(() => {
   return tradeWindows.value
-    .filter((window) => getMarketDayKey(window.openedAt) === selectedMarketDay.value || (window.closedAt ? getMarketDayKey(window.closedAt) === selectedMarketDay.value : false))
+    .filter((window) => marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value || marketDayKeyForTimestamp(window.closedAt ?? '') === selectedMarketDay.value)
     .filter((window) => !selectedWindowSymbol.value || window.symbol === selectedWindowSymbol.value)
     .slice()
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
@@ -231,7 +231,7 @@ const allWindowReviews = computed(() => {
 })
 const allOptimizationReviews = computed(() => {
   return tradeWindows.value
-    .filter((window) => getMarketDayKey(window.openedAt) === selectedMarketDay.value || (window.closedAt ? getMarketDayKey(window.closedAt) === selectedMarketDay.value : false))
+    .filter((window) => marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value || marketDayKeyForTimestamp(window.closedAt ?? '') === selectedMarketDay.value)
     .filter((window) => !selectedOptimizationSymbol.value || window.symbol === selectedOptimizationSymbol.value)
     .slice()
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
