@@ -371,6 +371,13 @@ export const configFields: ConfigField[] = [
   },
 ]
 
+/**
+ * Classify a signal for the dashboard triage and live stream.
+ *
+ * `signalAction` takes precedence when available because it reflects the
+ * explicit buy/sell action emitted by the backend. We fall back to the
+ * stored state for older or partial records.
+ */
 export function classifySignal(signal: AdminSignal): 'entry' | 'exit' | 'hold' {
   const action = signal.signalAction?.toUpperCase()
   if (action === 'BUY_ALERT') {

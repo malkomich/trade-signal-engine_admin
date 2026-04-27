@@ -65,7 +65,7 @@ let dashboardRefreshInFlight = false
 let dashboardRefreshQueued = false
 let dashboardVisibilityChangeHandler: (() => void) | null = null
 let realtimeUnsubscribers: Unsubscribe[] = []
-let realtimeSessionId = ''
+let realtimeListenerKey = ''
 const triageFilter = ref<'all' | 'entry' | 'exit'>('all')
 const triageFilters = ['all', 'entry', 'exit'] as const
 const selectedConfigVersionId = ref<string>('current')
@@ -1173,15 +1173,17 @@ const triageCounts = computed(() => {
   const signals = selectedDaySignals.value
     .filter((signal) => classifySignal(signal) !== 'hold')
     .filter((signal) => !selectedDecisionSymbol.value || signal.symbol === selectedDecisionSymbol.value)
-  const counts: Record<(typeof triageFilters)[number] | 'hold', number> = {
+  const counts: Record<(typeof triageFilters)[number], number> = {
     all: signals.length,
     entry: 0,
     exit: 0,
-    hold: 0,
   }
 
   for (const signal of signals) {
     const classification = classifySignal(signal)
+    if (classification === 'hold') {
+      continue
+    }
     counts[classification] += 1
   }
 
@@ -1459,14 +1461,20 @@ function pageForWindowId(reviews: WindowReviewView[], windowId: string, pageSize
 }
 
 function findWindowReviewForSymbolAndTimestamp(symbol: string, timestamp: string, preferredWindowId = '') {
+  const reviewPool = tradeWindows.value
+    .filter((window) => getMarketDayKey(window.openedAt) === selectedMarketDay.value || (window.closedAt ? getMarketDayKey(window.closedAt) === selectedMarketDay.value : false))
+    .slice()
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+    .map((window) => decorateWindowReview(window))
+
   if (preferredWindowId) {
-    const directMatch = allWindowReviews.value.find((review) => review.id === preferredWindowId)
+    const directMatch = reviewPool.find((review) => review.id === preferredWindowId)
     if (directMatch) {
       return directMatch
     }
   }
   const fallbackTimestamp = Date.parse(timestamp)
-  return allWindowReviews.value.find(
+  return reviewPool.find(
     (review) =>
       review.symbol === symbol &&
       Number.isFinite(fallbackTimestamp) &&
@@ -1711,28 +1719,29 @@ function stopRealtimeDashboardListeners() {
     unsubscribe()
   }
   realtimeUnsubscribers = []
-  realtimeSessionId = ''
+  realtimeListenerKey = ''
 }
 
-function startRealtimeDashboardListeners(sessionId: string) {
-  if (!liveDataAvailable.value || !sessionId || sessionId === realtimeSessionId) {
+function startRealtimeDashboardListeners(sessionId: string, marketDayKey: string) {
+  const listenerKey = `${sessionId}:${marketDayKey}`
+  if (!liveDataAvailable.value || !sessionId || listenerKey === realtimeListenerKey) {
     return
   }
 
   stopRealtimeDashboardListeners()
-  realtimeSessionId = sessionId
+  realtimeListenerKey = listenerKey
   const paths = [
     `${MARKET_SESSIONS_COLLECTION}/${sessionId}`,
-    `${SIGNAL_EVENTS_COLLECTION}/${sessionId}`,
+    `${SIGNAL_EVENTS_COLLECTION}/${sessionId}/${marketDayKey}`,
     `${TRADE_WINDOWS_COLLECTION}/${sessionId}`,
     `${WINDOW_OPTIMIZATIONS_COLLECTION}/${sessionId}`,
-    `${MARKET_SNAPSHOTS_COLLECTION}/${sessionId}`,
+    `${MARKET_SNAPSHOTS_COLLECTION}/${sessionId}/${marketDayKey}`,
     `${CONFIG_VERSIONS_COLLECTION}/${sessionId}`,
   ]
 
   for (const path of paths) {
     const unsubscribe = onValue(databaseRef(rtdb, path), () => {
-      if (!isMounted || !liveDataAvailable.value || realtimeSessionId !== sessionId) {
+      if (!isMounted || !liveDataAvailable.value || realtimeListenerKey !== listenerKey) {
         return
       }
       void requestDashboardRefresh()
@@ -1880,10 +1889,16 @@ onMounted(async () => {
 watch(
   () => snapshot.value?.sessionOverview.sessionId ?? '',
   (sessionId) => {
-    startRealtimeDashboardListeners(sessionId)
+    startRealtimeDashboardListeners(sessionId, selectedMarketDay.value)
   },
   { immediate: true },
 )
+
+watch(selectedMarketDay, (marketDayKey) => {
+  if (snapshot.value?.sessionOverview.sessionId) {
+    startRealtimeDashboardListeners(snapshot.value.sessionOverview.sessionId, marketDayKey)
+  }
+})
 
 onUnmounted(() => {
   isMounted = false

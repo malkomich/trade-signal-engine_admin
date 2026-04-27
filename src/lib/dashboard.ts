@@ -537,15 +537,11 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       month: '2-digit',
       day: '2-digit',
     }).format(new Date())
-    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(`${SIGNAL_EVENTS_COLLECTION}/${latestSessionId}`)
+    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(`${SIGNAL_EVENTS_COLLECTION}/${latestSessionId}/${marketDayKey}`)
     const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(`${CONFIG_VERSIONS_COLLECTION}/${latestSessionId}`)
     const windowDocs = await loadRealtimeCollection<Record<string, unknown>>(`${TRADE_WINDOWS_COLLECTION}/${latestSessionId}`)
     const optimizationDocs = await loadRealtimeCollection<Record<string, unknown>>(`${WINDOW_OPTIMIZATIONS_COLLECTION}/${latestSessionId}`)
-    const selectedDaySignalDocs = signalDocs.filter((doc) => {
-      const data = doc.data()
-      const signalTimestamp = data.updatedAt ?? data.updated_at ?? data.timestamp ?? data.created_at ?? data.createdAt
-      return marketDayKeyForTimestamp(signalTimestamp) === marketDayKey
-    })
+    const selectedDaySignalDocs = signalDocs
     const latestSignalDoc = selectLatestRealtimeDoc(selectedDaySignalDocs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
     const latestVersionDoc = selectLatestRealtimeDoc(versionDocs, ['updatedAt', 'updated_at', 'created_at'])
