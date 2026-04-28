@@ -686,10 +686,7 @@ function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
 }
 
 function syncWindowSelectionSymbol(selection: Ref<string>, symbol: string) {
-  if (!selection.value) {
-    return;
-  }
-  if (selection.value !== symbol) {
+  if (!selection.value || selection.value !== symbol) {
     selection.value = symbol;
   }
 }
