@@ -376,6 +376,20 @@ const selectedOptimizationSnapshots = computed(() => {
   }
   return findWindowSnapshots(review);
 });
+const selectedSignalWindowReview = computed<WindowReviewView | null>(() => {
+  const signal = selectedSignal.value;
+  if (!signal) {
+    return null;
+  }
+  return findWindowReviewForSymbolAndTimestamp(
+    signal.symbol,
+    signal.updatedAt,
+    signal.windowId,
+  ) ?? null;
+});
+const selectedSignalDrivers = computed(() =>
+  buildSignalDrivers(selectedSignal.value, selectedSignalWindowReview.value),
+);
 const selectedWindowReviews = computed(() => {
   const start = windowReviewPage.value * windowReviewPageSize;
   const end = start + windowReviewPageSize;
@@ -1125,6 +1139,108 @@ function snapshotSummaryRows(snapshot: MarketSnapshotRecord | null) {
       value: `${formatChartValue(snapshot.obv, 0)} · ${formatChartValue(snapshot.relativeVolume, 2)} · ${formatChartValue(snapshot.volumeProfile, 2)}`,
     },
   ];
+}
+
+type SignalDriverRow = {
+  label: string;
+  value: string;
+  tone: "bullish" | "bearish" | "neutral";
+};
+
+function buildSignalDrivers(
+  signal: AdminSignal | null,
+  review: WindowReviewView | null,
+) {
+  if (!signal || !review) {
+    return [] as SignalDriverRow[];
+  }
+
+  const snapshot =
+    classifySignal(signal) === "sell"
+      ? review.sellSnapshot ?? review.buySnapshot
+      : review.buySnapshot ?? review.sellSnapshot;
+  if (!snapshot) {
+    return [] as SignalDriverRow[];
+  }
+
+  const drivers: SignalDriverRow[] = [];
+  const signalSide = classifySignal(signal);
+  const isBuy = signalSide === "buy";
+
+  if (snapshot.vwap !== null) {
+    const aligned = snapshot.close >= snapshot.vwap;
+    drivers.push({
+      label: "VWAP context",
+      value: aligned
+        ? isBuy
+          ? "Price above VWAP"
+          : "VWAP lost"
+        : isBuy
+          ? "Price below VWAP"
+          : "Price below VWAP",
+      tone: aligned ? "bullish" : "bearish",
+    });
+  }
+
+  if (snapshot.emaFast !== null && snapshot.emaSlow !== null) {
+    const aligned = snapshot.emaFast >= snapshot.emaSlow;
+    drivers.push({
+      label: "EMA stack",
+      value: aligned ? "Fast EMA above slow EMA" : "Fast EMA below slow EMA",
+      tone: aligned ? "bullish" : "bearish",
+    });
+  }
+
+  if (snapshot.rsi !== null) {
+    const healthyBuy = snapshot.rsi >= 50 && snapshot.rsi <= 68;
+    const stretchedSell = snapshot.rsi >= 68 || snapshot.rsi <= 35;
+    drivers.push({
+      label: "RSI momentum",
+      value: `RSI ${snapshot.rsi.toFixed(1)}`,
+      tone: isBuy ? (healthyBuy ? "bullish" : "bearish") : (stretchedSell ? "bearish" : "neutral"),
+    });
+  }
+
+  if (snapshot.macd !== null && snapshot.macdSignal !== null && snapshot.macdHistogram !== null) {
+    const bullishMacd = snapshot.macd >= snapshot.macdSignal && snapshot.macdHistogram >= 0;
+    drivers.push({
+      label: "MACD impulse",
+      value: bullishMacd ? "Momentum expanding" : "Momentum fading",
+      tone: bullishMacd ? "bullish" : "bearish",
+    });
+  }
+
+  if (snapshot.relativeVolume !== null || snapshot.volumeProfile !== null || snapshot.obv !== null) {
+    const volumeConfirmed =
+      (snapshot.relativeVolume ?? 0) >= 1.05 ||
+      (snapshot.volumeProfile ?? 0) >= 0.18 ||
+      (snapshot.obv ?? 0) >= 0;
+    drivers.push({
+      label: "Volume flow",
+      value: volumeConfirmed ? "Participation supports move" : "Participation weak",
+      tone: volumeConfirmed ? "bullish" : "bearish",
+    });
+  }
+
+  if (snapshot.plusDi !== null && snapshot.minusDi !== null && snapshot.adx !== null) {
+    const bullishTrend = snapshot.plusDi >= snapshot.minusDi && snapshot.adx >= 20;
+    drivers.push({
+      label: "Trend strength",
+      value: bullishTrend ? "Trend structure intact" : "Trend structure weak",
+      tone: bullishTrend ? "bullish" : "bearish",
+    });
+  }
+
+  if (snapshot.bollingerMiddle !== null && snapshot.bollingerUpper !== null && snapshot.bollingerLower !== null) {
+    const bullishBollinger = snapshot.close >= snapshot.bollingerMiddle;
+    drivers.push({
+      label: "Bollinger context",
+      value: bullishBollinger ? "Above middle band" : "Below middle band",
+      tone: bullishBollinger ? "bullish" : "bearish",
+    });
+  }
+
+  return drivers.slice(0, 4);
 }
 
 function selectConfigVersion(version: ConfigVersionRecord | null) {
@@ -2333,11 +2449,11 @@ onUnmounted(() => {
                 <span>Sell score</span>
                 <strong>{{ selectedSignal.exitScore.toFixed(2) }}</strong>
               </div>
-              <div>
-                <span>Window</span>
-                <strong>{{
-                  selectedSignal.windowId ? "Linked window" : "Window pending"
-                }}</strong>
+            </div>
+            <div v-if="selectedSignalDrivers.length" class="signal-summary-grid signal-driver-grid">
+              <div v-for="driver in selectedSignalDrivers" :key="driver.label">
+                <span>{{ driver.label }}</span>
+                <strong>{{ driver.value }}</strong>
               </div>
             </div>
             <p>{{ formatSignalRegimeLabel(selectedSignal) }}</p>
