@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch, type 
 import { signInAnonymously } from 'firebase/auth'
 import { onValue, ref as databaseRef, type Unsubscribe } from 'firebase/database'
 import { type MessagePayload } from 'firebase/messaging'
+import MarketChart from './components/MarketChart.vue'
 import { classifySignal } from './lib/engine'
 import { auth, rtdb } from './lib/firebase'
 import {
@@ -17,6 +18,7 @@ import {
   type TradeWindowRecord,
 } from './lib/dashboard'
 import { currentMarketDayKey, formatMarketDayLabel, marketDayKeyForTimestamp } from './lib/market-day'
+import { chartIntervals as chartIntervalOptions, marketCharts as marketChartDefs } from './lib/chart-definitions'
 import {
   CONFIG_VERSIONS_COLLECTION,
   MARKET_SESSIONS_COLLECTION,
@@ -43,6 +45,7 @@ const marketWindowPage = ref(0)
 const selectedMarketWindowReviewId = ref<string>('')
 const selectedWindowSymbol = ref<string>('')
 const selectedOptimizationSymbol = ref<string>('')
+const dashboardClock = ref(Date.now())
 const loading = ref(true)
 const authState = ref<'booting' | 'authenticating' | 'authenticated' | 'offline'>('booting')
 const snapshotSource = ref<DashboardSource>('empty')
@@ -63,11 +66,12 @@ let isMounted = true
 let dashboardRefreshTimer: number | null = null
 let dashboardRefreshInFlight = false
 let dashboardRefreshQueued = false
+let dashboardClockTimer: number | null = null
 let dashboardVisibilityChangeHandler: (() => void) | null = null
 let realtimeUnsubscribers: Unsubscribe[] = []
 let realtimeListenerKey = ''
-const triageFilter = ref<'all' | 'entry' | 'exit'>('all')
-const triageFilters = ['all', 'entry', 'exit'] as const
+const triageFilter = ref<'all' | 'buy' | 'sell'>('all')
+const triageFilters = ['all', 'buy', 'sell'] as const
 const selectedConfigVersionId = ref<string>('current')
 const configDraft = reactive<Record<string, string | number>>({})
 const symbolAddDrafts = reactive<Record<string, string>>({})
@@ -165,7 +169,7 @@ const marketWindowReviews = computed(() => {
     .filter((window) => !selectedMarketSymbol.value || window.symbol === selectedMarketSymbol.value)
     .slice()
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-    .map((window) => decorateWindowReview(window))
+    .map((window) => decorateWindowReview(window, dashboardClock.value))
 })
 const selectedMarketWindowReviews = computed(() => {
   const start = marketWindowPage.value * windowReviewPageSize
@@ -189,7 +193,7 @@ const selectedMarketWindowSnapshots = computed(() => {
   return findWindowSnapshots(review)
 })
 const selectedChartSnapshots = computed(() => {
-  return resampleSnapshots(selectedMarketWindowSnapshots.value, chartIntervalMinutes.value)
+  return selectedMarketWindowSnapshots.value
 })
 const marketLedgerPageSize = 12
 const marketLedgerPage = ref(0)
@@ -226,16 +230,16 @@ const allWindowReviews = computed(() => {
     .filter((window) => marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value || marketDayKeyForTimestamp(window.closedAt ?? '') === selectedMarketDay.value)
     .filter((window) => !selectedWindowSymbol.value || window.symbol === selectedWindowSymbol.value)
     .slice()
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-    .map((window) => decorateWindowReview(window))
+    .map((window) => decorateWindowReview(window, dashboardClock.value))
+    .sort((left, right) => Date.parse(right.lastSignalAt) - Date.parse(left.lastSignalAt))
 })
 const allOptimizationReviews = computed(() => {
   return tradeWindows.value
     .filter((window) => marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value || marketDayKeyForTimestamp(window.closedAt ?? '') === selectedMarketDay.value)
     .filter((window) => !selectedOptimizationSymbol.value || window.symbol === selectedOptimizationSymbol.value)
     .slice()
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-    .map((window) => decorateWindowReview(window))
+    .map((window) => decorateWindowReview(window, dashboardClock.value))
+    .sort((left, right) => Date.parse(right.lastSignalAt) - Date.parse(left.lastSignalAt))
 })
 const selectedWindowReview = computed<WindowReviewView | null>(() => {
   if (!allWindowReviews.value.length) {
@@ -264,13 +268,6 @@ const selectedWindowReviews = computed(() => {
 const windowReviewPageCount = computed(() => {
   return Math.max(1, Math.ceil(allWindowReviews.value.length / windowReviewPageSize))
 })
-const marketChartViews = computed(() =>
-  marketCharts.map((chart) => ({
-    chart,
-    view: buildChartView(selectedChartSnapshots.value, chart, selectedMarketWindowSnapshots.value),
-  })),
-)
-
 const windowChartMarkers = computed(() => {
   const review = selectedOptimizationReview.value
   if (!review) {
@@ -300,11 +297,11 @@ const selectedWindowOptimization = computed(() => {
   return windowOptimizationHistory.value.find((optimization) => optimization.windowId === selectedOptimizationReview.value?.id) ?? null
 })
 
-const expandedChartView = computed(() => {
+const expandedChartDefinition = computed(() => {
   if (!expandedChartId.value) {
     return null
   }
-  return marketChartViews.value.find((item) => item.chart.id === expandedChartId.value) ?? null
+  return marketChartDefs.find((chart) => chart.id === expandedChartId.value) ?? null
 })
 
 function clampPage(page: { value: number }, pageCount: number) {
@@ -314,13 +311,13 @@ function clampPage(page: { value: number }, pageCount: number) {
 const sourceDisplay = computed(() => {
   if (snapshotSource.value === 'live') {
     return {
-      title: 'Live market view',
-      description: 'The dashboard is connected and showing live session, signal, config, and chart data.',
+      title: 'Live session',
+      description: 'The dashboard is connected and showing live trading data.',
     }
   }
 
   return {
-    title: 'Waiting for live view',
+    title: 'Waiting for live session',
     description: 'The dashboard is connected, but the selected session has not produced live records yet.',
   }
 })
@@ -353,9 +350,9 @@ function windowKey(window: TradeWindowRecord | null) {
 function formatSignalActionLabel(action: string) {
   switch (action) {
     case 'BUY_ALERT':
-      return 'Buy signal'
+      return 'Buy'
     case 'SELL_ALERT':
-      return 'Sell signal'
+      return 'Sell'
     case 'HOLD':
       return 'Monitoring'
     default:
@@ -368,11 +365,11 @@ function formatSignalStateLabel(state: string) {
     case 'FLAT':
       return 'Waiting'
     case 'ENTRY_SIGNALLED':
-      return 'Buy signal'
+      return 'Buy'
     case 'ACCEPTED_OPEN':
       return 'Buy window open'
     case 'EXIT_SIGNALLED':
-      return 'Sell signal'
+      return 'Sell'
     case 'CLOSED':
       return 'Window closed'
     case 'REJECTED':
@@ -386,10 +383,10 @@ function formatSignalStateLabel(state: string) {
 
 function formatSignalQueueLabel(signal: AdminSignal) {
   switch (classifySignal(signal)) {
-    case 'entry':
-      return 'Buy signal'
-    case 'exit':
-      return 'Sell signal'
+    case 'buy':
+      return 'Buy'
+    case 'sell':
+      return 'Sell'
     default:
       return 'Signal'
   }
@@ -397,23 +394,23 @@ function formatSignalQueueLabel(signal: AdminSignal) {
 
 function formatSignalRegimeLabel(signal: AdminSignal | MarketSnapshotRecord | null) {
   if (!signal) {
-    return 'Live market view'
+    return 'Live market context'
   }
   const regime = 'regime' in signal ? signal.regime : signal.signalRegime
   if (!regime) {
-    return 'Live market view'
+    return 'Live market context'
   }
   if (regime === 'Live market session' || regime === 'benchmark snapshot') {
-    return 'Live market view'
+    return 'Live market context'
   }
   if (regime.includes('aligned')) {
-    return 'Reference aligned'
+    return 'Market aligned'
   }
   if (regime.includes('pressure')) {
-    return 'Reference under pressure'
+    return 'Market under pressure'
   }
   if (regime.includes('mixed')) {
-    return 'Mixed reference view'
+    return 'Mixed market context'
   }
   return regime
 }
@@ -463,21 +460,21 @@ function humanizeReason(reason: string) {
     return 'Forced exit at market close'
   }
   if (trimmed === 'benchmark snapshot') {
-    return 'Reference snapshot'
+    return 'Market reference snapshot'
   }
   if (trimmed === 'live market session') {
-    return 'Live market view'
+    return 'Live market context'
   }
   const benchmarkMatch = /^([A-Z]{1,6})\s+(market context aligned|market context under pressure|mixed market context)$/.exec(trimmed)
   if (benchmarkMatch) {
     const label = benchmarkMatch[2]
     if (label === 'market context aligned') {
-      return 'Reference aligned'
+      return 'Market aligned'
     }
     if (label === 'market context under pressure') {
-      return 'Reference under pressure'
+      return 'Market under pressure'
     }
-    return 'Mixed reference view'
+    return 'Mixed market context'
   }
   if (trimmed.includes('market context')) {
     return trimmed.replace(/-/g, ' ')
@@ -760,161 +757,17 @@ const configEditorStatus = computed(() => {
   return selectedConfigVersion.value?.status ?? 'draft'
 })
 
-type ChartSeriesKey = keyof Pick<
-  MarketSnapshotRecord,
-  | 'close'
-  | 'smaFast'
-  | 'smaSlow'
-  | 'emaFast'
-  | 'emaSlow'
-  | 'vwap'
-  | 'rsi'
-  | 'atr'
-  | 'plusDi'
-  | 'minusDi'
-  | 'adx'
-  | 'macd'
-  | 'macdSignal'
-  | 'macdHistogram'
-  | 'stochasticK'
-  | 'stochasticD'
->
-
-type ChartSeries = {
-  key: ChartSeriesKey
-  label: string
-  color: string
-  decimals?: number
-}
-
-type ChartDefinition = {
-  id: string
-  title: string
-  subtitle: string
-  series: ChartSeries[]
-}
-
-type ChartPoint = {
-  x: number
-  y: number
-}
-
-type ChartMarker = ChartPoint & {
-  id: string
-  kind: 'entry' | 'exit'
-  snapshotId: string
-  tooltip: string
-}
-
-type ChartView = {
-  lines: Array<{
-    label: string
-    color: string
-    latestValue: string
-    points: string
-  }>
-  markers: ChartMarker[]
-  firstTimestamp: string | null
-  latestTimestamp: string | null
-  minValue: number
-  maxValue: number
-}
-
 type WindowReviewView = TradeWindowRecord & {
+  buySnapshot: MarketSnapshotRecord | null
+  sellSnapshot: MarketSnapshotRecord | null
   entryPrice: number | null
   exitPrice: number | null
   changePct: number | null
   durationMinutes: number | null
-  entrySummary: string
-  exitSummary: string
-  benchmarkLabel: string
-}
-
-const marketCharts: ChartDefinition[] = [
-  {
-    id: 'price',
-    title: 'Price',
-    subtitle: 'Close price with simple and exponential moving averages',
-    series: [
-      { key: 'close', label: 'Close', color: '#7dd3fc', decimals: 2 },
-      { key: 'smaFast', label: 'Fast SMA', color: '#34d399', decimals: 2 },
-      { key: 'smaSlow', label: 'Slow SMA', color: '#f59e0b', decimals: 2 },
-      { key: 'emaFast', label: 'Fast EMA', color: '#60a5fa', decimals: 2 },
-      { key: 'emaSlow', label: 'Slow EMA', color: '#c084fc', decimals: 2 },
-    ],
-  },
-  {
-    id: 'sma',
-    title: 'SMA',
-    subtitle: 'Fast and slow simple moving averages',
-    series: [
-      { key: 'smaFast', label: 'Fast SMA', color: '#34d399', decimals: 2 },
-      { key: 'smaSlow', label: 'Slow SMA', color: '#f59e0b', decimals: 2 },
-    ],
-  },
-  {
-    id: 'ema',
-    title: 'EMA',
-    subtitle: 'Fast and slow exponential moving averages',
-    series: [
-      { key: 'emaFast', label: 'Fast EMA', color: '#60a5fa', decimals: 2 },
-      { key: 'emaSlow', label: 'Slow EMA', color: '#c084fc', decimals: 2 },
-    ],
-  },
-  {
-    id: 'vwap',
-    title: 'VWAP',
-    subtitle: 'Volume weighted price reference',
-    series: [{ key: 'vwap', label: 'VWAP', color: '#22d3ee', decimals: 2 }],
-  },
-  {
-    id: 'rsi',
-    title: 'RSI',
-    subtitle: 'Momentum oscillator',
-    series: [{ key: 'rsi', label: 'RSI', color: '#fb7185', decimals: 1 }],
-  },
-  {
-    id: 'atr',
-    title: 'ATR',
-    subtitle: 'Volatility range',
-    series: [{ key: 'atr', label: 'ATR', color: '#f97316', decimals: 2 }],
-  },
-  {
-    id: 'dmi',
-    title: 'DMI / ADX',
-    subtitle: 'Directional movement and trend strength',
-    series: [
-      { key: 'plusDi', label: '+DI', color: '#22c55e', decimals: 1 },
-      { key: 'minusDi', label: '-DI', color: '#ef4444', decimals: 1 },
-      { key: 'adx', label: 'ADX', color: '#f59e0b', decimals: 1 },
-    ],
-  },
-  {
-    id: 'macd',
-    title: 'MACD',
-    subtitle: 'Trend momentum and histogram',
-    series: [
-      { key: 'macd', label: 'MACD', color: '#38bdf8', decimals: 3 },
-      { key: 'macdSignal', label: 'Signal', color: '#c084fc', decimals: 3 },
-      { key: 'macdHistogram', label: 'Histogram', color: '#34d399', decimals: 3 },
-    ],
-  },
-  {
-    id: 'stochastic',
-    title: 'Stochastic',
-    subtitle: 'Momentum turning points',
-    series: [
-      { key: 'stochasticK', label: '%K', color: '#f472b6', decimals: 1 },
-      { key: 'stochasticD', label: '%D', color: '#fbbf24', decimals: 1 },
-    ],
-  },
-]
-
-const chartIntervals = [1, 5, 10, 30, 60] as const
-
-function readSeriesValue(record: MarketSnapshotRecord, key: ChartSeriesKey): number | null {
-  const value = record[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  lastSignalAt: string
+  minutesSinceLastSignal: number | null
+  buySummary: string
+  sellSummary: string
 }
 
 function formatChartValue(value: number | null, decimals = 2) {
@@ -940,156 +793,7 @@ function formatLocaleTimestamp(value: string | null | undefined) {
   }).format(parsed)
 }
 
-function buildChartView(records: MarketSnapshotRecord[], chart: ChartDefinition, markerRecords: MarketSnapshotRecord[] = records): ChartView {
-  const usableRecords = records.length > 0 ? records : []
-  const firstTimestamp = usableRecords.at(0)?.timestamp ?? null
-  const latestTimestamp = usableRecords.at(-1)?.timestamp ?? null
-  const timestampValues = usableRecords
-    .map((record) => Date.parse(record.timestamp))
-    .filter((value) => Number.isFinite(value))
-  const firstTimestampValue = timestampValues.at(0) ?? null
-  const latestTimestampValue = timestampValues.at(-1) ?? null
-  const values = chart.series
-    .flatMap((series) => usableRecords.map((record) => readSeriesValue(record, series.key)))
-    .filter((value): value is number => typeof value === 'number')
-  const minValue = values.length > 0 ? Math.min(...values) : 0
-  const maxValue = values.length > 0 ? Math.max(...values) : 1
-  const spread = maxValue - minValue || 1
-  const valuePadding = Math.max(spread * 0.08, Math.abs(maxValue) * 0.02, 0.5)
-  const paddedMinValue = minValue - valuePadding
-  const paddedMaxValue = maxValue + valuePadding
-  const paddedSpread = paddedMaxValue - paddedMinValue || 1
-  const xMin = firstTimestampValue ?? 0
-  const xMax = latestTimestampValue ?? xMin + 1
-  const xSpan = xMax - xMin || 1
-  const xPadding = Math.max(xSpan * 0.08, 60_000)
-  const paddedXMin = xMin - xPadding
-  const paddedXMax = xMax + xPadding
-  const paddedXSpan = paddedXMax - paddedXMin || 1
-  const leftPad = 6
-  const rightPad = 94
-  const topPad = 8
-  const bottomPad = 92
-  const plotWidth = rightPad - leftPad
-  const plotHeight = bottomPad - topPad
-
-  const toPoint = (timestamp: number, value: number): ChartPoint => {
-    const x = usableRecords.length > 1 ? leftPad + ((timestamp - paddedXMin) / paddedXSpan) * plotWidth : 50
-    const y = bottomPad - ((value - paddedMinValue) / paddedSpread) * plotHeight
-    return {
-      x: Number.isFinite(x) ? Math.min(rightPad, Math.max(leftPad, x)) : 50,
-      y: Number.isFinite(y) ? Math.min(bottomPad, Math.max(topPad, y)) : 50,
-    }
-  }
-
-  const lines = chart.series.map((series) => {
-    const coords: ChartPoint[] = []
-    usableRecords.forEach((record) => {
-      const value = readSeriesValue(record, series.key)
-      if (value === null) {
-        return
-      }
-      const timestamp = Date.parse(record.timestamp)
-      if (!Number.isFinite(timestamp)) {
-        return
-      }
-      coords.push(toPoint(timestamp, value))
-    })
-    const points = coords.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
-    const latestRecord = usableRecords.at(-1)
-    return {
-      label: series.label,
-      color: series.color,
-      latestValue: formatChartValue(latestRecord ? readSeriesValue(latestRecord, series.key) : null, series.decimals ?? 2),
-      points,
-    }
-  })
-
-  const markers: ChartMarker[] = []
-  const entrySnapshot = [...markerRecords].find((record) => record.signalAction === 'BUY_ALERT') ?? null
-  const exitSnapshot = [...markerRecords].reverse().find((record) => record.signalAction === 'SELL_ALERT') ?? null
-
-  if (entrySnapshot) {
-    const entryTimestamp = Date.parse(entrySnapshot.timestamp)
-    const entryValue = chartMarkerValue(entrySnapshot, chart)
-    markers.push({
-      id: `${entrySnapshot.id}:entry`,
-      snapshotId: entrySnapshot.id,
-      x: Number.isFinite(entryTimestamp) ? toPoint(entryTimestamp, entryValue).x : 50,
-      y: Number.isFinite(entryTimestamp) ? toPoint(entryTimestamp, entryValue).y : 50,
-      kind: 'entry',
-      tooltip: [
-        'Buy signal',
-        formatLocaleTimestamp(entrySnapshot.timestamp),
-        `Value ${formatChartValue(entryValue, chart.series[0]?.decimals ?? 2)}`,
-        ...chart.series.map(
-          (series) => `${series.label} ${formatChartValue(readSeriesValue(entrySnapshot, series.key), series.decimals ?? 2)}`,
-        ),
-      ].join(' · '),
-    })
-  }
-
-  if (exitSnapshot) {
-    const exitTimestamp = Date.parse(exitSnapshot.timestamp)
-    const exitValue = chartMarkerValue(exitSnapshot, chart)
-    markers.push({
-      id: `${exitSnapshot.id}:exit`,
-      snapshotId: exitSnapshot.id,
-      x: Number.isFinite(exitTimestamp) ? toPoint(exitTimestamp, exitValue).x : 50,
-      y: Number.isFinite(exitTimestamp) ? toPoint(exitTimestamp, exitValue).y : 50,
-      kind: 'exit',
-      tooltip: [
-        'Sell signal',
-        formatLocaleTimestamp(exitSnapshot.timestamp),
-        `Value ${formatChartValue(exitValue, chart.series[0]?.decimals ?? 2)}`,
-        ...chart.series.map(
-          (series) => `${series.label} ${formatChartValue(readSeriesValue(exitSnapshot, series.key), series.decimals ?? 2)}`,
-        ),
-      ].join(' · '),
-    })
-  }
-
-  return {
-    lines,
-    markers,
-    firstTimestamp,
-    latestTimestamp,
-    minValue,
-    maxValue,
-  }
-}
-
-function chartMarkerValue(record: MarketSnapshotRecord, chart: ChartDefinition) {
-  const values = chart.series
-    .map((series) => readSeriesValue(record, series.key))
-    .filter((value): value is number => typeof value === 'number')
-  if (values.length === 0) {
-    return record.close
-  }
-  return values.reduce((total, value) => total + value, 0) / values.length
-}
-
-function resampleSnapshots(records: MarketSnapshotRecord[], intervalMinutes: number) {
-  if (intervalMinutes <= 1 || records.length <= 1) {
-    return records
-  }
-  const intervalMs = intervalMinutes * 60 * 1000
-  const buckets = new Map<number, MarketSnapshotRecord>()
-  // Expects ascending timestamps and keeps the latest sample per interval bucket.
-  for (const record of records) {
-    const timestamp = Date.parse(record.timestamp)
-    if (!Number.isFinite(timestamp)) {
-      continue
-    }
-    const bucketKey = Math.floor(timestamp / intervalMs)
-    buckets.set(bucketKey, record)
-  }
-  return Array.from(buckets.entries())
-    .sort((left, right) => left[0] - right[0])
-    .map(([, record]) => record)
-}
-
-function decorateWindowReview(window: TradeWindowRecord): WindowReviewView {
+function decorateWindowReview(window: TradeWindowRecord, now = Date.now()): WindowReviewView {
   const snapshots = findWindowSnapshots(window)
   const entrySnapshot =
     snapshots.find((snapshot) => snapshot.signalAction === 'BUY_ALERT') ??
@@ -1100,22 +804,31 @@ function decorateWindowReview(window: TradeWindowRecord): WindowReviewView {
       snapshots.at(-1) ??
       null
     : null
+  const lastSignalSnapshot = exitSnapshot ?? entrySnapshot
   const entryPrice = entrySnapshot?.close ?? null
   const exitPrice = exitSnapshot?.close ?? null
   const changePct = entryPrice !== null && exitPrice !== null && entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 : null
   const durationMinutes = window.closedAt
     ? Math.max(0, Math.round((Date.parse(window.closedAt) - Date.parse(window.openedAt)) / 60000))
     : null
+  const lastSignalAt = lastSignalSnapshot?.timestamp ?? window.updatedAt ?? window.openedAt
+  const parsedLastSignalAt = Date.parse(lastSignalAt)
+  const minutesSinceLastSignal = Number.isFinite(parsedLastSignalAt)
+    ? Math.max(0, Math.round((now - parsedLastSignalAt) / 60000))
+    : null
 
   return {
     ...window,
+    buySnapshot: entrySnapshot,
+    sellSnapshot: exitSnapshot,
     entryPrice,
     exitPrice,
     changePct,
     durationMinutes,
-    entrySummary: entrySnapshot ? summarizeSnapshotReason(entrySnapshot) : 'Buy snapshot unavailable',
-    exitSummary: exitSnapshot ? summarizeSnapshotReason(exitSnapshot) : 'Sell snapshot unavailable',
-    benchmarkLabel: 'Reference view',
+    lastSignalAt,
+    minutesSinceLastSignal,
+    buySummary: entrySnapshot ? summarizeSnapshotReason(entrySnapshot) : 'Buy snapshot unavailable',
+    sellSummary: exitSnapshot ? summarizeSnapshotReason(exitSnapshot) : 'Sell snapshot unavailable',
   }
 }
 
@@ -1142,6 +855,49 @@ function summarizeSnapshotReason(snapshot: MarketSnapshotRecord) {
     return reasons.map(humanizeReason).join(' · ')
   }
   return formatSignalRegimeLabel(snapshot)
+}
+
+function formatMinutesAgo(minutes: number | null) {
+  if (minutes === null) {
+    return 'Pending'
+  }
+  if (minutes < 60) {
+    return `${minutes} min ago`
+  }
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  if (remainingMinutes === 0) {
+    return `${hours} h ago`
+  }
+  return `${hours} h ${remainingMinutes} m ago`
+}
+
+function formatElapsedMinutes(minutes: number | null) {
+  if (minutes === null) {
+    return 'Pending'
+  }
+  if (minutes < 60) {
+    return `${minutes} min`
+  }
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  if (remainingMinutes === 0) {
+    return `${hours} h`
+  }
+  return `${hours} h ${remainingMinutes} m`
+}
+
+function snapshotSummaryRows(snapshot: MarketSnapshotRecord | null) {
+  if (!snapshot) {
+    return []
+  }
+  return [
+    { label: 'Close', value: snapshot.close.toFixed(2) },
+    { label: 'RSI', value: formatChartValue(snapshot.rsi, 1) },
+    { label: 'EMA fast / slow', value: `${formatChartValue(snapshot.emaFast, 2)} / ${formatChartValue(snapshot.emaSlow, 2)}` },
+    { label: 'SMA fast / slow', value: `${formatChartValue(snapshot.smaFast, 2)} / ${formatChartValue(snapshot.smaSlow, 2)}` },
+    { label: 'MACD', value: `${formatChartValue(snapshot.macd, 3)} · ${formatChartValue(snapshot.macdSignal, 3)} · ${formatChartValue(snapshot.macdHistogram, 3)}` },
+  ]
 }
 
 function selectConfigVersion(version: ConfigVersionRecord | null) {
@@ -1175,16 +931,15 @@ const triageCounts = computed(() => {
     .filter((signal) => !selectedDecisionSymbol.value || signal.symbol === selectedDecisionSymbol.value)
   const counts: Record<(typeof triageFilters)[number], number> = {
     all: signals.length,
-    entry: 0,
-    exit: 0,
+    buy: 0,
+    sell: 0,
   }
 
   for (const signal of signals) {
     const classification = classifySignal(signal)
-    if (classification === 'hold') {
-      continue
+    if (classification === 'buy' || classification === 'sell') {
+      counts[classification] += 1
     }
-    counts[classification] += 1
   }
 
   return counts
@@ -1413,7 +1168,6 @@ function setTriageFilter(filter: (typeof triageFilters)[number]) {
 
 function setLedgerSnapshot(snapshotPoint: MarketSnapshotRecord) {
   selectedLedgerSnapshotId.value = snapshotPoint.id
-  selectedMarketSymbol.value = snapshotPoint.symbol
   const matchingWindow = findWindowReviewForSymbolAndTimestamp(snapshotPoint.symbol, snapshotPoint.timestamp, snapshotPoint.windowId)
   if (matchingWindow) {
     selectedMarketWindowReviewId.value = matchingWindow.id
@@ -1427,7 +1181,6 @@ function setLedgerSnapshot(snapshotPoint: MarketSnapshotRecord) {
 }
 
 function setWindowReview(review: WindowReviewView) {
-  selectedMarketSymbol.value = review.symbol
   selectedMarketWindowReviewId.value = review.id
   selectedWindowReviewId.value = review.id
   selectedOptimizationReviewId.value = review.id
@@ -1439,7 +1192,6 @@ function setWindowReview(review: WindowReviewView) {
 
 function setSelectedSignal(signal: AdminSignal) {
   selectedSignal.value = signal
-  selectedMarketSymbol.value = signal.symbol
   const matchingWindow = findWindowReviewForSymbolAndTimestamp(signal.symbol, signal.updatedAt, signal.windowId)
   if (matchingWindow) {
     selectedMarketWindowReviewId.value = matchingWindow.id
@@ -1826,6 +1578,10 @@ async function applySelectedVersion(version: ConfigVersionRecord) {
 }
 
 onMounted(async () => {
+  dashboardClockTimer = window.setInterval(() => {
+    dashboardClock.value = Date.now()
+  }, 60_000)
+
   let allowLiveData = true
   try {
     authState.value = 'authenticating'
@@ -1906,6 +1662,10 @@ onUnmounted(() => {
     window.clearTimeout(dashboardRefreshTimer)
     dashboardRefreshTimer = null
   }
+  if (dashboardClockTimer !== null) {
+    window.clearInterval(dashboardClockTimer)
+    dashboardClockTimer = null
+  }
   if (dashboardVisibilityChangeHandler) {
     document.removeEventListener('visibilitychange', dashboardVisibilityChangeHandler)
     dashboardVisibilityChangeHandler = null
@@ -1932,15 +1692,8 @@ onUnmounted(() => {
         <div>
           <strong>{{ sourceDisplay.title }}</strong>
           <p>{{ sourceDisplay.description }}</p>
-          <p>
-            {{
-              authState === 'authenticated'
-                ? 'Authentication completed successfully.'
-                : authState === 'offline'
-                  ? 'Offline fallback'
-                  : 'Signing in'
-            }}
-          </p>
+          <p>Last update: <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong></p>
+          <p>Access: <strong>{{ authState === 'authenticated' ? 'Authenticated' : authState === 'offline' ? 'Offline fallback' : 'Signing in' }}</strong></p>
           <p>
             Browser alerts:
             <strong>{{ notificationState }}</strong>
@@ -1975,229 +1728,9 @@ onUnmounted(() => {
         </article>
       </section>
 
-      <section class="overview-grid">
-        <article class="panel overview-panel">
-          <div class="panel-header">
-            <h2>Live market view</h2>
-            <span>{{ formatMarketDayLabel(selectedMarketDay) }}</span>
-          </div>
-          <div class="overview-copy">
-            <div>
-              <span>Last update</span>
-              <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong>
-            </div>
-            <div>
-              <span>Chart focus</span>
-              <strong>{{ selectedMarketSymbol || 'All tracked stocks' }}</strong>
-            </div>
-            <div>
-              <span>Selected day</span>
-              <strong>{{ formatMarketDayLabel(selectedMarketDay) }}</strong>
-            </div>
-            <div>
-              <span>Active windows</span>
-              <strong>{{ sessionOverview.openWindows }}</strong>
-            </div>
-          </div>
-          <p class="overview-note">
-            {{ sessionOverview.summary }}
-          </p>
-        </article>
-
-        <article class="panel shell-placeholder" data-slot="chart">
-          <div class="panel-header">
-            <h2>Live market charts</h2>
-            <div class="panel-header-actions chart-header-actions">
-              <span>{{ formatMarketDayLabel(selectedMarketDay) }} · {{ selectedMarketSymbol || 'All tracked stocks' }}</span>
-              <div class="chart-legend chart-legend-inline">
-                <span><i class="entry"></i>Buy</span>
-                <span><i class="exit"></i>Sell</span>
-              </div>
-            </div>
-          </div>
-          <p>
-            Switch the day and stock filters, then page through windows to inspect price, indicators, and the two markers that belong to each trade window.
-          </p>
-          <div class="day-tabs">
-            <button
-              v-for="day in availableMarketDays"
-              :key="day"
-              type="button"
-              class="symbol-tab"
-              :class="{ active: selectedMarketDay === day }"
-              @click="selectedMarketDay = day"
-            >
-              {{ day === currentMarketDayKey() ? 'Today' : formatMarketDayLabel(day) }}
-            </button>
-          </div>
-          <div class="symbol-tabs">
-            <button
-              v-for="symbol in marketSymbols"
-              :key="symbol"
-              type="button"
-              class="symbol-tab"
-              :class="{ active: selectedMarketSymbol === symbol }"
-              @click="selectedMarketSymbol = symbol"
-            >
-              {{ symbol }}
-            </button>
-          </div>
-          <div class="chart-resolution-toolbar">
-            <button
-              v-for="interval in chartIntervals"
-              :key="interval"
-              type="button"
-              class="symbol-tab"
-              :class="{ active: chartIntervalMinutes === interval }"
-              @click="chartIntervalMinutes = interval"
-            >
-              {{ interval }}m
-            </button>
-          </div>
-          <div v-if="selectedMarketWindowReviews.length" class="ledger-toolbar window-toolbar">
-            <button type="button" class="action-button ghost compact" :disabled="marketWindowPage === 0" @click="previousMarketWindowPage">
-              Previous window
-            </button>
-            <span class="pager-label">{{ marketWindowPage + 1 }} / {{ marketWindowPageCount }}</span>
-            <button
-              type="button"
-              class="action-button ghost compact"
-              :disabled="marketWindowPage >= marketWindowPageCount - 1"
-              @click="nextMarketWindowPage"
-            >
-              Next window
-            </button>
-            <div class="window-toolbar-legend">
-              <span><i class="entry"></i>Buy</span>
-              <span><i class="exit"></i>Sell</span>
-            </div>
-          </div>
-          <div v-if="selectedMarketWindowReview" class="window-context-bar">
-            <div>
-              <strong>{{ selectedMarketWindowReview.symbol }}</strong>
-              <p>{{ formatWindowStatusLabel(selectedMarketWindowReview.status) }} · {{ describeWindowOutcome(selectedMarketWindowReview.changePct) }}</p>
-            </div>
-            <div>
-              <span>Window</span>
-              <strong>{{ formatLocaleTimestamp(selectedMarketWindowReview.openedAt) }} → {{ selectedMarketWindowReview.closedAt ? formatLocaleTimestamp(selectedMarketWindowReview.closedAt) : 'Open' }}</strong>
-            </div>
-            <div>
-              <span>Marker guide</span>
-              <strong>{{ windowChartMarkers }}</strong>
-            </div>
-          </div>
-          <div v-if="selectedMarketWindowSnapshots.length" class="chart-grid">
-            <article v-for="item in marketChartViews" :key="`${selectedMarketWindowReview?.id ?? 'window'}-${item.chart.id}`" class="chart-card">
-              <div class="chart-card-header">
-                <div>
-                  <strong>{{ item.chart.title }}</strong>
-                  <p>{{ item.chart.subtitle }}</p>
-                </div>
-                <div class="chart-header-actions">
-                  <span>{{ formatLocaleTimestamp(item.view.latestTimestamp) }}</span>
-                  <button type="button" class="action-button ghost compact" @click="openExpandedChart(item.chart.id)">Expand</button>
-                </div>
-              </div>
-              <div class="chart-legend">
-                <span v-for="line in item.view.lines" :key="line.label" :title="`${line.label}: ${line.latestValue}`">
-                  <i :style="{ background: line.color }"></i>
-                  {{ line.label }} {{ line.latestValue }}
-                </span>
-              </div>
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="chart-svg" aria-hidden="true">
-                <g v-for="line in item.view.lines" :key="`${item.chart.id}-${line.label}`">
-                  <polyline
-                    v-if="line.points"
-                    :points="line.points"
-                    fill="none"
-                    :stroke="line.color"
-                    stroke-width="1.8"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </g>
-                <g
-                  v-for="marker in item.view.markers"
-                  :key="`${item.chart.id}-${marker.id}`"
-                  @click.stop="selectOptimizationPointById(marker.kind, marker.snapshotId)"
-                >
-                  <line
-                    :x1="marker.x"
-                    y1="0"
-                    :x2="marker.x"
-                    y2="100"
-                    :class="marker.kind"
-                    class="signal-marker-line"
-                  />
-                  <circle
-                    :cx="marker.x"
-                    :cy="marker.y"
-                    r="1.9"
-                    :class="marker.kind"
-                    class="signal-marker-dot"
-                  />
-                  <title>{{ marker.tooltip }}</title>
-                </g>
-              </svg>
-              <div class="chart-axis">
-                <span>X start: {{ formatLocaleTimestamp(item.view.firstTimestamp) }}</span>
-                <span>X end: {{ formatLocaleTimestamp(item.view.latestTimestamp) }}</span>
-                <span>Y range: {{ formatChartValue(item.view.maxValue, 2) }} / {{ formatChartValue(item.view.minValue, 2) }}</span>
-              </div>
-              <div class="chart-axis chart-axis-values">
-                <span>Y high: {{ formatChartValue(item.view.maxValue, 2) }}</span>
-                <span>Y mid: {{ formatChartValue((item.view.maxValue + item.view.minValue) / 2, 2) }}</span>
-                <span>Y low: {{ formatChartValue(item.view.minValue, 2) }}</span>
-              </div>
-            </article>
-          </div>
-          <p v-else class="empty-state">Select a market window to inspect its chart set.</p>
-        </article>
-
-        <article class="panel shell-placeholder" data-slot="table">
-          <div class="panel-header">
-            <h2>Live signal stream</h2>
-            <div class="panel-header-actions">
-              <span>{{ liveSignals.length }} signals</span>
-              <span>{{ liveSignalPage + 1 }} / {{ liveSignalPageCount }}</span>
-            </div>
-          </div>
-          <p>
-            This stream shows buy and sell signals across all tracked stocks in real time. Click a signal to open its linked window above.
-          </p>
-          <div v-if="liveSignalPageCount > 1" class="ledger-toolbar">
-            <button type="button" class="action-button ghost compact" :disabled="liveSignalPage === 0" @click="liveSignalPage = Math.max(liveSignalPage - 1, 0)">
-              Previous
-            </button>
-            <button type="button" class="action-button ghost compact" :disabled="liveSignalPage >= liveSignalPageCount - 1" @click="liveSignalPage = Math.min(liveSignalPage + 1, liveSignalPageCount - 1)">
-              Next
-            </button>
-          </div>
-          <div v-if="liveSignalPageSignals.length" class="signal-list compact ledger-list live-signal-list">
-            <button
-              v-for="signal in liveSignalPageSignals"
-              :key="signalKey(signal)"
-              type="button"
-              class="signal-row ledger-row"
-              :class="{ active: signalKey(selectedSignal) === signalKey(signal) }"
-              @click="setSelectedSignal(signal)"
-            >
-              <div>
-                <strong>{{ signal.symbol }}</strong>
-                <p>{{ formatLocaleTimestamp(signal.updatedAt) }} · {{ formatSignalQueueLabel(signal) }} · {{ signal.windowId ? 'Linked window' : 'Window pending' }}</p>
-              </div>
-              <div class="scores">
-                <span>{{ signal.entryScore.toFixed(2) }}</span>
-                <span>{{ signal.exitScore.toFixed(2) }}</span>
-              </div>
-            </button>
-          </div>
-          <div v-else class="empty-state">No live buy or sell signals have been written for the selected day yet.</div>
-        </article>
-      </section>
 
       <section class="grid">
-        <article class="panel">
+        <article class="panel decision-queue-panel">
           <div class="panel-header">
             <h2>Decision queue</h2>
             <span>{{ formatMarketDayLabel(selectedMarketDay) }} · {{ selectedDecisionSymbol || 'All tracked stocks' }}</span>
@@ -2232,7 +1765,7 @@ onUnmounted(() => {
               :aria-pressed="triageFilter === filter"
               @click="setTriageFilter(filter)"
             >
-              <span>{{ filter === 'all' ? 'All decisions' : filter === 'entry' ? 'Buy' : 'Sell' }}</span>
+              <span>{{ filter === 'all' ? 'All decisions' : filter === 'buy' ? 'Buy' : 'Sell' }}</span>
               <strong>{{ triageCounts[filter] }}</strong>
             </button>
           </div>
@@ -2271,7 +1804,7 @@ onUnmounted(() => {
           <p v-else class="empty-state">No buy or sell decisions have been written for the selected day.</p>
         </article>
 
-        <article class="panel">
+        <article class="panel decision-queue-panel">
           <div class="panel-header">
             <h2>Selected signal</h2>
             <span>{{ selectedSignal?.symbol ?? 'No signal selected' }}</span>
@@ -2308,6 +1841,24 @@ onUnmounted(() => {
           <h2>Trade windows</h2>
           <span>{{ allWindowReviews.length }} windows · {{ formatMarketDayLabel(selectedMarketDay) }}</span>
         </div>
+        <div class="window-toolbar">
+          <div class="day-tabs">
+            <button
+              v-for="day in availableMarketDays"
+              :key="day"
+              type="button"
+              class="symbol-tab"
+              :class="{ active: selectedMarketDay === day }"
+              @click="selectedMarketDay = day"
+            >
+              {{ day === currentMarketDayKey() ? 'Today' : formatMarketDayLabel(day) }}
+            </button>
+          </div>
+          <div class="window-toolbar-legend">
+            <span><i class="entry"></i>Buy</span>
+            <span><i class="exit"></i>Sell</span>
+          </div>
+        </div>
         <div class="symbol-tabs">
           <button
             type="button"
@@ -2329,8 +1880,8 @@ onUnmounted(() => {
           </button>
         </div>
         <p>
-          Each window shows the buy and sell decision, the change in price, and the context that pushed the engine into the trade.
-          This is the section to use when checking profitability and signal quality.
+          Each window shows the buy and sell decision, the change in price, and the signal snapshot that pushed the engine into the trade.
+          Use this section to compare buy and sell timing, profitability, and the price path that followed the window.
         </p>
         <div v-if="selectedWindowReviews.length" class="ledger-toolbar">
           <button type="button" class="action-button ghost compact" :disabled="windowReviewPage === 0" @click="previousWindowPage">
@@ -2360,7 +1911,7 @@ onUnmounted(() => {
                 <strong>{{ review.symbol }}</strong>
                 <p>
                   {{ formatWindowStatusLabel(review.status) }} · {{ describeWindowOutcome(review.changePct) }} ·
-                  {{ review.durationMinutes === null ? 'Open' : `${review.durationMinutes} min` }}
+                  {{ review.minutesSinceLastSignal === null ? 'Pending' : formatMinutesAgo(review.minutesSinceLastSignal) }}
                 </p>
               </div>
               <div class="scores">
@@ -2369,7 +1920,7 @@ onUnmounted(() => {
               </div>
             </button>
           </div>
-          <div v-else class="empty-state">No trade windows available for the selected symbol and day.</div>
+          <div v-else class="empty-state">No trade windows available for the selected filters and day.</div>
           <div v-if="selectedWindowReview" class="detail-card window-detail">
             <div class="detail-title">
               <strong>{{ selectedWindowReview.symbol }}</strong>
@@ -2381,8 +1932,20 @@ onUnmounted(() => {
                 <strong>{{ describeWindowOutcome(selectedWindowReview.changePct) }}</strong>
               </div>
               <div>
-                <span>Duration</span>
-                <strong>{{ selectedWindowReview.durationMinutes === null ? 'Open' : `${selectedWindowReview.durationMinutes} min` }}</strong>
+                <span>Total duration</span>
+                <strong :class="{ 'duration-open': selectedWindowReview.durationMinutes === null }">
+                  {{
+                    selectedWindowReview.durationMinutes === null
+                      ? selectedWindowReview.minutesSinceLastSignal === null
+                        ? 'Open'
+                        : `Open for ${formatElapsedMinutes(selectedWindowReview.minutesSinceLastSignal)}`
+                      : `${selectedWindowReview.durationMinutes} min`
+                  }}
+                </strong>
+              </div>
+              <div>
+                <span>Last signal</span>
+                <strong>{{ selectedWindowReview.minutesSinceLastSignal === null ? 'Pending' : formatMinutesAgo(selectedWindowReview.minutesSinceLastSignal) }}</strong>
               </div>
               <div>
                 <span>Buy price</span>
@@ -2393,16 +1956,28 @@ onUnmounted(() => {
                 <strong>{{ selectedWindowReview.exitPrice === null ? '--' : selectedWindowReview.exitPrice.toFixed(2) }}</strong>
               </div>
             </div>
-            <p>{{ selectedWindowReview.benchmarkLabel }}</p>
             <div class="window-summary-grid">
-              <div>
-                <span>Buy context</span>
-                <p>{{ selectedWindowReview.entrySummary }}</p>
-              </div>
-              <div>
-                <span>Sell context</span>
-                <p>{{ selectedWindowReview.exitSummary }}</p>
-              </div>
+              <article>
+                <span>Buy signal · {{ formatLocaleTimestamp(selectedWindowReview.openedAt) }}</span>
+                <div class="signal-summary-grid">
+                  <div v-for="row in snapshotSummaryRows(selectedWindowReview.buySnapshot)" :key="`buy-${row.label}`">
+                    <span>{{ row.label }}</span>
+                    <strong>{{ row.value }}</strong>
+                  </div>
+                </div>
+                <p class="window-summary-note">{{ selectedWindowReview.buySummary }}</p>
+              </article>
+              <article>
+                <span>Sell signal · {{ selectedWindowReview.closedAt ? formatLocaleTimestamp(selectedWindowReview.closedAt) : 'Still open' }}</span>
+                <div class="signal-summary-grid" v-if="selectedWindowReview.sellSnapshot">
+                  <div v-for="row in snapshotSummaryRows(selectedWindowReview.sellSnapshot)" :key="`sell-${row.label}`">
+                    <span>{{ row.label }}</span>
+                    <strong>{{ row.value }}</strong>
+                  </div>
+                </div>
+                <p class="window-summary-note" v-if="selectedWindowReview.sellSnapshot">{{ selectedWindowReview.sellSummary }}</p>
+                <p v-else class="empty-state compact">This window is still open, so the sell snapshot has not been recorded yet.</p>
+              </article>
             </div>
           </div>
         </div>
@@ -2410,143 +1985,51 @@ onUnmounted(() => {
 
       <section class="panel">
         <div class="panel-header">
-          <h2>Window optimizer</h2>
-          <span>{{ selectedOptimizationReview?.symbol ?? 'No window selected' }}</span>
-        </div>
-        <div class="symbol-tabs optimizer-symbol-tabs">
-          <button
-            type="button"
-            class="symbol-tab"
-            :class="{ active: !selectedOptimizationSymbol }"
-            @click="selectedOptimizationSymbol = ''"
-          >
-            All
-          </button>
-          <button
-            v-for="symbol in marketSymbols"
-            :key="`optimization-${symbol}`"
-            type="button"
-            class="symbol-tab"
-            :class="{ active: selectedOptimizationSymbol === symbol }"
-            @click="selectedOptimizationSymbol = symbol"
-          >
-            {{ symbol }}
-          </button>
-        </div>
-        <p>
-          Pick the most informative buy and sell points for the selected window. You can click the markers on the charts or the points below, then save the review so the engine can reuse the sample later.
-        </p>
-        <div v-if="selectedOptimizationReview" class="optimizer-layout">
-          <div class="detail-card">
-            <div class="detail-title">
-              <strong>{{ selectedOptimizationReview.symbol }}</strong>
-              <span>{{ formatWindowStatusLabel(selectedOptimizationReview.status) }}</span>
-            </div>
-              <div class="score-grid">
-                <div>
-                  <span>Change</span>
-                  <strong>{{ describeWindowOutcome(selectedOptimizationReview.changePct) }}</strong>
-                </div>
-                <div>
-                  <span>Duration</span>
-                  <strong>{{ selectedOptimizationReview.durationMinutes === null ? 'Open' : `${selectedOptimizationReview.durationMinutes} min` }}</strong>
-                </div>
-                <div>
-                  <span>Buy pick</span>
-                  <strong>{{ optimizationSnapshotLabel(selectedOptimizationSnapshot('entry')) }}</strong>
-                </div>
-                <div>
-                  <span>Sell pick</span>
-                  <strong>{{ optimizationSnapshotLabel(selectedOptimizationSnapshot('exit')) }}</strong>
-                </div>
-              </div>
-            <p class="optimization-status" :class="{ saved: !!selectedWindowOptimization }">
-              {{
-                selectedWindowOptimization
-                  ? `Optimization saved on ${formatLocaleTimestamp(selectedWindowOptimization.updatedAt)}`
-                  : 'This window has not been optimized yet.'
-              }}
+          <div>
+            <h2>Live market charts</h2>
+            <p>
+              {{ selectedWindowReview ? `${selectedWindowReview.symbol} · ${formatWindowStatusLabel(selectedWindowReview.status)}` : 'Select a trade window to inspect its charts.' }}
             </p>
-            <div class="optimizer-actions-inline">
-              <button type="button" class="action-button ghost compact" :disabled="selectedOptimizationSnapshotIndex('entry') <= 0" @click="shiftOptimizationPoint('entry', -1)">
-                Previous buy point
-              </button>
-              <button
-                type="button"
-                class="action-button ghost compact"
-                :disabled="selectedOptimizationSnapshotIndex('entry') < 0 || selectedOptimizationSnapshotIndex('entry') >= selectedOptimizationSnapshots.length - 1"
-                @click="shiftOptimizationPoint('entry', 1)"
-              >
-                Next buy point
-              </button>
-              <button type="button" class="action-button ghost compact" :disabled="selectedOptimizationSnapshotIndex('exit') <= 0" @click="shiftOptimizationPoint('exit', -1)">
-                Previous sell point
-              </button>
-              <button
-                type="button"
-                class="action-button ghost compact"
-                :disabled="selectedOptimizationSnapshotIndex('exit') < 0 || selectedOptimizationSnapshotIndex('exit') >= selectedOptimizationSnapshots.length - 1"
-                @click="shiftOptimizationPoint('exit', 1)"
-              >
-                Next sell point
-              </button>
-            </div>
-            <p>{{ windowChartMarkers }}</p>
           </div>
-          <div class="optimizer-point-list">
-            <div
-              v-for="snapshotPoint in selectedOptimizationSnapshots"
-              :key="`${selectedOptimizationReview.id}:${snapshotPoint.id}`"
-              class="signal-row ledger-row optimizer-row"
-              :class="{ active: optimizationEntrySnapshotId === snapshotPoint.id || optimizationExitSnapshotId === snapshotPoint.id }"
-            >
-              <div>
-                <strong>{{ formatLocaleTimestamp(snapshotPoint.timestamp) }}</strong>
-                <p>
-                  {{ formatSignalActionLabel(snapshotPoint.signalAction) }} ·
-                  {{ formatSignalRegimeLabel(snapshotPoint) }}
-                </p>
-              </div>
-              <div class="optimizer-actions-inline">
-                <button type="button" class="action-button ghost compact" @click.stop="selectOptimizationPoint('entry', snapshotPoint)">
-                  Buy
-                </button>
-                <button type="button" class="action-button ghost compact" @click.stop="selectOptimizationPoint('exit', snapshotPoint)">
-                  Sell
-                </button>
-              </div>
-            </div>
-          </div>
-          <div class="optimizer-footer">
-            <textarea
-              v-model="optimizationNotes"
-              rows="3"
-              placeholder="Optional notes for this review"
-            />
-            <p v-if="optimizationError" class="status-warning">{{ optimizationError }}</p>
-            <button
-              type="button"
-              class="action-button"
-              :disabled="optimizationSaving || !selectedOptimizationSnapshots.length"
-              @click="saveWindowReviewOptimization"
-            >
-              {{ optimizationSaving ? 'Saving...' : selectedWindowOptimization ? 'Update optimization' : 'Save optimization' }}
-            </button>
+          <div class="chart-header-actions">
+            <span>{{ chartIntervalMinutes }}m interval</span>
           </div>
         </div>
-        <div v-else class="empty-state">Select a window to review its optimal points.</div>
-        <div v-if="windowOptimizationHistory.length" class="history-strip">
-          <article v-for="optimization in windowOptimizationHistory" :key="optimization.id" class="history-row optimization-history-row">
-            <div>
-              <strong>{{ optimization.symbol }}</strong>
-              <p>{{ formatLocaleTimestamp(optimization.updatedAt) }} · {{ formatWindowOptimizationChange(optimization.changePct) }}</p>
+        <div class="day-tabs">
+          <button
+            v-for="interval in chartIntervalOptions"
+            :key="interval"
+            type="button"
+            class="symbol-tab"
+            :class="{ active: chartIntervalMinutes === interval }"
+            @click="chartIntervalMinutes = interval"
+          >
+            {{ interval }}m
+          </button>
+        </div>
+        <p class="panel-intro">
+          Each chart keeps its own scale and uses the selected trade window as its reference. Price uses candles plus moving averages, while oscillators use their native shape and thresholds.
+        </p>
+        <div v-if="selectedWindowReview && selectedChartSnapshots.length" class="chart-grid">
+          <article v-for="chart in marketChartDefs" :key="chart.id" class="chart-card">
+            <div class="chart-card-header">
+              <div>
+                <h3>{{ chart.title }}</h3>
+                <p>{{ chart.subtitle }}</p>
+              </div>
+              <div class="chart-header-actions">
+                <span>{{ chart.series.map((series) => series.label).join(' · ') }}</span>
+                <button type="button" class="action-button ghost compact" @click="openExpandedChart(chart.id)">
+                  Open large
+                </button>
+              </div>
             </div>
-            <div class="history-actions">
-              <span>{{ optimization.windowId ? 'Linked window' : 'Window pending' }}</span>
-              <span>{{ optimization.day }}</span>
-            </div>
+            <MarketChart :chart="chart" :snapshots="selectedChartSnapshots" :interval-minutes="chartIntervalMinutes" :height="320" />
           </article>
         </div>
+        <p v-else class="empty-state">
+          Select a trade window to load the chart history for that buy/sell window.
+        </p>
       </section>
 
       <section class="panel">
@@ -2596,15 +2079,15 @@ onUnmounted(() => {
                 </div>
                 <div v-if="field.inputType === 'symbols'" class="symbol-add-row">
                   <input
-                    :id="field.key"
                     v-model="symbolAddDrafts[field.key]"
                     type="text"
-                    :placeholder="field.placeholder"
-                    :title="field.description"
+                    :placeholder="`Add ${field.label.toLowerCase()} symbol`"
+                    :aria-label="`Add ${field.label.toLowerCase()} symbol`"
+                    class="symbol-add-input"
                     @keydown.enter.prevent="addDraftSymbol(field)"
                   />
                   <button type="button" class="action-button ghost compact" @click="addDraftSymbol(field)">
-                    Add symbol
+                    Add
                   </button>
                 </div>
                 <template v-else-if="field.inputType === 'number'">
@@ -2685,68 +2168,34 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <div v-if="expandedChartView" class="chart-modal" @click.self="closeExpandedChart">
+      <div v-if="expandedChartDefinition" class="chart-modal" @click.self="closeExpandedChart">
         <article
           ref="chartModalCardRef"
           class="panel chart-modal-card"
           role="dialog"
           aria-modal="true"
-          :aria-labelledby="`expanded-chart-title-${expandedChartView.chart.id}`"
-          :aria-describedby="`expanded-chart-desc-${expandedChartView.chart.id}`"
+          :aria-labelledby="`expanded-chart-title-${expandedChartDefinition.id}`"
+          :aria-describedby="`expanded-chart-desc-${expandedChartDefinition.id}`"
           tabindex="-1"
         >
           <div class="panel-header">
             <div>
-              <h2 :id="`expanded-chart-title-${expandedChartView.chart.id}`">{{ expandedChartView.chart.title }}</h2>
-              <p>{{ expandedChartView.chart.subtitle }}</p>
+              <h2 :id="`expanded-chart-title-${expandedChartDefinition.id}`">{{ expandedChartDefinition.title }}</h2>
+              <p>{{ expandedChartDefinition.subtitle }}</p>
             </div>
             <button ref="chartModalCloseButton" type="button" class="action-button ghost compact" @click="closeExpandedChart">
               Close
             </button>
           </div>
           <div class="chart-legend">
-            <span v-for="line in expandedChartView.view.lines" :key="line.label" :title="`${line.label}: ${line.latestValue}`">
-              <i :style="{ background: line.color }"></i>
-              {{ line.label }} {{ line.latestValue }}
+            <span v-for="series in expandedChartDefinition.series" :key="`${expandedChartDefinition.id}-${series.label}`" :title="series.label">
+              <i :style="{ background: series.color }"></i>
+              {{ series.label }}
             </span>
           </div>
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="chart-svg chart-svg-expanded" aria-hidden="true">
-            <g v-for="line in expandedChartView.view.lines" :key="`expanded-${expandedChartView.chart.id}-${line.label}`">
-              <polyline
-                v-if="line.points"
-                :points="line.points"
-                fill="none"
-                :stroke="line.color"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </g>
-            <g
-              v-for="marker in expandedChartView.view.markers"
-              :key="`expanded-${expandedChartView.chart.id}-${marker.id}`"
-              @click.stop="selectOptimizationPointById(marker.kind, marker.snapshotId)"
-            >
-              <line
-                :x1="marker.x"
-                y1="0"
-                :x2="marker.x"
-                y2="100"
-                :class="marker.kind"
-                class="signal-marker-line"
-              />
-              <circle
-                :cx="marker.x"
-                :cy="marker.y"
-                r="1.9"
-                :class="marker.kind"
-                class="signal-marker-dot"
-              />
-              <title>{{ marker.kind === 'entry' ? 'Click to use as the buy point' : 'Click to use as the sell point' }}</title>
-            </g>
-          </svg>
-          <p :id="`expanded-chart-desc-${expandedChartView.chart.id}`" class="status-warning">
-            {{ formatLocaleTimestamp(expandedChartView.view.latestTimestamp) }}
+          <MarketChart :chart="expandedChartDefinition" :snapshots="selectedChartSnapshots" :interval-minutes="chartIntervalMinutes" :height="640" />
+          <p :id="`expanded-chart-desc-${expandedChartDefinition.id}`" class="status-warning">
+            {{ selectedWindowReview ? `${selectedWindowReview.symbol} · ${formatLocaleTimestamp(selectedWindowReview.lastSignalAt)}` : 'Select a trade window to populate the chart.' }}
           </p>
         </article>
       </div>
