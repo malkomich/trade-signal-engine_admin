@@ -672,10 +672,7 @@ function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
 }
 
 function syncWindowSelectionSymbol(selection: Ref<string>, symbol: string) {
-  if (!selection.value) {
-    return;
-  }
-  if (selection.value !== symbol) {
+  if (!selection.value || selection.value !== symbol) {
     selection.value = symbol;
   }
 }
@@ -1147,6 +1144,10 @@ type SignalDriverRow = {
   tone: "bullish" | "bearish" | "neutral";
 };
 
+const VOLUME_FLOW_RELATIVE_VOLUME_THRESHOLD = 1.05;
+const VOLUME_FLOW_VOLUME_PROFILE_THRESHOLD = 0.18;
+const VOLUME_FLOW_OBV_THRESHOLD = 0;
+
 function buildSignalDrivers(
   signal: AdminSignal | null,
   review: WindowReviewView | null,
@@ -1168,17 +1169,18 @@ function buildSignalDrivers(
   const isBuy = signalSide === "buy";
 
   if (snapshot.vwap !== null) {
-    const aligned = snapshot.close >= snapshot.vwap;
+    const aboveVwap = snapshot.close >= snapshot.vwap;
+    const vwapValue = isBuy
+      ? aboveVwap
+        ? "Price above VWAP"
+        : "Price below VWAP"
+      : aboveVwap
+        ? "Price extended above VWAP"
+        : "VWAP lost";
     drivers.push({
       label: "VWAP context",
-      value: aligned
-        ? isBuy
-          ? "Price above VWAP"
-          : "VWAP lost"
-        : isBuy
-          ? "Price below VWAP"
-          : "Price below VWAP",
-      tone: aligned ? "bullish" : "bearish",
+      value: vwapValue,
+      tone: aboveVwap ? "bullish" : "bearish",
     });
   }
 
@@ -1211,14 +1213,19 @@ function buildSignalDrivers(
   }
 
   if (snapshot.relativeVolume !== null || snapshot.volumeProfile !== null || snapshot.obv !== null) {
+    const obvPositive = snapshot.obv !== null && snapshot.obv > VOLUME_FLOW_OBV_THRESHOLD;
     const volumeConfirmed =
-      (snapshot.relativeVolume ?? 0) >= 1.05 ||
-      (snapshot.volumeProfile ?? 0) >= 0.18 ||
-      (snapshot.obv ?? 0) >= 0;
+      (snapshot.relativeVolume !== null && snapshot.relativeVolume >= VOLUME_FLOW_RELATIVE_VOLUME_THRESHOLD) ||
+      (snapshot.volumeProfile !== null && snapshot.volumeProfile >= VOLUME_FLOW_VOLUME_PROFILE_THRESHOLD) ||
+      obvPositive;
     drivers.push({
       label: "Volume flow",
-      value: volumeConfirmed ? "Participation supports move" : "Participation weak",
-      tone: volumeConfirmed ? "bullish" : "bearish",
+      value: snapshot.obv === null
+        ? "OBV unavailable"
+        : volumeConfirmed
+          ? "Participation supports move"
+          : "Participation weak",
+      tone: snapshot.obv === null ? "neutral" : volumeConfirmed ? "bullish" : "bearish",
     });
   }
 

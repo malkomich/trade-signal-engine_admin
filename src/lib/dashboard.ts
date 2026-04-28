@@ -736,14 +736,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     const openWindows = selectedDayWindows.filter((window) => window.status === 'open').length
     const closedWindows = selectedDayWindows.filter((window) => window.status === 'closed').length
     const latestVersionDocs = [...versionDocs].sort((left, right) => compareRealtimeDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
-    const signals = [...decisionSignals].sort((left, right) => {
-      const leftTimestamp = Date.parse(left.updatedAt)
-      const rightTimestamp = Date.parse(right.updatedAt)
-      if (leftTimestamp !== rightTimestamp) {
-        return rightTimestamp - leftTimestamp
-      }
-      return left.symbol.localeCompare(right.symbol)
-    })
+    const signals = decisionSignals
     const configVersion = String(latestSession?.config_version ?? latestVersion?.version ?? 'draft')
     const configVersions = latestVersionDocs.map((doc) => {
       const data = doc.data() as Record<string, unknown>
