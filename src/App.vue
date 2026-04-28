@@ -237,6 +237,24 @@ const selectedMarketWindowSnapshots = computed(() => {
   return findWindowSnapshots(review);
 });
 const selectedChartSnapshots = computed(() => {
+  const review = selectedMarketWindowReview.value;
+  if (!review) {
+    return [];
+  }
+  const symbolSnapshots = selectedDaySnapshots.value
+    .filter((snapshot) => snapshot.symbol === review.symbol)
+    .slice()
+    .sort((left, right) => {
+      const leftTimestamp = Date.parse(left.timestamp);
+      const rightTimestamp = Date.parse(right.timestamp);
+      if (leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp;
+      }
+      return left.id.localeCompare(right.id);
+    });
+  if (symbolSnapshots.length > 0) {
+    return symbolSnapshots;
+  }
   return selectedMarketWindowSnapshots.value;
 });
 const chartGroups = marketChartGroups;
@@ -1863,7 +1881,7 @@ function startRealtimeDashboardListeners(
   realtimeListenerKey = listenerKey;
   const paths = [
     `${MARKET_SESSIONS_COLLECTION}/${sessionId}`,
-    `${SIGNAL_EVENTS_COLLECTION}/${sessionId}/${marketDayKey}`,
+    `${SIGNAL_EVENTS_COLLECTION}/${sessionId}`,
     `${TRADE_WINDOWS_COLLECTION}/${sessionId}`,
     `${WINDOW_OPTIMIZATIONS_COLLECTION}/${sessionId}`,
     `${MARKET_SNAPSHOTS_COLLECTION}/${sessionId}/${marketDayKey}`,
@@ -2638,6 +2656,7 @@ onUnmounted(() => {
                     :chart="chart"
                     :snapshots="selectedChartSnapshots"
                     :interval-minutes="chartIntervalMinutes"
+                    :window-id="selectedWindowReview?.id ?? null"
                     :height="320"
                   />
                 </article>
@@ -2881,6 +2900,7 @@ onUnmounted(() => {
             :chart="expandedChartDefinition"
             :snapshots="selectedChartSnapshots"
             :interval-minutes="chartIntervalMinutes"
+            :window-id="selectedWindowReview?.id ?? null"
             :height="640"
           />
           <p

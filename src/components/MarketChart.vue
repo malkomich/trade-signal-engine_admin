@@ -10,6 +10,7 @@ const props = defineProps<{
   chart: ChartDefinition
   snapshots: MarketSnapshotRecord[]
   intervalMinutes: 1 | 5 | 10 | 30 | 60
+  windowId?: string | null
   height?: number
 }>()
 
@@ -21,7 +22,12 @@ function renderChart() {
   if (!chartInstance) {
     return
   }
-  const option: EChartsOption = buildChartOption(props.chart, props.snapshots, props.intervalMinutes)
+  const option: EChartsOption = buildChartOption(
+    props.chart,
+    props.snapshots,
+    props.intervalMinutes,
+    props.windowId,
+  )
   chartInstance.setOption(option, true)
 }
 
@@ -40,7 +46,7 @@ onMounted(() => {
 })
 
 watch(
-  () => [props.chart.id, props.intervalMinutes, props.snapshots],
+  () => [props.chart.id, props.intervalMinutes, props.windowId, props.snapshots],
   () => {
     renderChart()
   },

@@ -458,19 +458,18 @@ export const configFields: ConfigField[] = [
  */
 export function classifySignal(signal: AdminSignal): 'buy' | 'sell' | 'hold' {
   const action = signal.signalAction?.toUpperCase()
-  if (action === 'BUY_ALERT') {
+  if (action === 'BUY_ALERT' || action === 'BUY' || action === 'ACCEPT') {
     return 'buy'
   }
-  if (action === 'SELL_ALERT') {
+  if (action === 'SELL_ALERT' || action === 'SELL' || action === 'EXIT') {
     return 'sell'
   }
-  switch (signal.state) {
-    case 'ENTRY_SIGNALLED':
-    case 'ACCEPTED_OPEN':
-      return 'buy'
-    case 'EXIT_SIGNALLED':
-      return 'sell'
-    default:
-      return 'hold'
+  const state = signal.state?.toUpperCase() ?? ''
+  if (state === 'ENTRY_SIGNALLED' || state === 'ACCEPTED_OPEN' || state === 'ENTRY' || state === 'OPEN') {
+    return 'buy'
   }
+  if (state === 'EXIT_SIGNALLED' || state === 'EXIT' || state === 'CLOSE') {
+    return 'sell'
+  }
+  return 'hold'
 }

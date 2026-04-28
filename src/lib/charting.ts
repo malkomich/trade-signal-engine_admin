@@ -77,17 +77,21 @@ function mergeSnapshotValues(
 }
 
 function aggregateSnapshots(records: MarketSnapshotRecord[], intervalMinutes: number): AggregatedSnapshot[] {
-  const sortedRecords = [...records].sort((left, right) => {
-    const leftTimestamp = parseTimestamp(left.timestamp) ?? 0
-    const rightTimestamp = parseTimestamp(right.timestamp) ?? 0
-    if (leftTimestamp !== rightTimestamp) {
-      return leftTimestamp - rightTimestamp
-    }
-    if (left.symbol !== right.symbol) {
-      return left.symbol.localeCompare(right.symbol)
-    }
-    return left.id.localeCompare(right.id)
-  })
+  const sortedRecords = records
+    .map((record) => ({
+      record,
+      timestamp: parseTimestamp(record.timestamp) ?? 0,
+    }))
+    .sort((left, right) => {
+      if (left.timestamp !== right.timestamp) {
+        return left.timestamp - right.timestamp
+      }
+      if (left.record.symbol !== right.record.symbol) {
+        return left.record.symbol.localeCompare(right.record.symbol)
+      }
+      return left.record.id.localeCompare(right.record.id)
+    })
+    .map((item) => item.record)
 
   if (intervalMinutes <= 1 || sortedRecords.length <= 1) {
     return sortedRecords
@@ -195,7 +199,7 @@ function markerTooltip(record: MarketSnapshotRecord, chart: ChartDefinition, kin
   return parts.join(' · ')
 }
 
-function axisRange(points: AggregatedSnapshot[]) {
+function axisRange(points: AggregatedSnapshot[], intervalMinutes: number) {
   if (points.length === 0) {
     return null
   }
@@ -203,19 +207,37 @@ function axisRange(points: AggregatedSnapshot[]) {
   if (timestamps.length === 0) {
     return null
   }
-  const min = Math.min(...timestamps)
-  const max = Math.max(...timestamps)
+  let min = timestamps[0]
+  let max = timestamps[0]
+  for (let index = 1; index < timestamps.length; index += 1) {
+    const value = timestamps[index]
+    if (value < min) {
+      min = value
+    }
+    if (value > max) {
+      max = value
+    }
+  }
   const span = Math.max(max - min, 60 * 1000)
-  const padding = Math.max(span * 0.15, 2 * 60 * 1000)
+  const padding = Math.max(span * 0.2, intervalMinutes * 60 * 1000 * 4)
   return {
     min: min - padding,
     max: max + padding,
   }
 }
 
-function signalMarkerSeries(chart: ChartDefinition, snapshots: MarketSnapshotRecord[]): SeriesOption[] {
+function signalMarkerSeries(
+  chart: ChartDefinition,
+  snapshots: MarketSnapshotRecord[],
+  windowId?: string | null,
+): SeriesOption[] {
   const markers: Array<{ kind: SignalMarkerKind; snapshot: MarketSnapshotRecord }> = snapshots
-    .filter((snapshot) => snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' || snapshot.signalAction?.toUpperCase() === 'SELL_ALERT')
+    .filter((snapshot) => {
+      if (windowId && snapshot.windowId !== windowId) {
+        return false
+      }
+      return snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' || snapshot.signalAction?.toUpperCase() === 'SELL_ALERT'
+    })
     .map((snapshot) => ({
       kind: snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' ? 'buy' : 'sell',
       snapshot,
@@ -362,9 +384,14 @@ function buildTooltipFormatter(chart: ChartDefinition) {
   }
 }
 
-export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapshotRecord[], intervalMinutes: number): EChartsOption {
+export function buildChartOption(
+  chart: ChartDefinition,
+  snapshots: MarketSnapshotRecord[],
+  intervalMinutes: number,
+  windowId?: string | null,
+): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
-  const range = axisRange(points)
+  const range = axisRange(points, intervalMinutes)
   const axisLabelFormatter = (value: number) =>
     new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
@@ -451,7 +478,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
       series: [
         candleSeries(points),
         ...chart.series.map((series) => lineSeries(series, points, true)),
-        ...signalMarkerSeries(chart, snapshots),
+        ...signalMarkerSeries(chart, snapshots, windowId),
       ],
     }
   }
@@ -491,7 +518,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
             data: [{ yAxis: 30 }, { yAxis: 70 }],
           },
         },
-        ...signalMarkerSeries(chart, snapshots),
+        ...signalMarkerSeries(chart, snapshots, windowId),
       ],
     }
   }
@@ -505,7 +532,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
         ...baseOption,
         series: [
           ...chart.series.map((series) => lineSeries(series, points, false)),
-          ...signalMarkerSeries(chart, snapshots),
+          ...signalMarkerSeries(chart, snapshots, windowId),
         ],
       }
     }
@@ -521,7 +548,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
         histogramSeries(histogram, points, false),
         lineSeries(macd, points, false),
         lineSeries(signal, points, false),
-        ...signalMarkerSeries(chart, snapshots),
+        ...signalMarkerSeries(chart, snapshots, windowId),
       ],
     }
   }
@@ -530,7 +557,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
     ...baseOption,
     series: [
       ...chart.series.map((series) => lineSeries(series, points, false)),
-      ...signalMarkerSeries(chart, snapshots),
+      ...signalMarkerSeries(chart, snapshots, windowId),
     ],
   }
 }

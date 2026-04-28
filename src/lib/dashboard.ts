@@ -549,11 +549,20 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       month: '2-digit',
       day: '2-digit',
     }).format(new Date())
-    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(`${SIGNAL_EVENTS_COLLECTION}/${latestSessionId}/${marketDayKey}`)
+    const signalDocs = await loadRealtimeCollection<Record<string, unknown>>(`${SIGNAL_EVENTS_COLLECTION}/${latestSessionId}`)
     const versionDocs = await loadRealtimeCollection<Record<string, unknown>>(`${CONFIG_VERSIONS_COLLECTION}/${latestSessionId}`)
     const windowDocs = await loadRealtimeCollection<Record<string, unknown>>(`${TRADE_WINDOWS_COLLECTION}/${latestSessionId}`)
     const optimizationDocs = await loadRealtimeCollection<Record<string, unknown>>(`${WINDOW_OPTIMIZATIONS_COLLECTION}/${latestSessionId}`)
-    const selectedDaySignalDocs = signalDocs
+    const selectedDaySignalDocs = signalDocs.filter((doc) => {
+      const data = doc.data() as Record<string, unknown>
+      const timestamp =
+        data.timestamp ??
+        data.updatedAt ??
+        data.updated_at ??
+        data.created_at ??
+        data.createdAt
+      return marketDayKeyForTimestamp(timestamp) === marketDayKey
+    })
     const latestSignalDoc = selectLatestRealtimeDoc(selectedDaySignalDocs, ['timestamp', 'updated_at', 'updatedAt'])
     const latestSignal = latestSignalDoc?.data() as Record<string, unknown> | undefined
     const latestVersionDoc = selectLatestRealtimeDoc(versionDocs, ['updatedAt', 'updated_at', 'created_at'])
@@ -721,14 +730,14 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
 
     const hasLiveData =
       sessionDocs.length > 0 ||
-      selectedDaySignals.length > 0 ||
+      selectedDaySignalDocs.length > 0 ||
       versionDocs.length > 0 ||
       windowDocs.length > 0 ||
       selectedDaySnapshots.length > 0
     const source = hasLiveData ? 'live' : 'empty'
     const warning = hasLiveData
       ? selectedDaySnapshots.length === 0
-            ? 'No live trading snapshots are available for the selected day yet.'
+        ? 'No live trading snapshots are available for the selected day yet.'
         : signals.length === 0
           ? 'No live trading decisions have been written for the selected day yet.'
           : null
@@ -737,7 +746,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     return {
       source,
       warning,
-        snapshot: {
+      snapshot: {
         metrics: [
           { label: 'Buy signals today', value: String(buySignalCount) },
           { label: 'Sell signals today', value: String(sellSignalCount) },
