@@ -85,4 +85,32 @@ describe('charting', () => {
     expect(series[1]?.name).toBe('MACD')
     expect(series[2]?.name).toBe('Signal')
   })
+
+  it('filters signal markers to the selected window', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-ema')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({
+          id: 'snapshot-a',
+          windowId: 'window-1',
+          timestamp: '2026-04-24T13:30:00.000Z',
+          signalAction: 'BUY_ALERT',
+        }),
+        makeSnapshot({
+          id: 'snapshot-b',
+          windowId: 'window-2',
+          timestamp: '2026-04-24T13:35:00.000Z',
+          signalAction: 'SELL_ALERT',
+        }),
+      ],
+      1,
+      'window-1',
+    )
+
+    const series = option.series as Array<{ type?: string; name?: string }>
+    const markerSeries = series.filter((item) => item.type === 'scatter')
+    expect(markerSeries).toHaveLength(1)
+    expect(markerSeries[0]?.name).toBe('Buy')
+  })
 })

@@ -20,4 +20,13 @@ describe('signal classification', () => {
   it('marks expired signals as hold', () => {
     expect(classifySignal({ ...sampleSignals[0], state: 'EXPIRED' })).toBe('hold')
   })
+
+  it('accepts explicit buy and sell signal labels', () => {
+    expect(
+      classifySignal({ ...sampleSignals[0], signalAction: 'BUY' }),
+    ).toBe('buy')
+    expect(
+      classifySignal({ ...sampleSignals[2], signalAction: 'SELL' }),
+    ).toBe('sell')
+  })
 })

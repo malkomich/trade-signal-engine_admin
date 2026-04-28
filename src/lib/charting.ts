@@ -195,7 +195,7 @@ function markerTooltip(record: MarketSnapshotRecord, chart: ChartDefinition, kin
   return parts.join(' · ')
 }
 
-function axisRange(points: AggregatedSnapshot[]) {
+function axisRange(points: AggregatedSnapshot[], intervalMinutes: number) {
   if (points.length === 0) {
     return null
   }
@@ -206,16 +206,25 @@ function axisRange(points: AggregatedSnapshot[]) {
   const min = Math.min(...timestamps)
   const max = Math.max(...timestamps)
   const span = Math.max(max - min, 60 * 1000)
-  const padding = Math.max(span * 0.15, 2 * 60 * 1000)
+  const padding = Math.max(span * 0.2, intervalMinutes * 60 * 1000 * 4)
   return {
     min: min - padding,
     max: max + padding,
   }
 }
 
-function signalMarkerSeries(chart: ChartDefinition, snapshots: MarketSnapshotRecord[]): SeriesOption[] {
+function signalMarkerSeries(
+  chart: ChartDefinition,
+  snapshots: MarketSnapshotRecord[],
+  windowId?: string | null,
+): SeriesOption[] {
   const markers: Array<{ kind: SignalMarkerKind; snapshot: MarketSnapshotRecord }> = snapshots
-    .filter((snapshot) => snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' || snapshot.signalAction?.toUpperCase() === 'SELL_ALERT')
+    .filter((snapshot) => {
+      if (windowId && snapshot.windowId !== windowId) {
+        return false
+      }
+      return snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' || snapshot.signalAction?.toUpperCase() === 'SELL_ALERT'
+    })
     .map((snapshot) => ({
       kind: snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' ? 'buy' : 'sell',
       snapshot,
@@ -362,9 +371,14 @@ function buildTooltipFormatter(chart: ChartDefinition) {
   }
 }
 
-export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapshotRecord[], intervalMinutes: number): EChartsOption {
+export function buildChartOption(
+  chart: ChartDefinition,
+  snapshots: MarketSnapshotRecord[],
+  intervalMinutes: number,
+  windowId?: string | null,
+): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
-  const range = axisRange(points)
+  const range = axisRange(points, intervalMinutes)
   const axisLabelFormatter = (value: number) =>
     new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
@@ -451,7 +465,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
       series: [
         candleSeries(points),
         ...chart.series.map((series) => lineSeries(series, points, true)),
-        ...signalMarkerSeries(chart, snapshots),
+        ...signalMarkerSeries(chart, snapshots, windowId),
       ],
     }
   }
@@ -491,7 +505,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
             data: [{ yAxis: 30 }, { yAxis: 70 }],
           },
         },
-        ...signalMarkerSeries(chart, snapshots),
+        ...signalMarkerSeries(chart, snapshots, windowId),
       ],
     }
   }
@@ -505,7 +519,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
         ...baseOption,
         series: [
           ...chart.series.map((series) => lineSeries(series, points, false)),
-          ...signalMarkerSeries(chart, snapshots),
+          ...signalMarkerSeries(chart, snapshots, windowId),
         ],
       }
     }
@@ -521,7 +535,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
         histogramSeries(histogram, points, false),
         lineSeries(macd, points, false),
         lineSeries(signal, points, false),
-        ...signalMarkerSeries(chart, snapshots),
+        ...signalMarkerSeries(chart, snapshots, windowId),
       ],
     }
   }
@@ -530,7 +544,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
     ...baseOption,
     series: [
       ...chart.series.map((series) => lineSeries(series, points, false)),
-      ...signalMarkerSeries(chart, snapshots),
+      ...signalMarkerSeries(chart, snapshots, windowId),
     ],
   }
 }
