@@ -29,4 +29,10 @@ describe('signal classification', () => {
       classifySignal({ ...sampleSignals[2], signalAction: 'SELL' }),
     ).toBe('sell')
   })
+
+  it('treats missing signal state as hold', () => {
+    expect(
+      classifySignal({ ...sampleSignals[0], state: undefined as never }),
+    ).toBe('hold')
+  })
 })

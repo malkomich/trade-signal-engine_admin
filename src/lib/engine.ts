@@ -464,7 +464,7 @@ export function classifySignal(signal: AdminSignal): 'buy' | 'sell' | 'hold' {
   if (action === 'SELL_ALERT' || action === 'SELL' || action === 'EXIT') {
     return 'sell'
   }
-  const state = signal.state.toUpperCase()
+  const state = signal.state?.toUpperCase() ?? ''
   if (state === 'ENTRY_SIGNALLED' || state === 'ACCEPTED_OPEN' || state === 'ENTRY' || state === 'OPEN') {
     return 'buy'
   }

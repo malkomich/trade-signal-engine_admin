@@ -556,9 +556,9 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     const selectedDaySignalDocs = signalDocs.filter((doc) => {
       const data = doc.data() as Record<string, unknown>
       const timestamp =
+        data.timestamp ??
         data.updatedAt ??
         data.updated_at ??
-        data.timestamp ??
         data.created_at ??
         data.createdAt
       return marketDayKeyForTimestamp(timestamp) === marketDayKey

@@ -77,17 +77,21 @@ function mergeSnapshotValues(
 }
 
 function aggregateSnapshots(records: MarketSnapshotRecord[], intervalMinutes: number): AggregatedSnapshot[] {
-  const sortedRecords = [...records].sort((left, right) => {
-    const leftTimestamp = parseTimestamp(left.timestamp) ?? 0
-    const rightTimestamp = parseTimestamp(right.timestamp) ?? 0
-    if (leftTimestamp !== rightTimestamp) {
-      return leftTimestamp - rightTimestamp
-    }
-    if (left.symbol !== right.symbol) {
-      return left.symbol.localeCompare(right.symbol)
-    }
-    return left.id.localeCompare(right.id)
-  })
+  const sortedRecords = records
+    .map((record) => ({
+      record,
+      timestamp: parseTimestamp(record.timestamp) ?? 0,
+    }))
+    .sort((left, right) => {
+      if (left.timestamp !== right.timestamp) {
+        return left.timestamp - right.timestamp
+      }
+      if (left.record.symbol !== right.record.symbol) {
+        return left.record.symbol.localeCompare(right.record.symbol)
+      }
+      return left.record.id.localeCompare(right.record.id)
+    })
+    .map((item) => item.record)
 
   if (intervalMinutes <= 1 || sortedRecords.length <= 1) {
     return sortedRecords
@@ -203,8 +207,17 @@ function axisRange(points: AggregatedSnapshot[], intervalMinutes: number) {
   if (timestamps.length === 0) {
     return null
   }
-  const min = Math.min(...timestamps)
-  const max = Math.max(...timestamps)
+  let min = timestamps[0]
+  let max = timestamps[0]
+  for (let index = 1; index < timestamps.length; index += 1) {
+    const value = timestamps[index]
+    if (value < min) {
+      min = value
+    }
+    if (value > max) {
+      max = value
+    }
+  }
   const span = Math.max(max - min, 60 * 1000)
   const padding = Math.max(span * 0.2, intervalMinutes * 60 * 1000 * 4)
   return {
