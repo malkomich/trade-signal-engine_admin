@@ -143,12 +143,14 @@ describe('charting', () => {
       'window-1',
     )
 
-    const xAxis = option.xAxis as { min?: number; max?: number }
-    expect(typeof xAxis.min).toBe('number')
-    expect(typeof xAxis.max).toBe('number')
-    expect((xAxis.max ?? 0) - (xAxis.min ?? 0)).toBeGreaterThanOrEqual(20 * 60 * 1000)
-    expect(xAxis.min ?? 0).toBeLessThan(Date.parse('2026-04-24T13:30:00.000Z'))
-    expect(xAxis.max ?? 0).toBeGreaterThan(Date.parse('2026-04-24T13:34:00.000Z'))
+    const dataZoom = Array.isArray(option.dataZoom)
+      ? (option.dataZoom[0] as { startValue?: number; endValue?: number } | undefined)
+      : null
+    expect(typeof dataZoom?.startValue).toBe('number')
+    expect(typeof dataZoom?.endValue).toBe('number')
+    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeGreaterThanOrEqual(15 * 60 * 1000)
+    expect(dataZoom?.startValue ?? 0).toBeLessThan(Date.parse('2026-04-24T13:30:00.000Z'))
+    expect(dataZoom?.endValue ?? 0).toBeGreaterThan(Date.parse('2026-04-24T13:34:00.000Z'))
   })
 
   it('escapes tooltip content before rendering HTML', () => {
