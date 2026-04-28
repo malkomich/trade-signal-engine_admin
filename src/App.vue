@@ -1,11 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch, type Ref } from 'vue'
-import { signInAnonymously } from 'firebase/auth'
-import { onValue, ref as databaseRef, type Unsubscribe } from 'firebase/database'
-import { type MessagePayload } from 'firebase/messaging'
-import MarketChart from './components/MarketChart.vue'
-import { classifySignal } from './lib/engine'
-import { auth, rtdb } from './lib/firebase'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+  watch,
+  type Ref,
+} from "vue";
+import { signInAnonymously } from "firebase/auth";
+import {
+  onValue,
+  ref as databaseRef,
+  type Unsubscribe,
+} from "firebase/database";
+import { type MessagePayload } from "firebase/messaging";
+import MarketChart from "./components/MarketChart.vue";
+import { classifySignal } from "./lib/engine";
+import { auth, rtdb } from "./lib/firebase";
 import {
   applyConfigVersion,
   loadDashboardSnapshot,
@@ -16,9 +29,17 @@ import {
   type DashboardSource,
   type MarketSnapshotRecord,
   type TradeWindowRecord,
-} from './lib/dashboard'
-import { currentMarketDayKey, formatMarketDayLabel, marketDayKeyForTimestamp } from './lib/market-day'
-import { chartIntervals as chartIntervalOptions, marketCharts as marketChartDefs } from './lib/chart-definitions'
+} from "./lib/dashboard";
+import {
+  currentMarketDayKey,
+  formatMarketDayLabel,
+  marketDayKeyForTimestamp,
+} from "./lib/market-day";
+import {
+  chartIntervals as chartIntervalOptions,
+  marketChartGroups,
+  marketCharts as marketChartDefs,
+} from "./lib/chart-definitions";
 import {
   CONFIG_VERSIONS_COLLECTION,
   MARKET_SESSIONS_COLLECTION,
@@ -26,796 +47,920 @@ import {
   SIGNAL_EVENTS_COLLECTION,
   TRADE_WINDOWS_COLLECTION,
   WINDOW_OPTIMIZATIONS_COLLECTION,
-} from './lib/schema'
+} from "./lib/schema";
 import {
   probeLiveSignalNotifications,
   setupLiveSignalNotifications,
   stopLiveSignalNotifications,
   type NotificationSetupState,
-} from './lib/notifications'
-import { configFields, type AdminSignal, type ConfigField, type ConfigFieldValue } from './lib/engine'
+} from "./lib/notifications";
+import {
+  configFields,
+  type AdminSignal,
+  type ConfigField,
+  type ConfigFieldValue,
+} from "./lib/engine";
 
-const snapshot = ref<DashboardSnapshot | null>(null)
-const selectedSignal = ref<DashboardSnapshot['selectedSignal'] | null>(null)
-const selectedMarketSymbol = ref<string>('')
-const selectedDecisionSymbol = ref<string>('')
-const selectedMarketDay = ref<string>(currentMarketDayKey())
-const chartIntervalMinutes = ref<1 | 5 | 10 | 30 | 60>(1)
-const marketWindowPage = ref(0)
-const selectedMarketWindowReviewId = ref<string>('')
-const selectedWindowSymbol = ref<string>('')
-const selectedOptimizationSymbol = ref<string>('')
-const dashboardClock = ref(Date.now())
-const loading = ref(true)
-const authState = ref<'booting' | 'authenticating' | 'authenticated' | 'offline'>('booting')
-const snapshotSource = ref<DashboardSource>('empty')
-const snapshotWarning = ref<string | null>(null)
-const liveDataAvailable = ref(true)
-const notificationState = ref<NotificationSetupState>('unsupported')
-const notificationMessage = ref<string | null>(null)
-const selectedLedgerSnapshotId = ref<string>('')
-const selectedWindowReviewId = ref<string>('')
-const selectedOptimizationReviewId = ref<string>('')
-const liveSignalPage = ref(0)
-const expandedChartId = ref<string | null>(null)
-const chartModalCardRef = ref<HTMLElement | null>(null)
-const chartModalCloseButton = ref<HTMLButtonElement | null>(null)
-let chartModalPreviousFocus: HTMLElement | null = null
-let notificationSetupGeneration = 0
-let isMounted = true
-let dashboardRefreshTimer: number | null = null
-let dashboardRefreshInFlight = false
-let dashboardRefreshQueued = false
-let dashboardClockTimer: number | null = null
-let dashboardVisibilityChangeHandler: (() => void) | null = null
-let realtimeUnsubscribers: Unsubscribe[] = []
-let realtimeListenerKey = ''
-const triageFilter = ref<'all' | 'buy' | 'sell'>('all')
-const triageFilters = ['all', 'buy', 'sell'] as const
-const selectedConfigVersionId = ref<string>('current')
-const configDraft = reactive<Record<string, string | number>>({})
-const symbolAddDrafts = reactive<Record<string, string>>({})
-const optimizationEntrySnapshotId = ref<string>('')
-const optimizationExitSnapshotId = ref<string>('')
-const optimizationNotes = ref('')
-const optimizationSaving = ref(false)
-const optimizationError = ref<string | null>(null)
-const DASHBOARD_REFRESH_INTERVAL_MS = 30_000
-const LIVE_SIGNAL_PAGE_SIZE = 20
-const getMarketDayKey = (value: string | Date) => marketDayKeyForTimestamp(value) || currentMarketDayKey()
-const sessionOverview = computed(() => snapshot.value?.sessionOverview ?? emptySessionOverview())
-const marketSnapshots = computed(() => snapshot.value?.marketSnapshots ?? [])
-const tradeWindows = computed(() => snapshot.value?.windows ?? [])
-const availableMarketDays = computed(() => {
-  const days = new Set<string>()
-  for (const signal of snapshot.value?.signals ?? []) {
-    days.add(getMarketDayKey(signal.updatedAt))
-  }
-  for (const window of tradeWindows.value) {
-    days.add(getMarketDayKey(window.openedAt))
-    if (window.closedAt) {
-      days.add(getMarketDayKey(window.closedAt))
-    }
-  }
-  for (const marketSnapshot of marketSnapshots.value) {
-    days.add(getMarketDayKey(marketSnapshot.timestamp))
-  }
-  days.add(currentMarketDayKey())
-  return Array.from(days).sort((left, right) => right.localeCompare(left))
-})
+const snapshot = ref<DashboardSnapshot | null>(null);
+const selectedSignal = ref<DashboardSnapshot["selectedSignal"] | null>(null);
+const selectedDecisionSymbol = ref<string>("");
+const selectedMarketDay = ref<string>(currentMarketDayKey());
+const chartIntervalMinutes = ref<1 | 5 | 10 | 30 | 60>(1);
+const marketWindowPage = ref(0);
+const selectedMarketWindowReviewId = ref<string>("");
+const selectedWindowSymbol = ref<string>("");
+const selectedOptimizationSymbol = ref<string>("");
+const dashboardClock = ref(Date.now());
+const loading = ref(true);
+const authState = ref<
+  "booting" | "authenticating" | "authenticated" | "offline"
+>("booting");
+const snapshotSource = ref<DashboardSource>("empty");
+const snapshotWarning = ref<string | null>(null);
+const liveDataAvailable = ref(true);
+const notificationState = ref<NotificationSetupState>("unsupported");
+const notificationMessage = ref<string | null>(null);
+const selectedLedgerSnapshotId = ref<string>("");
+const selectedWindowReviewId = ref<string>("");
+const selectedOptimizationReviewId = ref<string>("");
+const liveSignalPage = ref(0);
+const expandedChartId = ref<string | null>(null);
+const chartModalCardRef = ref<HTMLElement | null>(null);
+const chartModalCloseButton = ref<HTMLButtonElement | null>(null);
+let chartModalPreviousFocus: HTMLElement | null = null;
+let notificationSetupGeneration = 0;
+let isMounted = true;
+let dashboardRefreshTimer: number | null = null;
+let dashboardRefreshInFlight = false;
+let dashboardRefreshQueued = false;
+let dashboardClockTimer: number | null = null;
+let dashboardVisibilityChangeHandler: (() => void) | null = null;
+let realtimeUnsubscribers: Unsubscribe[] = [];
+let realtimeListenerKey = "";
+const triageFilter = ref<"all" | "buy" | "sell">("all");
+const triageFilters = ["all", "buy", "sell"] as const;
+const selectedConfigVersionId = ref<string>("current");
+const configDraft = reactive<Record<string, string | number>>({});
+const symbolAddDrafts = reactive<Record<string, string>>({});
+const optimizationEntrySnapshotId = ref<string>("");
+const optimizationExitSnapshotId = ref<string>("");
+const optimizationNotes = ref("");
+const optimizationSaving = ref(false);
+const optimizationError = ref<string | null>(null);
+const collapsedChartGroups = reactive<Record<string, boolean>>({});
+const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
+const LIVE_SIGNAL_PAGE_SIZE = 20;
+const getMarketDayKey = (value: string | Date) =>
+  marketDayKeyForTimestamp(value) || currentMarketDayKey();
+const sessionOverview = computed(
+  () => snapshot.value?.sessionOverview ?? emptySessionOverview(),
+);
+const marketSnapshots = computed(() => snapshot.value?.marketSnapshots ?? []);
+const tradeWindows = computed(() => snapshot.value?.windows ?? []);
 const selectedDaySnapshots = computed(() => {
-  return marketSnapshots.value.filter((record) => getMarketDayKey(record.timestamp) === selectedMarketDay.value)
-})
+  return marketSnapshots.value.filter(
+    (record) => getMarketDayKey(record.timestamp) === selectedMarketDay.value,
+  );
+});
 const selectedDaySignals = computed(() => {
-  const signals = snapshot.value?.signals ?? []
-  return signals.filter((signal) => getMarketDayKey(signal.updatedAt) === selectedMarketDay.value)
-})
+  const signals = snapshot.value?.signals ?? [];
+  return signals.filter(
+    (signal) => getMarketDayKey(signal.updatedAt) === selectedMarketDay.value,
+  );
+});
 const marketSymbols = computed(() => {
-  const symbols = new Set<string>()
-  const monitoredSymbols = snapshot.value?.configFields.find((field) => field.key === 'monitored_symbols')?.value
+  const symbols = new Set<string>();
+  const monitoredSymbols = snapshot.value?.configFields.find(
+    (field) => field.key === "monitored_symbols",
+  )?.value;
   if (Array.isArray(monitoredSymbols)) {
     for (const symbol of monitoredSymbols) {
-      const normalized = String(symbol).trim().toUpperCase()
+      const normalized = String(symbol).trim().toUpperCase();
       if (normalized) {
-        symbols.add(normalized)
+        symbols.add(normalized);
       }
     }
   }
   const benchmarkSymbol = String(
-    snapshot.value?.configFields.find((field) => field.key === 'benchmark_symbol')?.value ?? 'QQQ',
+    snapshot.value?.configFields.find(
+      (field) => field.key === "benchmark_symbol",
+    )?.value ?? "QQQ",
   )
     .trim()
-    .toUpperCase()
+    .toUpperCase();
   for (const signal of selectedDaySignals.value) {
     if (signal.symbol && signal.symbol !== benchmarkSymbol) {
-      symbols.add(signal.symbol)
+      symbols.add(signal.symbol);
     }
   }
   for (const snapshotRecord of selectedDaySnapshots.value) {
     if (snapshotRecord.symbol && snapshotRecord.symbol !== benchmarkSymbol) {
-      symbols.add(snapshotRecord.symbol)
+      symbols.add(snapshotRecord.symbol);
     }
   }
   for (const window of tradeWindows.value) {
-    if (getMarketDayKey(window.openedAt) === selectedMarketDay.value || (window.closedAt ? getMarketDayKey(window.closedAt) === selectedMarketDay.value : false)) {
+    if (
+      getMarketDayKey(window.openedAt) === selectedMarketDay.value ||
+      (window.closedAt
+        ? getMarketDayKey(window.closedAt) === selectedMarketDay.value
+        : false)
+    ) {
       if (window.symbol && window.symbol !== benchmarkSymbol) {
-        symbols.add(window.symbol)
+        symbols.add(window.symbol);
       }
     }
   }
-  return Array.from(symbols).sort()
-})
+  return Array.from(symbols).sort();
+});
 const decisionSymbols = computed(() => {
-  const symbols = new Set<string>()
+  const symbols = new Set<string>();
   for (const signal of selectedDaySignals.value) {
-    if (classifySignal(signal) === 'hold') {
-      continue
+    if (classifySignal(signal) === "hold") {
+      continue;
     }
     if (signal.symbol) {
-      symbols.add(signal.symbol)
+      symbols.add(signal.symbol);
     }
   }
-  return Array.from(symbols).sort()
-})
+  return Array.from(symbols).sort();
+});
 const selectedMarketSnapshots = computed(() => {
-  if (!selectedMarketSymbol.value) {
-    return selectedDaySnapshots.value
-  }
-  return selectedDaySnapshots.value.filter((record) => record.symbol === selectedMarketSymbol.value)
-})
+  return selectedDaySnapshots.value;
+});
 const marketWindowReviews = computed(() => {
   return tradeWindows.value
-    .filter((window) => marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value || marketDayKeyForTimestamp(window.closedAt ?? '') === selectedMarketDay.value)
-    .filter((window) => !selectedMarketSymbol.value || window.symbol === selectedMarketSymbol.value)
+    .filter(
+      (window) =>
+        marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value ||
+        marketDayKeyForTimestamp(window.closedAt ?? "") ===
+          selectedMarketDay.value,
+    )
+    .filter(
+      (window) =>
+        !selectedWindowSymbol.value ||
+        window.symbol === selectedWindowSymbol.value,
+    )
     .slice()
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
     .map((window) => decorateWindowReview(window, dashboardClock.value))
-})
+    .sort(
+      (left, right) =>
+        (right.lastSignalAt ? Date.parse(right.lastSignalAt) : 0) -
+        (left.lastSignalAt ? Date.parse(left.lastSignalAt) : 0),
+    );
+});
 const selectedMarketWindowReviews = computed(() => {
-  const start = marketWindowPage.value * windowReviewPageSize
-  const end = start + windowReviewPageSize
-  return marketWindowReviews.value.slice(start, end)
-})
+  const start = marketWindowPage.value * windowReviewPageSize;
+  const end = start + windowReviewPageSize;
+  return marketWindowReviews.value.slice(start, end);
+});
 const marketWindowPageCount = computed(() => {
-  return Math.max(1, Math.ceil(marketWindowReviews.value.length / windowReviewPageSize))
-})
+  return Math.max(
+    1,
+    Math.ceil(marketWindowReviews.value.length / windowReviewPageSize),
+  );
+});
 const selectedMarketWindowReview = computed<WindowReviewView | null>(() => {
   if (!marketWindowReviews.value.length) {
-    return null
+    return null;
   }
-  return marketWindowReviews.value.find((review) => review.id === selectedMarketWindowReviewId.value) ?? marketWindowReviews.value[0]
-})
+  return (
+    marketWindowReviews.value.find(
+      (review) => review.id === selectedMarketWindowReviewId.value,
+    ) ?? marketWindowReviews.value[0]
+  );
+});
 const selectedMarketWindowSnapshots = computed(() => {
-  const review = selectedMarketWindowReview.value
+  const review = selectedMarketWindowReview.value;
   if (!review) {
-    return []
+    return [];
   }
-  return findWindowSnapshots(review)
-})
+  return findWindowSnapshots(review);
+});
 const selectedChartSnapshots = computed(() => {
-  return selectedMarketWindowSnapshots.value
-})
-const marketLedgerPageSize = 12
-const marketLedgerPage = ref(0)
-const triagePageSize = 12
-const triagePage = ref(0)
-const windowReviewPageSize = 6
-const windowReviewPage = ref(0)
+  return selectedMarketWindowSnapshots.value;
+});
+const chartGroups = marketChartGroups;
+const marketLedgerPageSize = 12;
+const marketLedgerPage = ref(0);
+const triagePageSize = 12;
+const triagePage = ref(0);
+const windowReviewPageSize = 6;
+const windowReviewPage = ref(0);
 const latestMarketSnapshots = computed(() => {
-  const start = marketLedgerPage.value * marketLedgerPageSize
-  const end = start + marketLedgerPageSize
-  return selectedMarketSnapshots.value.slice(-50).reverse().slice(start, end)
-})
-const marketLedgerPageCount = computed(() => Math.max(1, Math.ceil(Math.min(50, selectedMarketSnapshots.value.length) / marketLedgerPageSize)))
+  const start = marketLedgerPage.value * marketLedgerPageSize;
+  const end = start + marketLedgerPageSize;
+  return selectedMarketSnapshots.value.slice(-50).reverse().slice(start, end);
+});
+const marketLedgerPageCount = computed(() =>
+  Math.max(
+    1,
+    Math.ceil(
+      Math.min(50, selectedMarketSnapshots.value.length) / marketLedgerPageSize,
+    ),
+  ),
+);
 const liveSignals = computed(() => {
   return selectedDaySignals.value
-    .filter((signal) => classifySignal(signal) !== 'hold')
-    .reverse()
-})
+    .filter((signal) => classifySignal(signal) !== "hold")
+    .reverse();
+});
 const liveSignalPageSignals = computed(() => {
-  const start = liveSignalPage.value * LIVE_SIGNAL_PAGE_SIZE
-  const end = start + LIVE_SIGNAL_PAGE_SIZE
-  return liveSignals.value.slice(start, end)
-})
-const liveSignalPageCount = computed(() => Math.max(1, Math.ceil(liveSignals.value.length / LIVE_SIGNAL_PAGE_SIZE)))
+  const start = liveSignalPage.value * LIVE_SIGNAL_PAGE_SIZE;
+  const end = start + LIVE_SIGNAL_PAGE_SIZE;
+  return liveSignals.value.slice(start, end);
+});
+const liveSignalPageCount = computed(() =>
+  Math.max(1, Math.ceil(liveSignals.value.length / LIVE_SIGNAL_PAGE_SIZE)),
+);
 const selectedLedgerSnapshot = computed(() => {
-  const snapshotId = selectedLedgerSnapshotId.value
+  const snapshotId = selectedLedgerSnapshotId.value;
   if (!snapshotId) {
-    return latestMarketSnapshots.value[0] ?? null
+    return latestMarketSnapshots.value[0] ?? null;
   }
-  return selectedMarketSnapshots.value.find((record) => record.id === snapshotId) ?? latestMarketSnapshots.value[0] ?? null
-})
+  return (
+    selectedMarketSnapshots.value.find((record) => record.id === snapshotId) ??
+    latestMarketSnapshots.value[0] ??
+    null
+  );
+});
 const allWindowReviews = computed(() => {
   return tradeWindows.value
-    .filter((window) => marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value || marketDayKeyForTimestamp(window.closedAt ?? '') === selectedMarketDay.value)
-    .filter((window) => !selectedWindowSymbol.value || window.symbol === selectedWindowSymbol.value)
+    .filter(
+      (window) =>
+        marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value ||
+        marketDayKeyForTimestamp(window.closedAt ?? "") ===
+          selectedMarketDay.value,
+    )
+    .filter(
+      (window) =>
+        !selectedWindowSymbol.value ||
+        window.symbol === selectedWindowSymbol.value,
+    )
     .slice()
     .map((window) => decorateWindowReview(window, dashboardClock.value))
-    .sort((left, right) => Date.parse(right.lastSignalAt) - Date.parse(left.lastSignalAt))
-})
+    .sort(
+      (left, right) =>
+        (right.lastSignalAt ? Date.parse(right.lastSignalAt) : 0) -
+        (left.lastSignalAt ? Date.parse(left.lastSignalAt) : 0),
+    );
+});
 const allOptimizationReviews = computed(() => {
   return tradeWindows.value
-    .filter((window) => marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value || marketDayKeyForTimestamp(window.closedAt ?? '') === selectedMarketDay.value)
-    .filter((window) => !selectedOptimizationSymbol.value || window.symbol === selectedOptimizationSymbol.value)
+    .filter(
+      (window) =>
+        marketDayKeyForTimestamp(window.openedAt) === selectedMarketDay.value ||
+        marketDayKeyForTimestamp(window.closedAt ?? "") ===
+          selectedMarketDay.value,
+    )
+    .filter(
+      (window) =>
+        !selectedOptimizationSymbol.value ||
+        window.symbol === selectedOptimizationSymbol.value,
+    )
     .slice()
     .map((window) => decorateWindowReview(window, dashboardClock.value))
-    .sort((left, right) => Date.parse(right.lastSignalAt) - Date.parse(left.lastSignalAt))
-})
+    .sort(
+      (left, right) =>
+        (right.lastSignalAt ? Date.parse(right.lastSignalAt) : 0) -
+        (left.lastSignalAt ? Date.parse(left.lastSignalAt) : 0),
+    );
+});
 const selectedWindowReview = computed<WindowReviewView | null>(() => {
   if (!allWindowReviews.value.length) {
-    return null
+    return null;
   }
-  return allWindowReviews.value.find((review) => review.id === selectedWindowReviewId.value) ?? allWindowReviews.value[0]
-})
+  return (
+    allWindowReviews.value.find(
+      (review) => review.id === selectedWindowReviewId.value,
+    ) ?? allWindowReviews.value[0]
+  );
+});
 const selectedOptimizationReview = computed<WindowReviewView | null>(() => {
   if (!allOptimizationReviews.value.length) {
-    return null
+    return null;
   }
-  return allOptimizationReviews.value.find((review) => review.id === selectedOptimizationReviewId.value) ?? allOptimizationReviews.value[0]
-})
+  return (
+    allOptimizationReviews.value.find(
+      (review) => review.id === selectedOptimizationReviewId.value,
+    ) ?? allOptimizationReviews.value[0]
+  );
+});
 const selectedOptimizationSnapshots = computed(() => {
-  const review = selectedOptimizationReview.value
+  const review = selectedOptimizationReview.value;
   if (!review) {
-    return []
+    return [];
   }
-  return findWindowSnapshots(review)
-})
+  return findWindowSnapshots(review);
+});
 const selectedWindowReviews = computed(() => {
-  const start = windowReviewPage.value * windowReviewPageSize
-  const end = start + windowReviewPageSize
-  return allWindowReviews.value.slice(start, end)
-})
+  const start = windowReviewPage.value * windowReviewPageSize;
+  const end = start + windowReviewPageSize;
+  return allWindowReviews.value.slice(start, end);
+});
 const windowReviewPageCount = computed(() => {
-  return Math.max(1, Math.ceil(allWindowReviews.value.length / windowReviewPageSize))
-})
+  return Math.max(
+    1,
+    Math.ceil(allWindowReviews.value.length / windowReviewPageSize),
+  );
+});
 const windowChartMarkers = computed(() => {
-  const review = selectedOptimizationReview.value
+  const review = selectedOptimizationReview.value;
   if (!review) {
-    return 'Select a window to inspect its buy and sell markers.'
+    return "Select a window to inspect its buy and sell markers.";
   }
   if (selectedOptimizationSnapshots.value.length === 0) {
-    return 'No market snapshots are linked to this window yet.'
+    return "No market snapshots are linked to this window yet.";
   }
   return review.closedAt
-    ? 'Buy and sell markers are visible for this closed window.'
-    : 'This window is still open, so the sell marker may be missing until the position closes.'
-})
+    ? "Buy and sell markers are visible for this closed window."
+    : "This window is still open, so the sell marker may be missing until the position closes.";
+});
 
 const windowOptimizationHistory = computed(() => {
-  const optimizations = snapshot.value?.windowOptimizations ?? []
+  const optimizations = snapshot.value?.windowOptimizations ?? [];
   return optimizations
     .filter((item) => item.day === selectedMarketDay.value)
-    .filter((item) => !selectedOptimizationSymbol.value || item.symbol === selectedOptimizationSymbol.value)
+    .filter(
+      (item) =>
+        !selectedOptimizationSymbol.value ||
+        item.symbol === selectedOptimizationSymbol.value,
+    )
     .slice()
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-})
+    .sort(
+      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+    );
+});
 
 const selectedWindowOptimization = computed(() => {
   if (!selectedOptimizationReview.value) {
-    return null
+    return null;
   }
-  return windowOptimizationHistory.value.find((optimization) => optimization.windowId === selectedOptimizationReview.value?.id) ?? null
-})
+  return (
+    windowOptimizationHistory.value.find(
+      (optimization) =>
+        optimization.windowId === selectedOptimizationReview.value?.id,
+    ) ?? null
+  );
+});
 
 const expandedChartDefinition = computed(() => {
   if (!expandedChartId.value) {
-    return null
+    return null;
   }
-  return marketChartDefs.find((chart) => chart.id === expandedChartId.value) ?? null
-})
+  return (
+    marketChartDefs.find((chart) => chart.id === expandedChartId.value) ?? null
+  );
+});
 
 function clampPage(page: { value: number }, pageCount: number) {
-  page.value = Math.min(page.value, Math.max(0, pageCount - 1))
+  page.value = Math.min(page.value, Math.max(0, pageCount - 1));
 }
 
 const sourceDisplay = computed(() => {
-  if (snapshotSource.value === 'live') {
+  if (snapshotSource.value === "live") {
     return {
-      title: 'Live session',
-      description: 'The dashboard is connected and showing live trading data.',
-    }
+      title: "Live session",
+      description: "Live trading data is available for the selected day.",
+    };
   }
 
   return {
-    title: 'Waiting for live session',
-    description: 'The dashboard is connected, but the selected session has not produced live records yet.',
-  }
-})
+    title: "Waiting for live session",
+    description: "No live trading data has been written for the selected day yet.",
+  };
+});
 
-function emptySessionOverview(): DashboardSnapshot['sessionOverview'] {
+function emptySessionOverview(): DashboardSnapshot["sessionOverview"] {
   return {
-    sessionId: 'nasdaq-live',
-    status: 'waiting',
+    sessionId: "nasdaq-live",
+    status: "waiting",
     updatedAt: new Date().toISOString(),
-    configVersion: 'draft',
+    configVersion: "draft",
     openWindows: 0,
-    summary: 'No live records are available for the selected day yet.',
-  }
+    summary: "No live records are available for the selected day yet.",
+  };
 }
 
 function signalKey(signal: AdminSignal | null) {
   if (!signal) {
-    return ''
+    return "";
   }
-  return `${signal.symbol}:${signal.windowId || 'no-window'}:${signal.updatedAt}`
+  return `${signal.symbol}:${signal.windowId || "no-window"}:${signal.updatedAt}`;
 }
 
 function windowKey(window: TradeWindowRecord | null) {
   if (!window) {
-    return ''
+    return "";
   }
-  return `${window.id}:${window.updatedAt}`
+  return `${window.id}:${window.updatedAt}`;
 }
 
 function formatSignalActionLabel(action: string) {
   switch (action) {
-    case 'BUY_ALERT':
-      return 'Buy'
-    case 'SELL_ALERT':
-      return 'Sell'
-    case 'HOLD':
-      return 'Monitoring'
+    case "BUY_ALERT":
+      return "Buy";
+    case "SELL_ALERT":
+      return "Sell";
+    case "HOLD":
+      return "Monitoring";
     default:
-      return action || 'Signal'
+      return action || "Signal";
   }
 }
 
 function formatSignalStateLabel(state: string) {
   switch (state) {
-    case 'FLAT':
-      return 'Waiting'
-    case 'ENTRY_SIGNALLED':
-      return 'Buy'
-    case 'ACCEPTED_OPEN':
-      return 'Buy window open'
-    case 'EXIT_SIGNALLED':
-      return 'Sell'
-    case 'CLOSED':
-      return 'Window closed'
-    case 'REJECTED':
-      return 'Rejected'
-    case 'EXPIRED':
-      return 'Expired'
+    case "FLAT":
+      return "Waiting";
+    case "ENTRY_SIGNALLED":
+      return "Buy";
+    case "ACCEPTED_OPEN":
+      return "Buy window open";
+    case "EXIT_SIGNALLED":
+      return "Sell";
+    case "CLOSED":
+      return "Window closed";
+    case "REJECTED":
+      return "Rejected";
+    case "EXPIRED":
+      return "Expired";
     default:
-      return state || 'Unknown'
+      return state || "Unknown";
   }
 }
 
 function formatSignalQueueLabel(signal: AdminSignal) {
   switch (classifySignal(signal)) {
-    case 'buy':
-      return 'Buy'
-    case 'sell':
-      return 'Sell'
+    case "buy":
+      return "Buy";
+    case "sell":
+      return "Sell";
     default:
-      return 'Signal'
+      return "Signal";
   }
 }
 
-function formatSignalRegimeLabel(signal: AdminSignal | MarketSnapshotRecord | null) {
+function formatSignalRegimeLabel(
+  signal: AdminSignal | MarketSnapshotRecord | null,
+) {
   if (!signal) {
-    return 'Live market context'
+    return "Live market context";
   }
-  const regime = 'regime' in signal ? signal.regime : signal.signalRegime
+  const regime = "regime" in signal ? signal.regime : signal.signalRegime;
   if (!regime) {
-    return 'Live market context'
+    return "Live market context";
   }
-  if (regime === 'Live market session' || regime === 'benchmark snapshot') {
-    return 'Live market context'
+  if (regime === "Live market session" || regime === "benchmark snapshot") {
+    return "Live market context";
   }
-  if (regime.includes('aligned')) {
-    return 'Market aligned'
+  if (regime.includes("aligned")) {
+    return "Market aligned";
   }
-  if (regime.includes('pressure')) {
-    return 'Market under pressure'
+  if (regime.includes("pressure")) {
+    return "Market under pressure";
   }
-  if (regime.includes('mixed')) {
-    return 'Mixed market context'
+  if (regime.includes("mixed")) {
+    return "Mixed market context";
   }
-  return regime
+  return regime;
 }
 
 function formatWindowStatusLabel(status: string) {
   switch (status) {
-    case 'open':
-      return 'Open'
-    case 'closed':
-      return 'Closed'
+    case "open":
+      return "Open";
+    case "closed":
+      return "Closed";
     default:
-      return status || 'Unknown'
+      return status || "Unknown";
   }
 }
 
 function describeWindowOutcome(changePct: number | null) {
   if (changePct === null) {
-    return 'Pending price change'
+    return "Pending price change";
   }
   if (changePct > 0) {
-    return `Up ${changePct.toFixed(2)}%`
+    return `Up ${changePct.toFixed(2)}%`;
   }
   if (changePct < 0) {
-    return `Down ${Math.abs(changePct).toFixed(2)}%`
+    return `Down ${Math.abs(changePct).toFixed(2)}%`;
   }
-  return 'Flat'
+  return "Flat";
 }
 
 function humanizeReason(reason: string) {
-  const trimmed = reason.trim()
+  const trimmed = reason.trim();
   if (!trimmed) {
-    return 'Unknown context'
+    return "Unknown context";
   }
-  if (trimmed === 'entry-qualified') {
-    return 'Buy criteria met'
+  if (trimmed === "entry-qualified") {
+    return "Buy criteria met";
   }
-  if (trimmed === 'exit-qualified') {
-    return 'Sell criteria met'
+  if (trimmed === "exit-qualified") {
+    return "Sell criteria met";
   }
-  if (trimmed === 'exit-pressure') {
-    return 'Sell pressure detected'
+  if (trimmed === "exit-pressure") {
+    return "Sell pressure detected";
   }
-  if (trimmed === 'market-closed') {
-    return 'Market closed'
+  if (trimmed === "market-closed") {
+    return "Market closed";
   }
-  if (trimmed === 'session-close exit') {
-    return 'Forced exit at market close'
+  if (trimmed === "session-close exit") {
+    return "Forced exit at market close";
   }
-  if (trimmed === 'benchmark snapshot') {
-    return 'Market reference snapshot'
+  if (trimmed === "benchmark snapshot") {
+    return "Market reference snapshot";
   }
-  if (trimmed === 'live market session') {
-    return 'Live market context'
+  if (trimmed === "live market session") {
+    return "Live market context";
   }
-  const benchmarkMatch = /^([A-Z]{1,6})\s+(market context aligned|market context under pressure|mixed market context)$/.exec(trimmed)
+  const benchmarkMatch =
+    /^([A-Z]{1,6})\s+(market context aligned|market context under pressure|mixed market context)$/.exec(
+      trimmed,
+    );
   if (benchmarkMatch) {
-    const label = benchmarkMatch[2]
-    if (label === 'market context aligned') {
-      return 'Market aligned'
+    const label = benchmarkMatch[2];
+    if (label === "market context aligned") {
+      return "Market aligned";
     }
-    if (label === 'market context under pressure') {
-      return 'Market under pressure'
+    if (label === "market context under pressure") {
+      return "Market under pressure";
     }
-    return 'Mixed market context'
+    return "Mixed market context";
   }
-  if (trimmed.includes('market context')) {
-    return trimmed.replace(/-/g, ' ')
+  if (trimmed.includes("market context")) {
+    return trimmed.replace(/-/g, " ");
   }
-  const timeframeMatch = /^([0-9]+m):(.*)$/.exec(trimmed)
+  const timeframeMatch = /^([0-9]+m):(.*)$/.exec(trimmed);
   if (timeframeMatch) {
-    return `${timeframeMatch[1]} timeframe · ${timeframeMatch[2].replace(/-/g, ' ').trim()}`
+    return `${timeframeMatch[1]} timeframe · ${timeframeMatch[2].replace(/-/g, " ").trim()}`;
   }
-  return trimmed.replace(/-/g, ' ')
-}
-
-function syncSelectedMarketSymbol(symbols: string[]) {
-  if (symbols.length === 0) {
-    selectedMarketSymbol.value = ''
-    return
-  }
-
-  if (!selectedMarketSymbol.value) {
-    return
-  }
-
-  if (symbols.includes(selectedMarketSymbol.value)) {
-    return
-  }
-
-  selectedMarketSymbol.value = symbols[0] ?? ''
+  return trimmed.replace(/-/g, " ");
 }
 
 function syncSelectedDecisionSymbol(symbols: string[]) {
   if (symbols.length === 0) {
-    selectedDecisionSymbol.value = ''
-    return
+    selectedDecisionSymbol.value = "";
+    return;
   }
 
   if (!selectedDecisionSymbol.value) {
-    return
+    return;
   }
 
   if (symbols.includes(selectedDecisionSymbol.value)) {
-    return
+    return;
   }
 
-  selectedDecisionSymbol.value = symbols[0] ?? ''
+  selectedDecisionSymbol.value = symbols[0] ?? "";
 }
 
 function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
   if (symbols.length === 0) {
-    selection.value = ''
-    return
+    selection.value = "";
+    return;
   }
 
   if (!selection.value) {
-    return
+    return;
   }
 
   if (symbols.includes(selection.value)) {
-    return
+    return;
   }
 
-  selection.value = symbols[0]
+  selection.value = symbols[0];
 }
 
 function syncSelectedWindowSymbol(symbols: string[]) {
-  syncSelectedSymbol(selectedWindowSymbol, symbols)
+  syncSelectedSymbol(selectedWindowSymbol, symbols);
 }
 
 function syncSelectedOptimizationSymbol(symbols: string[]) {
-  syncSelectedSymbol(selectedOptimizationSymbol, symbols)
+  syncSelectedSymbol(selectedOptimizationSymbol, symbols);
 }
 
-const currentConfigVersion = computed(() => sessionOverview.value.configVersion)
+const currentConfigVersion = computed(
+  () => sessionOverview.value.configVersion,
+);
 
-const configVersions = computed(() => snapshot.value?.configVersions ?? [])
+const configVersions = computed(() => snapshot.value?.configVersions ?? []);
 
 const selectedConfigVersion = computed<ConfigVersionRecord | null>(() => {
   if (!snapshot.value) {
-    return null
+    return null;
   }
-  if (selectedConfigVersionId.value === 'current') {
-    return configVersions.value.find((version) => version.version === currentConfigVersion.value) ?? configVersions.value[0] ?? null
+  if (selectedConfigVersionId.value === "current") {
+    return (
+      configVersions.value.find(
+        (version) => version.version === currentConfigVersion.value,
+      ) ??
+      configVersions.value[0] ??
+      null
+    );
   }
-  return configVersions.value.find((version) => version.id === selectedConfigVersionId.value) ?? null
-})
+  return (
+    configVersions.value.find(
+      (version) => version.id === selectedConfigVersionId.value,
+    ) ?? null
+  );
+});
 
 const selectedConfigFields = computed(() => {
-  const versionFields = selectedConfigVersion.value?.fields
+  const versionFields = selectedConfigVersion.value?.fields;
   if (versionFields && versionFields.length > 0) {
-    return versionFields
+    return versionFields;
   }
-  return snapshot.value?.configFields ?? configFields
-})
+  return snapshot.value?.configFields ?? configFields;
+});
 
-const editableConfigFields = computed(() => selectedConfigFields.value)
-const configFieldGroups = computed(() => groupConfigFields(editableConfigFields.value))
+const editableConfigFields = computed(() => selectedConfigFields.value);
+const configFieldGroups = computed(() =>
+  groupConfigFields(editableConfigFields.value),
+);
 
 function stringifyConfigValue(value: ConfigFieldValue): string {
   if (Array.isArray(value)) {
-    return value.map((item) => item.toUpperCase()).join('\n')
+    return value.map((item) => item.toUpperCase()).join("\n");
   }
-  return String(value)
+  return String(value);
 }
 
-function parseConfigDraftValue(field: ConfigField, rawValue: string | number): ConfigFieldValue {
-  if (field.inputType === 'symbols') {
+function parseConfigDraftValue(
+  field: ConfigField,
+  rawValue: string | number,
+): ConfigFieldValue {
+  if (field.inputType === "symbols") {
     return String(rawValue)
       .split(/[\n,]/)
       .map((item) => item.trim().toUpperCase())
-      .filter(Boolean)
+      .filter(Boolean);
   }
-  if (field.inputType === 'number') {
-    if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
-      return rawValue
+  if (field.inputType === "number") {
+    if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+      return rawValue;
     }
-    const trimmed = String(rawValue).trim()
-    const parsed = trimmed ? Number(trimmed) : Number.NaN
-    return Number.isFinite(parsed) ? parsed : field.value
+    const trimmed = String(rawValue).trim();
+    const parsed = trimmed ? Number(trimmed) : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : field.value;
   }
-  return String(rawValue).trim()
+  return String(rawValue).trim();
 }
 
 function configFieldBounds(field: ConfigField) {
-  const key = field.key.toLowerCase()
-  const step = field.step ?? (key.includes('threshold') || key.includes('optimizer') ? 0.01 : 0.05)
-  if (key.includes('threshold')) {
-    return { min: 0, max: 1, step }
+  const key = field.key.toLowerCase();
+  const step =
+    field.step ??
+    (key.includes("threshold") || key.includes("optimizer") ? 0.01 : 0.05);
+  if (key.includes("threshold")) {
+    return { min: 0, max: 1, step };
   }
-  if (key.includes('margin')) {
-    return { min: 0, max: 0.5, step }
+  if (key.includes("margin")) {
+    return { min: 0, max: 0.5, step };
   }
-  if (key.includes('optimizer')) {
-    return { min: 0, max: 1, step }
+  if (key.includes("optimizer")) {
+    return { min: 0, max: 1, step };
   }
-  if (key.includes('weight') || key.includes('bias')) {
-    return { min: 0, max: 4, step }
+  if (key.includes("weight") || key.includes("bias")) {
+    return { min: 0, max: 4, step };
   }
-  if (key.includes('bars')) {
-    return { min: 1, max: 500, step: 1 }
+  if (key.includes("bars")) {
+    return { min: 1, max: 500, step: 1 };
   }
-  if (typeof field.value === 'number' && Number.isFinite(field.value)) {
-    const min = Math.min(Math.floor(field.value * 0.25), field.value)
-    const max = Math.max(field.value * 2, field.value + 1, min + step)
-    return { min, max, step }
+  if (typeof field.value === "number" && Number.isFinite(field.value)) {
+    const min = Math.min(Math.floor(field.value * 0.25), field.value);
+    const max = Math.max(field.value * 2, field.value + 1, min + step);
+    return { min, max, step };
   }
-  return { min: 0, max: 100, step }
+  return { min: 0, max: 100, step };
 }
 
 function isConfigValueOutsideBounds(field: ConfigField) {
-  if (field.inputType !== 'number') {
-    return false
+  if (field.inputType !== "number") {
+    return false;
   }
-  const bounds = configFieldBounds(field)
-  const draftValue = configDraft[field.key]
-  const value = typeof draftValue === 'number'
-    ? draftValue
-    : typeof draftValue === 'string' && draftValue.trim()
-      ? Number(draftValue)
-      : typeof field.value === 'number'
-        ? field.value
-        : Number.NaN
+  const bounds = configFieldBounds(field);
+  const draftValue = configDraft[field.key];
+  const value =
+    typeof draftValue === "number"
+      ? draftValue
+      : typeof draftValue === "string" && draftValue.trim()
+        ? Number(draftValue)
+        : typeof field.value === "number"
+          ? field.value
+          : Number.NaN;
   if (!Number.isFinite(value)) {
-    return false
+    return false;
   }
-  return value < bounds.min || value > bounds.max
+  return value < bounds.min || value > bounds.max;
 }
 
 function draftNumberValue(field: ConfigField) {
-  const draftValue = configDraft[field.key]
-  if (typeof draftValue === 'number' && Number.isFinite(draftValue)) {
-    return draftValue
+  const draftValue = configDraft[field.key];
+  if (typeof draftValue === "number" && Number.isFinite(draftValue)) {
+    return draftValue;
   }
-  if (typeof draftValue === 'string' && draftValue.trim()) {
-    const parsed = Number(draftValue)
+  if (typeof draftValue === "string" && draftValue.trim()) {
+    const parsed = Number(draftValue);
     if (Number.isFinite(parsed)) {
-      return parsed
+      return parsed;
     }
   }
-  return typeof field.value === 'number' ? field.value : 0
+  return typeof field.value === "number" ? field.value : 0;
 }
 
 function readDraftSymbols(field: ConfigField) {
-  const raw = configDraft[field.key] ?? stringifyConfigValue(field.value)
+  const raw = configDraft[field.key] ?? stringifyConfigValue(field.value);
   return String(raw)
     .split(/[\n,]/)
     .map((item) => item.trim().toUpperCase())
-    .filter(Boolean)
+    .filter(Boolean);
 }
 
 function symbolChipOptions(field: ConfigField) {
-  return Array.from(new Set([...(field.options ?? []), ...readDraftSymbols(field)]))
+  return Array.from(
+    new Set([...(field.options ?? []), ...readDraftSymbols(field)]),
+  );
 }
 
 function toggleDraftSymbol(field: ConfigField, symbol: string) {
-  const current = readDraftSymbols(field)
-  const normalized = symbol.trim().toUpperCase()
+  const current = readDraftSymbols(field);
+  const normalized = symbol.trim().toUpperCase();
   if (!normalized) {
-    return
+    return;
   }
 
   const next = current.includes(normalized)
     ? current.filter((item) => item !== normalized)
-    : [...current, normalized]
-  configDraft[field.key] = next.join('\n')
+    : [...current, normalized];
+  configDraft[field.key] = next.join("\n");
 }
 
 function addDraftSymbol(field: ConfigField) {
-  const normalized = (symbolAddDrafts[field.key] ?? '').trim().toUpperCase()
+  const normalized = (symbolAddDrafts[field.key] ?? "").trim().toUpperCase();
   if (!normalized) {
-    return
+    return;
   }
 
-  const current = readDraftSymbols(field)
+  const current = readDraftSymbols(field);
   if (!current.includes(normalized)) {
-    configDraft[field.key] = [...current, normalized].join('\n')
+    configDraft[field.key] = [...current, normalized].join("\n");
   }
-  symbolAddDrafts[field.key] = ''
+  symbolAddDrafts[field.key] = "";
 }
 
 function isDraftSymbolSelected(field: ConfigField, symbol: string) {
-  return readDraftSymbols(field).includes(symbol.trim().toUpperCase())
+  return readDraftSymbols(field).includes(symbol.trim().toUpperCase());
 }
 
 function groupConfigFields(fields: ConfigField[]) {
-  const groups = new Map<string, { label: string; fields: ConfigField[] }>()
+  const groups = new Map<string, { label: string; fields: ConfigField[] }>();
   for (const field of fields) {
-    const group = groups.get(field.group)
+    const group = groups.get(field.group);
     if (group) {
-      group.fields.push(field)
+      group.fields.push(field);
     } else {
-      groups.set(field.group, { label: field.group, fields: [field] })
+      groups.set(field.group, { label: field.group, fields: [field] });
     }
   }
-  return Array.from(groups.values())
+  return Array.from(groups.values());
 }
 
 function syncConfigDraft(fields: ConfigField[]) {
-  const validKeys = new Set(fields.map((field) => field.key))
+  const validKeys = new Set(fields.map((field) => field.key));
   for (const key of Object.keys(configDraft)) {
     if (!validKeys.has(key)) {
-      delete configDraft[key]
+      delete configDraft[key];
     }
   }
   for (const key of Object.keys(symbolAddDrafts)) {
     if (!validKeys.has(key)) {
-      delete symbolAddDrafts[key]
+      delete symbolAddDrafts[key];
     }
   }
   for (const field of fields) {
     if (!(field.key in configDraft)) {
-      configDraft[field.key] = typeof field.value === 'number' ? field.value : stringifyConfigValue(field.value)
+      configDraft[field.key] =
+        typeof field.value === "number"
+          ? field.value
+          : stringifyConfigValue(field.value);
     }
   }
 }
 
 function sameDraft(fields: ConfigField[]) {
   if (fields.length !== Object.keys(configDraft).length) {
-    return false
+    return false;
   }
   return fields.every((field) => {
-    const draftValue = configDraft[field.key]
-    if (field.inputType === 'number' && typeof field.value === 'number') {
-      const value = typeof draftValue === 'number' ? draftValue : Number(draftValue)
-      return Number.isFinite(value) && value === field.value
+    const draftValue = configDraft[field.key];
+    if (field.inputType === "number" && typeof field.value === "number") {
+      const value =
+        typeof draftValue === "number" ? draftValue : Number(draftValue);
+      return Number.isFinite(value) && value === field.value;
     }
-    if (field.inputType === 'symbols') {
-      const parsed = parseConfigDraftValue(field, draftValue ?? stringifyConfigValue(field.value))
-      return Array.isArray(parsed) && stringifyConfigValue(parsed) === stringifyConfigValue(field.value)
+    if (field.inputType === "symbols") {
+      const parsed = parseConfigDraftValue(
+        field,
+        draftValue ?? stringifyConfigValue(field.value),
+      );
+      return (
+        Array.isArray(parsed) &&
+        stringifyConfigValue(parsed) === stringifyConfigValue(field.value)
+      );
     }
-    return String(draftValue ?? '').trim() === stringifyConfigValue(field.value)
-  })
+    return (
+      String(draftValue ?? "").trim() === stringifyConfigValue(field.value)
+    );
+  });
 }
 
 const isConfigDraftDirty = computed(() => {
-  return !sameDraft(selectedConfigFields.value)
-})
+  return !sameDraft(selectedConfigFields.value);
+});
 
 const configEditorStatus = computed(() => {
   if (isConfigDraftDirty.value) {
-    return 'draft'
+    return "draft";
   }
-  return selectedConfigVersion.value?.status ?? 'draft'
-})
+  return selectedConfigVersion.value?.status ?? "draft";
+});
 
 type WindowReviewView = TradeWindowRecord & {
-  buySnapshot: MarketSnapshotRecord | null
-  sellSnapshot: MarketSnapshotRecord | null
-  entryPrice: number | null
-  exitPrice: number | null
-  changePct: number | null
-  durationMinutes: number | null
-  lastSignalAt: string
-  minutesSinceLastSignal: number | null
-  buySummary: string
-  sellSummary: string
-}
+  buySnapshot: MarketSnapshotRecord | null;
+  sellSnapshot: MarketSnapshotRecord | null;
+  entryPrice: number | null;
+  exitPrice: number | null;
+  changePct: number | null;
+  durationMinutes: number | null;
+  lastSignalAt: string;
+  minutesSinceLastSignal: number | null;
+  buySummary: string;
+  sellSummary: string;
+};
 
 function formatChartValue(value: number | null, decimals = 2) {
   if (value === null) {
-    return '--'
+    return "--";
   }
-  return value.toFixed(decimals)
+  return value.toFixed(decimals);
 }
 
 function formatLocaleTimestamp(value: string | null | undefined) {
   if (!value) {
-    return 'waiting for live data'
+    return "waiting for live data";
   }
 
-  const parsed = new Date(value)
+  const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return value
+    return value;
   }
 
   return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-  }).format(parsed)
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(parsed);
 }
 
-function decorateWindowReview(window: TradeWindowRecord, now = Date.now()): WindowReviewView {
-  const snapshots = findWindowSnapshots(window)
+function decorateWindowReview(
+  window: TradeWindowRecord,
+  now = Date.now(),
+): WindowReviewView {
+  const snapshots = findWindowSnapshots(window);
   const entrySnapshot =
-    snapshots.find((snapshot) => snapshot.signalAction === 'BUY_ALERT') ??
+    snapshots.find((snapshot) => snapshot.signalAction === "BUY_ALERT") ??
     snapshots[0] ??
-    null
+    null;
   const exitSnapshot = window.closedAt
-    ? snapshots.slice().reverse().find((snapshot) => snapshot.signalAction === 'SELL_ALERT') ??
+    ? (snapshots
+        .slice()
+        .reverse()
+        .find((snapshot) => snapshot.signalAction === "SELL_ALERT") ??
       snapshots.at(-1) ??
-      null
-    : null
-  const lastSignalSnapshot = exitSnapshot ?? entrySnapshot
-  const entryPrice = entrySnapshot?.close ?? null
-  const exitPrice = exitSnapshot?.close ?? null
-  const changePct = entryPrice !== null && exitPrice !== null && entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 : null
+      null)
+    : null;
+  const lastSignalSnapshot = exitSnapshot ?? entrySnapshot;
+  const entryPrice = entrySnapshot?.close ?? null;
+  const exitPrice = exitSnapshot?.close ?? null;
+  const changePct =
+    entryPrice !== null && exitPrice !== null && entryPrice > 0
+      ? ((exitPrice - entryPrice) / entryPrice) * 100
+      : null;
   const durationMinutes = window.closedAt
-    ? Math.max(0, Math.round((Date.parse(window.closedAt) - Date.parse(window.openedAt)) / 60000))
-    : null
-  const lastSignalAt = lastSignalSnapshot?.timestamp ?? window.updatedAt ?? window.openedAt
-  const parsedLastSignalAt = Date.parse(lastSignalAt)
+    ? Math.max(
+        0,
+        Math.round(
+          (Date.parse(window.closedAt) - Date.parse(window.openedAt)) / 60000,
+        ),
+      )
+    : null;
+  const lastSignalAt =
+    lastSignalSnapshot?.timestamp ?? window.updatedAt ?? window.openedAt;
+  const parsedLastSignalAt = Date.parse(lastSignalAt);
   const minutesSinceLastSignal = Number.isFinite(parsedLastSignalAt)
     ? Math.max(0, Math.round((now - parsedLastSignalAt) / 60000))
-    : null
+    : null;
 
   return {
     ...window,
@@ -827,508 +972,711 @@ function decorateWindowReview(window: TradeWindowRecord, now = Date.now()): Wind
     durationMinutes,
     lastSignalAt,
     minutesSinceLastSignal,
-    buySummary: entrySnapshot ? summarizeSnapshotReason(entrySnapshot) : 'Buy snapshot unavailable',
-    sellSummary: exitSnapshot ? summarizeSnapshotReason(exitSnapshot) : 'Sell snapshot unavailable',
-  }
+    buySummary: entrySnapshot
+      ? summarizeSnapshotReason(entrySnapshot)
+      : "Buy snapshot unavailable",
+    sellSummary: exitSnapshot
+      ? summarizeSnapshotReason(exitSnapshot)
+      : "Sell snapshot unavailable",
+  };
 }
 
 function findWindowSnapshots(window: TradeWindowRecord) {
-  const byWindowId = selectedDaySnapshots.value.filter((snapshot) => snapshot.windowId === window.id)
+  const byWindowId = selectedDaySnapshots.value
+    .filter(
+      (snapshot) => snapshot.windowId === window.id,
+    )
+    .slice()
+    .sort((left, right) => {
+      const leftTimestamp = Date.parse(left.timestamp)
+      const rightTimestamp = Date.parse(right.timestamp)
+      if (leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp
+      }
+      return left.id.localeCompare(right.id)
+    })
   if (byWindowId.length > 0) {
     return byWindowId
   }
 
-  const openedAt = Date.parse(window.openedAt)
-  const closedAt = window.closedAt ? Date.parse(window.closedAt) : Number.POSITIVE_INFINITY
-  return selectedDaySnapshots.value.filter((snapshot) => {
-    if (snapshot.symbol !== window.symbol) {
-      return false
-    }
-    const timestamp = Date.parse(snapshot.timestamp)
-    return Number.isFinite(timestamp) && timestamp >= openedAt && timestamp <= closedAt
-  })
+  const openedAt = Date.parse(window.openedAt);
+  const closedAt = window.closedAt
+    ? Date.parse(window.closedAt)
+    : Number.POSITIVE_INFINITY;
+  return selectedDaySnapshots.value
+    .filter((snapshot) => {
+      if (snapshot.symbol !== window.symbol) {
+        return false;
+      }
+      const timestamp = Date.parse(snapshot.timestamp);
+      return (
+        Number.isFinite(timestamp) &&
+        timestamp >= openedAt &&
+        timestamp <= closedAt
+      );
+    })
+    .slice()
+    .sort((left, right) => {
+      const leftTimestamp = Date.parse(left.timestamp)
+      const rightTimestamp = Date.parse(right.timestamp)
+      if (leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp
+      }
+      return left.id.localeCompare(right.id)
+    });
 }
 
 function summarizeSnapshotReason(snapshot: MarketSnapshotRecord) {
-  const reasons = snapshot.reasons.slice(0, 2)
+  const reasons = snapshot.reasons.slice(0, 2);
   if (reasons.length > 0) {
-    return reasons.map(humanizeReason).join(' · ')
+    return reasons.map(humanizeReason).join(" · ");
   }
-  return formatSignalRegimeLabel(snapshot)
+  return formatSignalRegimeLabel(snapshot);
 }
 
 function formatMinutesAgo(minutes: number | null) {
   if (minutes === null) {
-    return 'Pending'
+    return "Pending";
   }
   if (minutes < 60) {
-    return `${minutes} min ago`
+    return `${minutes} min ago`;
   }
-  const hours = Math.floor(minutes / 60)
-  const remainingMinutes = minutes % 60
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
   if (remainingMinutes === 0) {
-    return `${hours} h ago`
+    return `${hours} h ago`;
   }
-  return `${hours} h ${remainingMinutes} m ago`
+  return `${hours} h ${remainingMinutes} m ago`;
 }
 
 function formatElapsedMinutes(minutes: number | null) {
   if (minutes === null) {
-    return 'Pending'
+    return "Pending";
   }
   if (minutes < 60) {
-    return `${minutes} min`
+    return `${minutes} min`;
   }
-  const hours = Math.floor(minutes / 60)
-  const remainingMinutes = minutes % 60
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
   if (remainingMinutes === 0) {
-    return `${hours} h`
+    return `${hours} h`;
   }
-  return `${hours} h ${remainingMinutes} m`
+  return `${hours} h ${remainingMinutes} m`;
 }
 
 function snapshotSummaryRows(snapshot: MarketSnapshotRecord | null) {
   if (!snapshot) {
-    return []
+    return [];
   }
   return [
-    { label: 'Close', value: snapshot.close.toFixed(2) },
-    { label: 'RSI', value: formatChartValue(snapshot.rsi, 1) },
-    { label: 'EMA fast / slow', value: `${formatChartValue(snapshot.emaFast, 2)} / ${formatChartValue(snapshot.emaSlow, 2)}` },
-    { label: 'SMA fast / slow', value: `${formatChartValue(snapshot.smaFast, 2)} / ${formatChartValue(snapshot.smaSlow, 2)}` },
-    { label: 'MACD', value: `${formatChartValue(snapshot.macd, 3)} · ${formatChartValue(snapshot.macdSignal, 3)} · ${formatChartValue(snapshot.macdHistogram, 3)}` },
-  ]
+    { label: "Close", value: snapshot.close.toFixed(2) },
+    { label: "RSI", value: formatChartValue(snapshot.rsi, 1) },
+    {
+      label: "EMA fast / slow",
+      value: `${formatChartValue(snapshot.emaFast, 2)} / ${formatChartValue(snapshot.emaSlow, 2)}`,
+    },
+    {
+      label: "SMA fast / slow",
+      value: `${formatChartValue(snapshot.smaFast, 2)} / ${formatChartValue(snapshot.smaSlow, 2)}`,
+    },
+    {
+      label: "Bollinger bands",
+      value: `${formatChartValue(snapshot.bollingerMiddle, 2)} / ${formatChartValue(snapshot.bollingerUpper, 2)} / ${formatChartValue(snapshot.bollingerLower, 2)}`,
+    },
+    {
+      label: "MACD",
+      value: `${formatChartValue(snapshot.macd, 3)} · ${formatChartValue(snapshot.macdSignal, 3)} · ${formatChartValue(snapshot.macdHistogram, 3)}`,
+    },
+    {
+      label: "Volume flow",
+      value: `${formatChartValue(snapshot.obv, 0)} · ${formatChartValue(snapshot.relativeVolume, 2)} · ${formatChartValue(snapshot.volumeProfile, 2)}`,
+    },
+  ];
 }
 
 function selectConfigVersion(version: ConfigVersionRecord | null) {
   if (!version) {
-    selectedConfigVersionId.value = 'current'
-    return
+    selectedConfigVersionId.value = "current";
+    return;
   }
 
-  selectedConfigVersionId.value = version.id
+  selectedConfigVersionId.value = version.id;
 }
 
 const triageSignals = computed(() => {
   const signals = selectedDaySignals.value
-    .filter((signal) => classifySignal(signal) !== 'hold')
-    .filter((signal) => !selectedDecisionSymbol.value || signal.symbol === selectedDecisionSymbol.value)
-  if (triageFilter.value === 'all') {
-    return signals
+    .filter((signal) => classifySignal(signal) !== "hold")
+    .filter(
+      (signal) =>
+        !selectedDecisionSymbol.value ||
+        signal.symbol === selectedDecisionSymbol.value,
+    );
+  if (triageFilter.value === "all") {
+    return signals;
   }
-  return signals.filter((signal) => classifySignal(signal) === triageFilter.value)
-})
+  return signals.filter(
+    (signal) => classifySignal(signal) === triageFilter.value,
+  );
+});
 const triagePageSignals = computed(() => {
-  const start = triagePage.value * triagePageSize
-  const end = start + triagePageSize
-  return triageSignals.value.slice(start, end)
-})
-const triagePageCount = computed(() => Math.max(1, Math.ceil(triageSignals.value.length / triagePageSize)))
+  const start = triagePage.value * triagePageSize;
+  const end = start + triagePageSize;
+  return triageSignals.value.slice(start, end);
+});
+const triagePageCount = computed(() =>
+  Math.max(1, Math.ceil(triageSignals.value.length / triagePageSize)),
+);
 
 const triageCounts = computed(() => {
   const signals = selectedDaySignals.value
-    .filter((signal) => classifySignal(signal) !== 'hold')
-    .filter((signal) => !selectedDecisionSymbol.value || signal.symbol === selectedDecisionSymbol.value)
+    .filter((signal) => classifySignal(signal) !== "hold")
+    .filter(
+      (signal) =>
+        !selectedDecisionSymbol.value ||
+        signal.symbol === selectedDecisionSymbol.value,
+    );
   const counts: Record<(typeof triageFilters)[number], number> = {
     all: signals.length,
     buy: 0,
     sell: 0,
-  }
+  };
 
   for (const signal of signals) {
-    const classification = classifySignal(signal)
-    if (classification === 'buy' || classification === 'sell') {
-      counts[classification] += 1
+    const classification = classifySignal(signal);
+    if (classification === "buy" || classification === "sell") {
+      counts[classification] += 1;
     }
   }
 
-  return counts
-})
+  return counts;
+});
 
 watch(
   triageSignals,
   (signals) => {
     if (signals.length === 0) {
-      selectedSignal.value = null
-      triagePage.value = 0
-      return
+      selectedSignal.value = null;
+      triagePage.value = 0;
+      return;
     }
 
-    const activeSignal = selectedSignal.value
-    if (!activeSignal || !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))) {
-      selectedSignal.value = signals.at(-1) ?? null
+    const activeSignal = selectedSignal.value;
+    if (
+      !activeSignal ||
+      !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))
+    ) {
+      selectedSignal.value = signals.at(-1) ?? null;
     }
-    triagePage.value = Math.min(triagePage.value, Math.max(0, Math.ceil(signals.length / triagePageSize) - 1))
+    triagePage.value = Math.min(
+      triagePage.value,
+      Math.max(0, Math.ceil(signals.length / triagePageSize) - 1),
+    );
   },
   { immediate: true },
-)
-
-watch(
-  [selectedMarketDay, selectedMarketSymbol],
-  () => {
-    marketLedgerPage.value = 0
-    marketWindowPage.value = 0
-    selectedLedgerSnapshotId.value = ''
-    selectedMarketWindowReviewId.value = ''
-  },
-)
+);
 
 watch(selectedMarketDay, () => {
-  marketWindowPage.value = 0
-  selectedMarketWindowReviewId.value = ''
-  selectedWindowSymbol.value = ''
-  selectedOptimizationSymbol.value = ''
-})
+  marketLedgerPage.value = 0;
+  marketWindowPage.value = 0;
+  selectedLedgerSnapshotId.value = "";
+  selectedMarketWindowReviewId.value = "";
+});
 
-watch(selectedMarketSymbol, () => {
-  marketWindowPage.value = 0
-  selectedMarketWindowReviewId.value = ''
-})
+watch(selectedMarketDay, () => {
+  marketWindowPage.value = 0;
+  selectedMarketWindowReviewId.value = "";
+  selectedWindowSymbol.value = "";
+  selectedOptimizationSymbol.value = "";
+});
 
 watch(selectedWindowSymbol, () => {
-  windowReviewPage.value = 0
-  selectedWindowReviewId.value = ''
-})
+  windowReviewPage.value = 0;
+  selectedWindowReviewId.value = "";
+});
 
 watch(
   [selectedMarketDay, selectedDecisionSymbol],
   ([nextDay, nextSymbol], [previousDay, previousSymbol]) => {
     if (nextDay !== previousDay) {
-      liveSignalPage.value = 0
-      triagePage.value = 0
-      void requestDashboardRefresh()
+      liveSignalPage.value = 0;
+      triagePage.value = 0;
+      void requestDashboardRefresh();
     }
     if (nextSymbol !== previousSymbol) {
-      triagePage.value = 0
+      triagePage.value = 0;
     }
   },
-)
+);
 
 watch(
   selectedConfigVersion,
   (version) => {
     if (!snapshot.value) {
-      return
+      return;
     }
-    syncConfigDraft(version?.fields ?? snapshot.value.configFields)
+    syncConfigDraft(version?.fields ?? snapshot.value.configFields);
   },
   { immediate: true },
-)
+);
 
 watch(marketLedgerPageCount, (pageCount) => {
-  clampPage(marketLedgerPage, pageCount)
-})
+  clampPage(marketLedgerPage, pageCount);
+});
 
 watch(windowReviewPageCount, (pageCount) => {
-  clampPage(windowReviewPage, pageCount)
-})
+  clampPage(windowReviewPage, pageCount);
+});
 
 watch(marketWindowPageCount, (pageCount) => {
-  clampPage(marketWindowPage, pageCount)
-})
+  clampPage(marketWindowPage, pageCount);
+});
 
-watch(marketSymbols, (symbols) => {
-  syncSelectedMarketSymbol(symbols)
-}, { immediate: true })
+watch(
+  [marketSymbols, selectedWindowSymbol],
+  ([symbols]) => {
+    syncSelectedWindowSymbol(symbols);
+  },
+  { immediate: true },
+);
 
-watch([marketSymbols, selectedWindowSymbol], ([symbols]) => {
-  syncSelectedWindowSymbol(symbols)
-}, { immediate: true })
-
-watch([marketSymbols, selectedOptimizationSymbol], ([symbols]) => {
-  syncSelectedOptimizationSymbol(symbols)
-}, { immediate: true })
+watch(
+  [marketSymbols, selectedOptimizationSymbol],
+  ([symbols]) => {
+    syncSelectedOptimizationSymbol(symbols);
+  },
+  { immediate: true },
+);
 
 watch(selectedOptimizationSymbol, () => {
-  selectedOptimizationReviewId.value = ''
-})
+  selectedOptimizationReviewId.value = "";
+});
 
-watch([decisionSymbols, selectedSignal], ([symbols]) => {
-  syncSelectedDecisionSymbol(symbols)
-}, { immediate: true })
+watch(
+  [decisionSymbols, selectedSignal],
+  ([symbols]) => {
+    syncSelectedDecisionSymbol(symbols);
+  },
+  { immediate: true },
+);
 
 watch(
   liveSignals,
   (signals) => {
     if (signals.length === 0) {
-      liveSignalPage.value = 0
-      return
+      liveSignalPage.value = 0;
+      return;
     }
-    const maxPage = Math.max(0, Math.ceil(signals.length / LIVE_SIGNAL_PAGE_SIZE) - 1)
-    liveSignalPage.value = Math.min(liveSignalPage.value, maxPage)
+    const maxPage = Math.max(
+      0,
+      Math.ceil(signals.length / LIVE_SIGNAL_PAGE_SIZE) - 1,
+    );
+    liveSignalPage.value = Math.min(liveSignalPage.value, maxPage);
   },
   { immediate: true },
-)
+);
 
 watch(
   latestMarketSnapshots,
   (snapshots) => {
     if (!snapshots.length) {
-      selectedLedgerSnapshotId.value = ''
-      return
+      selectedLedgerSnapshotId.value = "";
+      return;
     }
-    if (!selectedLedgerSnapshotId.value || !snapshots.some((snapshot) => snapshot.id === selectedLedgerSnapshotId.value)) {
-      selectedLedgerSnapshotId.value = snapshots[0].id
+    if (
+      !selectedLedgerSnapshotId.value ||
+      !snapshots.some(
+        (snapshot) => snapshot.id === selectedLedgerSnapshotId.value,
+      )
+    ) {
+      selectedLedgerSnapshotId.value = snapshots[0].id;
     }
   },
   { immediate: true },
-)
+);
 
 watch(
   allWindowReviews,
   (reviews) => {
     if (!reviews.length) {
-      selectedWindowReviewId.value = ''
-      return
+      selectedWindowReviewId.value = "";
+      return;
     }
-    if (!selectedWindowReviewId.value || !reviews.some((review) => review.id === selectedWindowReviewId.value)) {
-      selectedWindowReviewId.value = reviews[0].id
+    if (
+      !selectedWindowReviewId.value ||
+      !reviews.some((review) => review.id === selectedWindowReviewId.value)
+    ) {
+      selectedWindowReviewId.value = reviews[0].id;
     }
   },
   { immediate: true },
-)
+);
 
 watch(
   selectedWindowReviews,
   (reviews) => {
     if (!reviews.length) {
-      selectedWindowReviewId.value = ''
-      return
+      selectedWindowReviewId.value = "";
+      return;
     }
-    if (!selectedWindowReviewId.value || !reviews.some((review) => review.id === selectedWindowReviewId.value)) {
-      selectedWindowReviewId.value = reviews[0].id
+    if (
+      !selectedWindowReviewId.value ||
+      !reviews.some((review) => review.id === selectedWindowReviewId.value)
+    ) {
+      selectedWindowReviewId.value = reviews[0].id;
     }
   },
   { immediate: true },
-)
+);
 
 watch(
   marketWindowReviews,
   (reviews) => {
     if (!reviews.length) {
-      selectedMarketWindowReviewId.value = ''
-      return
+      selectedMarketWindowReviewId.value = "";
+      return;
     }
-    if (!selectedMarketWindowReviewId.value || !reviews.some((review) => review.id === selectedMarketWindowReviewId.value)) {
-      selectedMarketWindowReviewId.value = reviews[0].id
+    if (
+      !selectedMarketWindowReviewId.value ||
+      !reviews.some(
+        (review) => review.id === selectedMarketWindowReviewId.value,
+      )
+    ) {
+      selectedMarketWindowReviewId.value = reviews[0].id;
     }
   },
   { immediate: true },
-)
+);
 
 watch(
   selectedMarketWindowReviews,
   (reviews) => {
     if (!reviews.length) {
-      selectedMarketWindowReviewId.value = ''
-      return
+      selectedMarketWindowReviewId.value = "";
+      return;
     }
-    if (!selectedMarketWindowReviewId.value || !reviews.some((review) => review.id === selectedMarketWindowReviewId.value)) {
-      selectedMarketWindowReviewId.value = reviews[0].id
+    if (
+      !selectedMarketWindowReviewId.value ||
+      !reviews.some(
+        (review) => review.id === selectedMarketWindowReviewId.value,
+      )
+    ) {
+      selectedMarketWindowReviewId.value = reviews[0].id;
     }
   },
   { immediate: true },
-)
+);
 
 watch(
   allOptimizationReviews,
   (reviews) => {
     if (!reviews.length) {
-      selectedOptimizationReviewId.value = ''
-      return
+      selectedOptimizationReviewId.value = "";
+      return;
     }
-    if (!selectedOptimizationReviewId.value || !reviews.some((review) => review.id === selectedOptimizationReviewId.value)) {
-      selectedOptimizationReviewId.value = reviews[0].id
+    if (
+      !selectedOptimizationReviewId.value ||
+      !reviews.some(
+        (review) => review.id === selectedOptimizationReviewId.value,
+      )
+    ) {
+      selectedOptimizationReviewId.value = reviews[0].id;
     }
   },
   { immediate: true },
-)
+);
 
 watch(
   selectedOptimizationSnapshots,
   (snapshots) => {
     if (!snapshots.length) {
-      optimizationEntrySnapshotId.value = ''
-      optimizationExitSnapshotId.value = ''
-      return
+      optimizationEntrySnapshotId.value = "";
+      optimizationExitSnapshotId.value = "";
+      return;
     }
-    if (!optimizationEntrySnapshotId.value || !snapshots.some((snapshot) => snapshot.id === optimizationEntrySnapshotId.value)) {
-      optimizationEntrySnapshotId.value = snapshots.find((snapshot) => snapshot.signalAction === 'BUY_ALERT')?.id ?? snapshots[0].id
+    if (
+      !optimizationEntrySnapshotId.value ||
+      !snapshots.some(
+        (snapshot) => snapshot.id === optimizationEntrySnapshotId.value,
+      )
+    ) {
+      optimizationEntrySnapshotId.value =
+        snapshots.find((snapshot) => snapshot.signalAction === "BUY_ALERT")
+          ?.id ?? snapshots[0].id;
     }
-    if (!optimizationExitSnapshotId.value || !snapshots.some((snapshot) => snapshot.id === optimizationExitSnapshotId.value)) {
-      optimizationExitSnapshotId.value = snapshots.find((snapshot) => snapshot.signalAction === 'SELL_ALERT')?.id ?? snapshots.at(-1)?.id ?? ''
+    if (
+      !optimizationExitSnapshotId.value ||
+      !snapshots.some(
+        (snapshot) => snapshot.id === optimizationExitSnapshotId.value,
+      )
+    ) {
+      optimizationExitSnapshotId.value =
+        snapshots.find((snapshot) => snapshot.signalAction === "SELL_ALERT")
+          ?.id ??
+        snapshots.at(-1)?.id ??
+        "";
     }
   },
   { immediate: true },
-)
+);
 
 function setTriageFilter(filter: (typeof triageFilters)[number]) {
-  triageFilter.value = filter
+  triageFilter.value = filter;
 }
 
 function setLedgerSnapshot(snapshotPoint: MarketSnapshotRecord) {
-  selectedLedgerSnapshotId.value = snapshotPoint.id
-  const matchingWindow = findWindowReviewForSymbolAndTimestamp(snapshotPoint.symbol, snapshotPoint.timestamp, snapshotPoint.windowId)
+  selectedLedgerSnapshotId.value = snapshotPoint.id;
+  const matchingWindow = findWindowReviewForSymbolAndTimestamp(
+    snapshotPoint.symbol,
+    snapshotPoint.timestamp,
+    snapshotPoint.windowId,
+  );
   if (matchingWindow) {
-    selectedMarketWindowReviewId.value = matchingWindow.id
-    selectedWindowReviewId.value = matchingWindow.id
-    selectedOptimizationReviewId.value = matchingWindow.id
-    selectedWindowSymbol.value = matchingWindow.symbol
-    selectedOptimizationSymbol.value = matchingWindow.symbol
-    marketWindowPage.value = pageForWindowId(marketWindowReviews.value, matchingWindow.id, windowReviewPageSize)
-    windowReviewPage.value = pageForWindowId(allWindowReviews.value, matchingWindow.id, windowReviewPageSize)
+    selectedMarketWindowReviewId.value = matchingWindow.id;
+    selectedWindowReviewId.value = matchingWindow.id;
+    selectedOptimizationReviewId.value = matchingWindow.id;
+    selectedWindowSymbol.value = matchingWindow.symbol;
+    selectedOptimizationSymbol.value = matchingWindow.symbol;
+    marketWindowPage.value = pageForWindowId(
+      marketWindowReviews.value,
+      matchingWindow.id,
+      windowReviewPageSize,
+    );
+    windowReviewPage.value = pageForWindowId(
+      allWindowReviews.value,
+      matchingWindow.id,
+      windowReviewPageSize,
+    );
   }
 }
 
 function setWindowReview(review: WindowReviewView) {
-  selectedMarketWindowReviewId.value = review.id
-  selectedWindowReviewId.value = review.id
-  selectedOptimizationReviewId.value = review.id
-  selectedWindowSymbol.value = review.symbol
-  selectedOptimizationSymbol.value = review.symbol
-  marketWindowPage.value = pageForWindowId(marketWindowReviews.value, review.id, windowReviewPageSize)
-  windowReviewPage.value = pageForWindowId(allWindowReviews.value, review.id, windowReviewPageSize)
+  selectedMarketWindowReviewId.value = review.id;
+  selectedWindowReviewId.value = review.id;
+  selectedOptimizationReviewId.value = review.id;
+  selectedWindowSymbol.value = review.symbol;
+  selectedOptimizationSymbol.value = review.symbol;
+  marketWindowPage.value = pageForWindowId(
+    marketWindowReviews.value,
+    review.id,
+    windowReviewPageSize,
+  );
+  windowReviewPage.value = pageForWindowId(
+    allWindowReviews.value,
+    review.id,
+    windowReviewPageSize,
+  );
 }
 
 function setSelectedSignal(signal: AdminSignal) {
-  selectedSignal.value = signal
-  const matchingWindow = findWindowReviewForSymbolAndTimestamp(signal.symbol, signal.updatedAt, signal.windowId)
+  selectedSignal.value = signal;
+  const matchingWindow = findWindowReviewForSymbolAndTimestamp(
+    signal.symbol,
+    signal.updatedAt,
+    signal.windowId,
+  );
   if (matchingWindow) {
-    selectedMarketWindowReviewId.value = matchingWindow.id
-    selectedWindowReviewId.value = matchingWindow.id
-    selectedOptimizationReviewId.value = matchingWindow.id
-    selectedWindowSymbol.value = matchingWindow.symbol
-    selectedOptimizationSymbol.value = matchingWindow.symbol
-    marketWindowPage.value = pageForWindowId(marketWindowReviews.value, matchingWindow.id, windowReviewPageSize)
-    windowReviewPage.value = pageForWindowId(allWindowReviews.value, matchingWindow.id, windowReviewPageSize)
+    selectedMarketWindowReviewId.value = matchingWindow.id;
+    selectedWindowReviewId.value = matchingWindow.id;
+    selectedOptimizationReviewId.value = matchingWindow.id;
+    selectedWindowSymbol.value = matchingWindow.symbol;
+    selectedOptimizationSymbol.value = matchingWindow.symbol;
+    marketWindowPage.value = pageForWindowId(
+      marketWindowReviews.value,
+      matchingWindow.id,
+      windowReviewPageSize,
+    );
+    windowReviewPage.value = pageForWindowId(
+      allWindowReviews.value,
+      matchingWindow.id,
+      windowReviewPageSize,
+    );
   }
 }
 
-function pageForWindowId(reviews: WindowReviewView[], windowId: string, pageSize: number) {
-  const index = reviews.findIndex((review) => review.id === windowId)
+function pageForWindowId(
+  reviews: WindowReviewView[],
+  windowId: string,
+  pageSize: number,
+) {
+  const index = reviews.findIndex((review) => review.id === windowId);
   if (index < 0 || pageSize <= 0) {
-    return 0
+    return 0;
   }
-  return Math.floor(index / pageSize)
+  return Math.floor(index / pageSize);
 }
 
-function findWindowReviewForSymbolAndTimestamp(symbol: string, timestamp: string, preferredWindowId = '') {
+function findWindowReviewForSymbolAndTimestamp(
+  symbol: string,
+  timestamp: string,
+  preferredWindowId = "",
+) {
   const reviewPool = tradeWindows.value
-    .filter((window) => getMarketDayKey(window.openedAt) === selectedMarketDay.value || (window.closedAt ? getMarketDayKey(window.closedAt) === selectedMarketDay.value : false))
+    .filter(
+      (window) =>
+        getMarketDayKey(window.openedAt) === selectedMarketDay.value ||
+        (window.closedAt
+          ? getMarketDayKey(window.closedAt) === selectedMarketDay.value
+          : false),
+    )
     .slice()
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-    .map((window) => decorateWindowReview(window))
+    .sort(
+      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+    )
+    .map((window) => decorateWindowReview(window));
 
   if (preferredWindowId) {
-    const directMatch = reviewPool.find((review) => review.id === preferredWindowId)
+    const directMatch = reviewPool.find(
+      (review) => review.id === preferredWindowId,
+    );
     if (directMatch) {
-      return directMatch
+      return directMatch;
     }
   }
-  const fallbackTimestamp = Date.parse(timestamp)
+  const fallbackTimestamp = Date.parse(timestamp);
   return reviewPool.find(
     (review) =>
       review.symbol === symbol &&
       Number.isFinite(fallbackTimestamp) &&
       fallbackTimestamp >= Date.parse(review.openedAt) &&
       (!review.closedAt || fallbackTimestamp <= Date.parse(review.closedAt)),
-  )
+  );
 }
 
-function selectOptimizationPoint(kind: 'entry' | 'exit', snapshotPoint: MarketSnapshotRecord) {
-  if (kind === 'entry') {
-    optimizationEntrySnapshotId.value = snapshotPoint.id
-    return
+function selectOptimizationPoint(
+  kind: "entry" | "exit",
+  snapshotPoint: MarketSnapshotRecord,
+) {
+  if (kind === "entry") {
+    optimizationEntrySnapshotId.value = snapshotPoint.id;
+    return;
   }
-  optimizationExitSnapshotId.value = snapshotPoint.id
+  optimizationExitSnapshotId.value = snapshotPoint.id;
 }
 
-function selectOptimizationPointById(kind: 'entry' | 'exit', snapshotId: string) {
-  const snapshotPoint = selectedOptimizationSnapshots.value.find((snapshot) => snapshot.id === snapshotId)
+function selectOptimizationPointById(
+  kind: "entry" | "exit",
+  snapshotId: string,
+) {
+  const snapshotPoint = selectedOptimizationSnapshots.value.find(
+    (snapshot) => snapshot.id === snapshotId,
+  );
   if (snapshotPoint) {
-    selectOptimizationPoint(kind, snapshotPoint)
+    selectOptimizationPoint(kind, snapshotPoint);
   }
 }
 
-function selectedOptimizationSnapshot(kind: 'entry' | 'exit') {
-  const snapshotId = kind === 'entry' ? optimizationEntrySnapshotId.value : optimizationExitSnapshotId.value
-  return selectedOptimizationSnapshots.value.find((snapshot) => snapshot.id === snapshotId) ?? null
+function selectedOptimizationSnapshot(kind: "entry" | "exit") {
+  const snapshotId =
+    kind === "entry"
+      ? optimizationEntrySnapshotId.value
+      : optimizationExitSnapshotId.value;
+  return (
+    selectedOptimizationSnapshots.value.find(
+      (snapshot) => snapshot.id === snapshotId,
+    ) ?? null
+  );
 }
 
-function selectedOptimizationSnapshotIndex(kind: 'entry' | 'exit') {
-  const snapshotId = kind === 'entry' ? optimizationEntrySnapshotId.value : optimizationExitSnapshotId.value
-  return selectedOptimizationSnapshots.value.findIndex((snapshot) => snapshot.id === snapshotId)
+function selectedOptimizationSnapshotIndex(kind: "entry" | "exit") {
+  const snapshotId =
+    kind === "entry"
+      ? optimizationEntrySnapshotId.value
+      : optimizationExitSnapshotId.value;
+  return selectedOptimizationSnapshots.value.findIndex(
+    (snapshot) => snapshot.id === snapshotId,
+  );
 }
 
-function shiftOptimizationPoint(kind: 'entry' | 'exit', delta: number) {
-  const snapshots = selectedOptimizationSnapshots.value
+function shiftOptimizationPoint(kind: "entry" | "exit", delta: number) {
+  const snapshots = selectedOptimizationSnapshots.value;
   if (!snapshots.length) {
-    return
+    return;
   }
-  const currentIndex = selectedOptimizationSnapshotIndex(kind)
-  const fallbackIndex = kind === 'entry'
-    ? snapshots.findIndex((snapshot) => snapshot.signalAction === 'BUY_ALERT')
-    : snapshots.findIndex((snapshot) => snapshot.signalAction === 'SELL_ALERT')
-  const baseIndex = currentIndex >= 0 ? currentIndex : (fallbackIndex >= 0 ? fallbackIndex : 0)
-  const nextIndex = Math.min(Math.max(baseIndex + delta, 0), snapshots.length - 1)
-  selectOptimizationPoint(kind, snapshots[nextIndex])
+  const currentIndex = selectedOptimizationSnapshotIndex(kind);
+  const fallbackIndex =
+    kind === "entry"
+      ? snapshots.findIndex((snapshot) => snapshot.signalAction === "BUY_ALERT")
+      : snapshots.findIndex(
+          (snapshot) => snapshot.signalAction === "SELL_ALERT",
+        );
+  const baseIndex =
+    currentIndex >= 0 ? currentIndex : fallbackIndex >= 0 ? fallbackIndex : 0;
+  const nextIndex = Math.min(
+    Math.max(baseIndex + delta, 0),
+    snapshots.length - 1,
+  );
+  selectOptimizationPoint(kind, snapshots[nextIndex]);
 }
 
 function optimizationSnapshotLabel(snapshotPoint: MarketSnapshotRecord | null) {
   if (!snapshotPoint) {
-    return 'Not selected'
+    return "Not selected";
   }
-  const action = snapshotPoint.signalAction === 'BUY_ALERT' ? 'Buy' : snapshotPoint.signalAction === 'SELL_ALERT' ? 'Sell' : 'Market'
-  return `${action} · ${formatLocaleTimestamp(snapshotPoint.timestamp)}`
+  const action =
+    snapshotPoint.signalAction === "BUY_ALERT"
+      ? "Buy"
+      : snapshotPoint.signalAction === "SELL_ALERT"
+        ? "Sell"
+        : "Market";
+  return `${action} · ${formatLocaleTimestamp(snapshotPoint.timestamp)}`;
 }
 
 function nextLedgerPage() {
-  marketLedgerPage.value = Math.min(marketLedgerPage.value + 1, marketLedgerPageCount.value - 1)
+  marketLedgerPage.value = Math.min(
+    marketLedgerPage.value + 1,
+    marketLedgerPageCount.value - 1,
+  );
 }
 
 function previousLedgerPage() {
-  marketLedgerPage.value = Math.max(marketLedgerPage.value - 1, 0)
+  marketLedgerPage.value = Math.max(marketLedgerPage.value - 1, 0);
 }
 
 function nextWindowPage() {
-  windowReviewPage.value = Math.min(windowReviewPage.value + 1, windowReviewPageCount.value - 1)
+  windowReviewPage.value = Math.min(
+    windowReviewPage.value + 1,
+    windowReviewPageCount.value - 1,
+  );
 }
 
 function previousWindowPage() {
-  windowReviewPage.value = Math.max(windowReviewPage.value - 1, 0)
+  windowReviewPage.value = Math.max(windowReviewPage.value - 1, 0);
 }
 
 function nextMarketWindowPage() {
-  marketWindowPage.value = Math.min(marketWindowPage.value + 1, marketWindowPageCount.value - 1)
+  marketWindowPage.value = Math.min(
+    marketWindowPage.value + 1,
+    marketWindowPageCount.value - 1,
+  );
 }
 
 function previousMarketWindowPage() {
-  marketWindowPage.value = Math.max(marketWindowPage.value - 1, 0)
+  marketWindowPage.value = Math.max(marketWindowPage.value - 1, 0);
 }
 
 function formatWindowOptimizationChange(changePct: number) {
   if (!Number.isFinite(changePct)) {
-    return '0.00%'
+    return "0.00%";
   }
-  const sign = changePct >= 0 ? '+' : ''
-  return `${sign}${changePct.toFixed(2)}%`
+  const sign = changePct >= 0 ? "+" : "";
+  return `${sign}${changePct.toFixed(2)}%`;
 }
 
 async function saveWindowReviewOptimization() {
   if (!snapshot.value || !liveDataAvailable.value) {
-    return
+    return;
   }
-  const review = selectedOptimizationReview.value
-  const entrySnapshot = selectedOptimizationSnapshot('entry')
-  const exitSnapshot = selectedOptimizationSnapshot('exit')
+  const review = selectedOptimizationReview.value;
+  const entrySnapshot = selectedOptimizationSnapshot("entry");
+  const exitSnapshot = selectedOptimizationSnapshot("exit");
   if (!review || !entrySnapshot || !exitSnapshot) {
-    return
+    return;
   }
 
-  optimizationSaving.value = true
-  optimizationError.value = null
+  optimizationSaving.value = true;
+  optimizationError.value = null;
   try {
-    const now = new Date().toISOString()
+    const now = new Date().toISOString();
     const record = await saveWindowOptimization(
       sessionOverview.value.sessionId,
       review,
@@ -1338,27 +1686,38 @@ async function saveWindowReviewOptimization() {
       snapshot.value?.configFields ?? configFields,
       snapshot.value.windowOptimizations ?? [],
       now,
-    )
+    );
     snapshot.value = {
       ...snapshot.value,
-      windowOptimizations: [record, ...(snapshot.value.windowOptimizations ?? []).filter((item) => item.id !== record.id)],
-    }
-    optimizationNotes.value = ''
+      windowOptimizations: [
+        record,
+        ...(snapshot.value.windowOptimizations ?? []).filter(
+          (item) => item.id !== record.id,
+        ),
+      ],
+    };
+    optimizationNotes.value = "";
   } catch (error) {
-    console.error('Failed to save window optimization:', error)
-    optimizationError.value = error instanceof Error ? error.message : 'Failed to save window optimization.'
+    console.error("Failed to save window optimization:", error);
+    optimizationError.value =
+      error instanceof Error
+        ? error.message
+        : "Failed to save window optimization.";
   } finally {
-    optimizationSaving.value = false
+    optimizationSaving.value = false;
   }
 }
 
 function openExpandedChart(chartId: string) {
-  chartModalPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  expandedChartId.value = chartId
+  chartModalPreviousFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  expandedChartId.value = chartId;
 }
 
 function closeExpandedChart() {
-  expandedChartId.value = null
+  expandedChartId.value = null;
 }
 
 function getFocusableElements(root: HTMLElement) {
@@ -1366,122 +1725,142 @@ function getFocusableElements(root: HTMLElement) {
     root.querySelectorAll<HTMLElement>(
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((element) => !element.hasAttribute('disabled') && element.tabIndex >= 0)
+  ).filter(
+    (element) => !element.hasAttribute("disabled") && element.tabIndex >= 0,
+  );
 }
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (!expandedChartId.value) {
-    return
+    return;
   }
 
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    closeExpandedChart()
-    return
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeExpandedChart();
+    return;
   }
 
-  if (event.key !== 'Tab') {
-    return
+  if (event.key !== "Tab") {
+    return;
   }
 
-  const modalCard = chartModalCardRef.value
+  const modalCard = chartModalCardRef.value;
   if (!modalCard) {
-    return
+    return;
   }
 
-  const focusable = getFocusableElements(modalCard)
+  const focusable = getFocusableElements(modalCard);
   if (focusable.length === 0) {
-    event.preventDefault()
-    chartModalCloseButton.value?.focus()
-    return
+    event.preventDefault();
+    chartModalCloseButton.value?.focus();
+    return;
   }
 
-  const currentIndex = focusable.findIndex((element) => element === document.activeElement)
+  const currentIndex = focusable.findIndex(
+    (element) => element === document.activeElement,
+  );
   const nextIndex = event.shiftKey
     ? currentIndex <= 0
       ? focusable.length - 1
       : currentIndex - 1
     : currentIndex === -1 || currentIndex === focusable.length - 1
       ? 0
-      : currentIndex + 1
+      : currentIndex + 1;
 
-  event.preventDefault()
-  focusable[nextIndex]?.focus()
+  event.preventDefault();
+  focusable[nextIndex]?.focus();
 }
 
 watch(
   expandedChartId,
   async (chartId) => {
     if (chartId) {
-      await nextTick()
-      chartModalCloseButton.value?.focus()
-      return
+      await nextTick();
+      chartModalCloseButton.value?.focus();
+      return;
     }
 
-    chartModalPreviousFocus?.focus?.()
-    chartModalPreviousFocus = null
+    chartModalPreviousFocus?.focus?.();
+    chartModalPreviousFocus = null;
   },
   { immediate: true },
-)
+);
 
 function handleConfigVersionClick(version: ConfigVersionRecord) {
-  if (isConfigDraftDirty.value && selectedConfigVersion.value?.id !== version.id) {
-    return
+  if (
+    isConfigDraftDirty.value &&
+    selectedConfigVersion.value?.id !== version.id
+  ) {
+    return;
   }
-  selectConfigVersion(version)
+  selectConfigVersion(version);
 }
 
 async function requestDashboardRefresh() {
   if (!liveDataAvailable.value) {
-    return
+    return;
   }
   if (dashboardRefreshInFlight) {
-    dashboardRefreshQueued = true
-    return
+    dashboardRefreshQueued = true;
+    return;
   }
 
-  dashboardRefreshInFlight = true
-  const preserveSelectedConfig = selectedConfigVersionId.value
+  dashboardRefreshInFlight = true;
+  const preserveSelectedConfig = selectedConfigVersionId.value;
   try {
-    const result = await loadDashboardSnapshot({ allowLiveData: true, marketDayKey: selectedMarketDay.value })
-    snapshot.value = result.snapshot
-    selectedSignal.value = result.snapshot.selectedSignal
-    snapshotSource.value = result.source
-    snapshotWarning.value = result.warning
-    if (preserveSelectedConfig === 'current') {
+    const result = await loadDashboardSnapshot({
+      allowLiveData: true,
+      marketDayKey: selectedMarketDay.value,
+    });
+    snapshot.value = result.snapshot;
+    selectedSignal.value = result.snapshot.selectedSignal;
+    snapshotSource.value = result.source;
+    snapshotWarning.value = result.warning;
+    if (preserveSelectedConfig === "current") {
       selectConfigVersion(
-        result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ??
+        result.snapshot.configVersions.find(
+          (version) =>
+            version.version === result.snapshot.sessionOverview.configVersion,
+        ) ??
           result.snapshot.configVersions[0] ??
           null,
-      )
+      );
     }
   } catch (error) {
-    console.error('Failed to refresh dashboard:', error)
+    console.error("Failed to refresh dashboard:", error);
   } finally {
-    dashboardRefreshInFlight = false
+    dashboardRefreshInFlight = false;
     if (dashboardRefreshQueued) {
-      dashboardRefreshQueued = false
-      void requestDashboardRefresh()
+      dashboardRefreshQueued = false;
+      void requestDashboardRefresh();
     }
   }
 }
 
 function stopRealtimeDashboardListeners() {
   for (const unsubscribe of realtimeUnsubscribers) {
-    unsubscribe()
+    unsubscribe();
   }
-  realtimeUnsubscribers = []
-  realtimeListenerKey = ''
+  realtimeUnsubscribers = [];
+  realtimeListenerKey = "";
 }
 
-function startRealtimeDashboardListeners(sessionId: string, marketDayKey: string) {
-  const listenerKey = `${sessionId}:${marketDayKey}`
-  if (!liveDataAvailable.value || !sessionId || listenerKey === realtimeListenerKey) {
-    return
+function startRealtimeDashboardListeners(
+  sessionId: string,
+  marketDayKey: string,
+) {
+  const listenerKey = `${sessionId}:${marketDayKey}`;
+  if (
+    !liveDataAvailable.value ||
+    !sessionId ||
+    listenerKey === realtimeListenerKey
+  ) {
+    return;
   }
 
-  stopRealtimeDashboardListeners()
-  realtimeListenerKey = listenerKey
+  stopRealtimeDashboardListeners();
+  realtimeListenerKey = listenerKey;
   const paths = [
     `${MARKET_SESSIONS_COLLECTION}/${sessionId}`,
     `${SIGNAL_EVENTS_COLLECTION}/${sessionId}/${marketDayKey}`,
@@ -1489,80 +1868,96 @@ function startRealtimeDashboardListeners(sessionId: string, marketDayKey: string
     `${WINDOW_OPTIMIZATIONS_COLLECTION}/${sessionId}`,
     `${MARKET_SNAPSHOTS_COLLECTION}/${sessionId}/${marketDayKey}`,
     `${CONFIG_VERSIONS_COLLECTION}/${sessionId}`,
-  ]
+  ];
 
   for (const path of paths) {
     const unsubscribe = onValue(databaseRef(rtdb, path), () => {
-      if (!isMounted || !liveDataAvailable.value || realtimeListenerKey !== listenerKey) {
-        return
+      if (
+        !isMounted ||
+        !liveDataAvailable.value ||
+        realtimeListenerKey !== listenerKey
+      ) {
+        return;
       }
-      void requestDashboardRefresh()
-    })
-    realtimeUnsubscribers.push(unsubscribe)
+      void requestDashboardRefresh();
+    });
+    realtimeUnsubscribers.push(unsubscribe);
   }
 }
 
 async function refreshOnRelevantSignal(payload: MessagePayload) {
-  const type = payload.data?.type?.trim().toLowerCase()
-  if (type === 'decision.accepted' || type === 'decision.exited') {
-    await requestDashboardRefresh()
+  const type = payload.data?.type?.trim().toLowerCase();
+  if (type === "decision.accepted" || type === "decision.exited") {
+    await requestDashboardRefresh();
   }
 }
 
 async function initializeNotifications(promptForPermission: boolean) {
   if (!liveDataAvailable.value) {
-    notificationState.value = 'failed'
-    notificationMessage.value = 'Cannot enable live updates: live data is unavailable.'
-    return
+    notificationState.value = "failed";
+    notificationMessage.value =
+      "Cannot enable live updates: live data is unavailable.";
+    return;
   }
 
-  const generation = ++notificationSetupGeneration
-  stopLiveSignalNotifications()
-  const setup = promptForPermission ? setupLiveSignalNotifications : probeLiveSignalNotifications
-  const result = await setup(refreshOnRelevantSignal)
+  const generation = ++notificationSetupGeneration;
+  stopLiveSignalNotifications();
+  const setup = promptForPermission
+    ? setupLiveSignalNotifications
+    : probeLiveSignalNotifications;
+  const result = await setup(refreshOnRelevantSignal);
   if (!isMounted || generation !== notificationSetupGeneration) {
-    result.stop?.()
-    return
+    result.stop?.();
+    return;
   }
-  notificationState.value = result.state
-  notificationMessage.value = result.error
+  notificationState.value = result.state;
+  notificationMessage.value = result.error;
 }
 
 async function enableLiveNotifications() {
-  await initializeNotifications(true)
+  await initializeNotifications(true);
 }
 
 async function saveConfigVersion() {
   if (!snapshot.value || !liveDataAvailable.value) {
-    return
+    return;
   }
 
   try {
     const fields = editableConfigFields.value.map((field) => ({
       ...field,
-      value: parseConfigDraftValue(field, configDraft[field.key] ?? stringifyConfigValue(field.value)),
-    }))
-    const baseVersion = selectedConfigVersion.value?.version ?? currentConfigVersion.value
+      value: parseConfigDraftValue(
+        field,
+        configDraft[field.key] ?? stringifyConfigValue(field.value),
+      ),
+    }));
+    const baseVersion =
+      selectedConfigVersion.value?.version ?? currentConfigVersion.value;
     const candidate = await saveConfigCandidate(
       sessionOverview.value.sessionId,
       baseVersion,
       fields,
       `Draft snapshot derived from ${baseVersion}`,
-    )
+    );
 
     snapshot.value = {
       ...snapshot.value,
-      configVersions: [candidate, ...snapshot.value.configVersions.filter((version) => version.id !== candidate.id)],
-    }
-    selectConfigVersion(candidate)
+      configVersions: [
+        candidate,
+        ...snapshot.value.configVersions.filter(
+          (version) => version.id !== candidate.id,
+        ),
+      ],
+    };
+    selectConfigVersion(candidate);
   } catch (error) {
-    console.error('Failed to save config candidate:', error)
+    console.error("Failed to save config candidate:", error);
   }
 }
 
 async function applySelectedVersion(version: ConfigVersionRecord) {
   if (!snapshot.value || !liveDataAvailable.value) {
-    return
+    return;
   }
 
   try {
@@ -1570,110 +1965,129 @@ async function applySelectedVersion(version: ConfigVersionRecord) {
       sessionOverview.value.sessionId,
       currentConfigVersion.value,
       version.version,
-    )
-    await requestDashboardRefresh()
+    );
+    await requestDashboardRefresh();
   } catch (error) {
-    console.error('Failed to apply config version:', error)
+    console.error("Failed to apply config version:", error);
   }
 }
 
 onMounted(async () => {
   dashboardClockTimer = window.setInterval(() => {
-    dashboardClock.value = Date.now()
-  }, 60_000)
+    dashboardClock.value = Date.now();
+  }, 60_000);
 
-  let allowLiveData = true
+  let allowLiveData = true;
   try {
-    authState.value = 'authenticating'
-    await signInAnonymously(auth)
-    authState.value = 'authenticated'
+    authState.value = "authenticating";
+    await signInAnonymously(auth);
+    authState.value = "authenticated";
   } catch {
-    authState.value = 'offline'
-    allowLiveData = false
+    authState.value = "offline";
+    allowLiveData = false;
   }
 
-  liveDataAvailable.value = allowLiveData
+  liveDataAvailable.value = allowLiveData;
   try {
-    const result = await loadDashboardSnapshot({ allowLiveData, marketDayKey: selectedMarketDay.value })
-    snapshot.value = result.snapshot
-    selectedSignal.value = result.snapshot.selectedSignal
-    snapshotSource.value = result.source
-    snapshotWarning.value = result.warning
-    selectConfigVersion(result.snapshot.configVersions.find((version) => version.version === result.snapshot.sessionOverview.configVersion) ?? result.snapshot.configVersions[0] ?? null)
+    const result = await loadDashboardSnapshot({
+      allowLiveData,
+      marketDayKey: selectedMarketDay.value,
+    });
+    snapshot.value = result.snapshot;
+    selectedSignal.value = result.snapshot.selectedSignal;
+    snapshotSource.value = result.source;
+    snapshotWarning.value = result.warning;
+    selectConfigVersion(
+      result.snapshot.configVersions.find(
+        (version) =>
+          version.version === result.snapshot.sessionOverview.configVersion,
+      ) ??
+        result.snapshot.configVersions[0] ??
+        null,
+    );
   } catch (error) {
-    console.error('Failed to load dashboard snapshot:', error)
+    console.error("Failed to load dashboard snapshot:", error);
   }
-  void initializeNotifications(false)
+  void initializeNotifications(false);
   const scheduleDashboardRefresh = () => {
     if (!isMounted || !liveDataAvailable.value || document.hidden) {
-      return
+      return;
     }
 
     if (dashboardRefreshTimer !== null) {
-      window.clearTimeout(dashboardRefreshTimer)
+      window.clearTimeout(dashboardRefreshTimer);
     }
 
     dashboardRefreshTimer = window.setTimeout(async () => {
-      dashboardRefreshTimer = null
+      dashboardRefreshTimer = null;
       try {
-        await requestDashboardRefresh()
+        await requestDashboardRefresh();
       } finally {
         if (isMounted && liveDataAvailable.value && !document.hidden) {
-          scheduleDashboardRefresh()
+          scheduleDashboardRefresh();
         }
       }
-    }, DASHBOARD_REFRESH_INTERVAL_MS)
-  }
+    }, DASHBOARD_REFRESH_INTERVAL_MS);
+  };
 
   const handleVisibilityChange = () => {
     if (dashboardRefreshTimer !== null) {
-      window.clearTimeout(dashboardRefreshTimer)
-      dashboardRefreshTimer = null
+      window.clearTimeout(dashboardRefreshTimer);
+      dashboardRefreshTimer = null;
     }
     if (!document.hidden) {
-      scheduleDashboardRefresh()
+      scheduleDashboardRefresh();
     }
-  }
+  };
 
-  dashboardVisibilityChangeHandler = handleVisibilityChange
-  document.addEventListener('visibilitychange', dashboardVisibilityChangeHandler)
-  window.addEventListener('keydown', handleGlobalKeydown)
-  scheduleDashboardRefresh()
-  loading.value = false
-})
+  dashboardVisibilityChangeHandler = handleVisibilityChange;
+  document.addEventListener(
+    "visibilitychange",
+    dashboardVisibilityChangeHandler,
+  );
+  window.addEventListener("keydown", handleGlobalKeydown);
+  scheduleDashboardRefresh();
+  loading.value = false;
+});
 
 watch(
-  () => snapshot.value?.sessionOverview.sessionId ?? '',
+  () => snapshot.value?.sessionOverview.sessionId ?? "",
   (sessionId) => {
-    startRealtimeDashboardListeners(sessionId, selectedMarketDay.value)
+    startRealtimeDashboardListeners(sessionId, selectedMarketDay.value);
   },
   { immediate: true },
-)
+);
 
 watch(selectedMarketDay, (marketDayKey) => {
   if (snapshot.value?.sessionOverview.sessionId) {
-    startRealtimeDashboardListeners(snapshot.value.sessionOverview.sessionId, marketDayKey)
+    startRealtimeDashboardListeners(
+      snapshot.value.sessionOverview.sessionId,
+      marketDayKey,
+    );
   }
-})
+});
 
 onUnmounted(() => {
-  isMounted = false
+  isMounted = false;
   if (dashboardRefreshTimer !== null) {
-    window.clearTimeout(dashboardRefreshTimer)
-    dashboardRefreshTimer = null
+    window.clearTimeout(dashboardRefreshTimer);
+    dashboardRefreshTimer = null;
   }
   if (dashboardClockTimer !== null) {
-    window.clearInterval(dashboardClockTimer)
-    dashboardClockTimer = null
+    window.clearInterval(dashboardClockTimer);
+    dashboardClockTimer = null;
   }
   if (dashboardVisibilityChangeHandler) {
-    document.removeEventListener('visibilitychange', dashboardVisibilityChangeHandler)
-    dashboardVisibilityChangeHandler = null
+    document.removeEventListener(
+      "visibilitychange",
+      dashboardVisibilityChangeHandler,
+    );
+    dashboardVisibilityChangeHandler = null;
   }
-  window.removeEventListener('keydown', handleGlobalKeydown)
-  stopRealtimeDashboardListeners()
-  stopLiveSignalNotifications()
-})
+  window.removeEventListener("keydown", handleGlobalKeydown);
+  stopRealtimeDashboardListeners();
+  stopLiveSignalNotifications();
+});
 </script>
 
 <template>
@@ -1683,7 +2097,8 @@ onUnmounted(() => {
         <p class="eyebrow">Trade Signal Engine</p>
         <h1>Live signal control room</h1>
         <p class="lede">
-          Monitor live windows, tune strategy settings, and inspect signal state without coupling the admin UI to market-data logic.
+          Monitor live windows, tune strategy settings, and inspect signal state
+          without coupling the admin UI to market-data logic.
         </p>
       </div>
 
@@ -1692,8 +2107,22 @@ onUnmounted(() => {
         <div>
           <strong>{{ sourceDisplay.title }}</strong>
           <p>{{ sourceDisplay.description }}</p>
-          <p>Last update: <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong></p>
-          <p>Access: <strong>{{ authState === 'authenticated' ? 'Authenticated' : authState === 'offline' ? 'Offline fallback' : 'Signing in' }}</strong></p>
+          <p>
+            Last update:
+            <strong>{{
+              formatLocaleTimestamp(sessionOverview.updatedAt)
+            }}</strong>
+          </p>
+          <p>
+            Access:
+            <strong>{{
+              authState === "authenticated"
+                ? "Authenticated"
+                : authState === "offline"
+                  ? "Offline fallback"
+                  : "Signing in"
+            }}</strong>
+          </p>
           <p>
             Browser alerts:
             <strong>{{ notificationState }}</strong>
@@ -1710,30 +2139,53 @@ onUnmounted(() => {
             :disabled="notificationState === 'ready'"
             @click="enableLiveNotifications"
           >
-            {{ notificationState === 'ready' ? 'Live notifications enabled' : 'Enable live notifications' }}
+            {{
+              notificationState === "ready"
+                ? "Live notifications enabled"
+                : "Enable live notifications"
+            }}
           </button>
         </div>
       </div>
     </section>
 
-    <section v-if="loading" class="panel">
-      Loading dashboard data...
-    </section>
+    <section v-if="loading" class="panel">Loading dashboard data...</section>
 
     <template v-else>
       <section class="metrics">
-        <article v-for="metric in snapshot?.metrics ?? []" :key="metric.label" class="metric-card">
+        <article
+          v-for="metric in snapshot?.metrics ?? []"
+          :key="metric.label"
+          class="metric-card"
+        >
           <span>{{ metric.label }}</span>
           <strong>{{ metric.value }}</strong>
         </article>
       </section>
 
-
       <section class="grid">
         <article class="panel decision-queue-panel">
           <div class="panel-header">
             <h2>Decision queue</h2>
-            <span>{{ formatMarketDayLabel(selectedMarketDay) }} · {{ selectedDecisionSymbol || 'All tracked stocks' }}</span>
+            <div class="panel-header-actions">
+              <span>{{ selectedDecisionSymbol || "All tracked stocks" }}</span>
+              <input
+                v-model="selectedMarketDay"
+                type="date"
+                class="day-picker"
+                :max="currentMarketDayKey()"
+                :aria-label="`Decision day ${formatMarketDayLabel(selectedMarketDay)}`"
+                :title="`Select decision day · ${formatMarketDayLabel(selectedMarketDay)}`"
+              />
+              <button
+                type="button"
+                class="action-button ghost compact"
+                :disabled="selectedMarketDay === currentMarketDayKey()"
+                @click="selectedMarketDay = currentMarketDayKey()"
+              >
+                Today
+              </button>
+            </div>
           </div>
           <div class="symbol-tabs">
             <button
@@ -1765,20 +2217,35 @@ onUnmounted(() => {
               :aria-pressed="triageFilter === filter"
               @click="setTriageFilter(filter)"
             >
-              <span>{{ filter === 'all' ? 'All decisions' : filter === 'buy' ? 'Buy' : 'Sell' }}</span>
+              <span>{{
+                filter === "all"
+                  ? "All decisions"
+                  : filter === "buy"
+                    ? "Buy"
+                    : "Sell"
+              }}</span>
               <strong>{{ triageCounts[filter] }}</strong>
             </button>
           </div>
           <div v-if="triagePageSignals.length" class="ledger-toolbar">
-            <button type="button" class="action-button ghost compact" :disabled="triagePage === 0" @click="triagePage = Math.max(triagePage - 1, 0)">
+            <button
+              type="button"
+              class="action-button ghost compact"
+              :disabled="triagePage === 0"
+              @click="triagePage = Math.max(triagePage - 1, 0)"
+            >
               Previous
             </button>
-            <span class="pager-label">{{ triagePage + 1 }} / {{ triagePageCount }}</span>
+            <span class="pager-label"
+              >{{ triagePage + 1 }} / {{ triagePageCount }}</span
+            >
             <button
               type="button"
               class="action-button ghost compact"
               :disabled="triagePage >= triagePageCount - 1"
-              @click="triagePage = Math.min(triagePage + 1, triagePageCount - 1)"
+              @click="
+                triagePage = Math.min(triagePage + 1, triagePageCount - 1)
+              "
             >
               Next
             </button>
@@ -1793,7 +2260,10 @@ onUnmounted(() => {
             >
               <div>
                 <strong>{{ signal.symbol }}</strong>
-                <p>{{ formatSignalRegimeLabel(signal) }} · {{ signal.windowId ? 'Linked window' : 'Window pending' }}</p>
+                <p>
+                  {{ formatSignalRegimeLabel(signal) }} ·
+                  {{ signal.windowId ? "Linked window" : "Window pending" }}
+                </p>
               </div>
               <div class="scores">
                 <span>{{ signal.entryScore.toFixed(2) }}</span>
@@ -1801,18 +2271,25 @@ onUnmounted(() => {
               </div>
             </button>
           </div>
-          <p v-else class="empty-state">No buy or sell decisions have been written for the selected day.</p>
+          <p v-else class="empty-state">
+            No buy or sell decisions have been written for the selected day.
+          </p>
         </article>
 
         <article class="panel decision-queue-panel">
           <div class="panel-header">
             <h2>Selected signal</h2>
-            <span>{{ selectedSignal?.symbol ?? 'No signal selected' }}</span>
+            <span>{{ selectedSignal?.symbol ?? "No signal selected" }}</span>
           </div>
           <div class="detail-card" v-if="selectedSignal">
             <div class="detail-title">
-              <strong>{{ formatSignalStateLabel(selectedSignal.state) }}</strong>
-              <span>Updated {{ formatLocaleTimestamp(selectedSignal.updatedAt) }}</span>
+              <strong>{{
+                formatSignalStateLabel(selectedSignal.state)
+              }}</strong>
+              <span
+                >Updated
+                {{ formatLocaleTimestamp(selectedSignal.updatedAt) }}</span
+              >
             </div>
             <div class="score-grid">
               <div>
@@ -1825,12 +2302,16 @@ onUnmounted(() => {
               </div>
               <div>
                 <span>Window</span>
-                <strong>{{ selectedSignal.windowId ? 'Linked window' : 'Window pending' }}</strong>
+                <strong>{{
+                  selectedSignal.windowId ? "Linked window" : "Window pending"
+                }}</strong>
               </div>
             </div>
             <p>{{ formatSignalRegimeLabel(selectedSignal) }}</p>
             <ul class="reason-list">
-              <li v-for="reason in selectedSignal.reasons" :key="reason">{{ humanizeReason(reason) }}</li>
+              <li v-for="reason in selectedSignal.reasons" :key="reason">
+                {{ humanizeReason(reason) }}
+              </li>
             </ul>
           </div>
         </article>
@@ -1839,24 +2320,27 @@ onUnmounted(() => {
       <section class="panel two-column">
         <div class="panel-header">
           <h2>Trade windows</h2>
-          <span>{{ allWindowReviews.length }} windows · {{ formatMarketDayLabel(selectedMarketDay) }}</span>
-        </div>
-        <div class="window-toolbar">
-          <div class="day-tabs">
-            <button
-              v-for="day in availableMarketDays"
-              :key="day"
-              type="button"
-              class="symbol-tab"
-              :class="{ active: selectedMarketDay === day }"
-              @click="selectedMarketDay = day"
+          <div class="panel-header-actions">
+            <span
+              >{{ allWindowReviews.length }} windows ·
+              {{ selectedWindowSymbol || "All tracked stocks" }}</span
             >
-              {{ day === currentMarketDayKey() ? 'Today' : formatMarketDayLabel(day) }}
+            <input
+              v-model="selectedMarketDay"
+              type="date"
+              class="day-picker"
+              :max="currentMarketDayKey()"
+              :aria-label="`Trade window day ${formatMarketDayLabel(selectedMarketDay)}`"
+              :title="`Select trade window day · ${formatMarketDayLabel(selectedMarketDay)}`"
+            />
+            <button
+              type="button"
+              class="action-button ghost compact"
+              :disabled="selectedMarketDay === currentMarketDayKey()"
+              @click="selectedMarketDay = currentMarketDayKey()"
+            >
+              Today
             </button>
-          </div>
-          <div class="window-toolbar-legend">
-            <span><i class="entry"></i>Buy</span>
-            <span><i class="exit"></i>Sell</span>
           </div>
         </div>
         <div class="symbol-tabs">
@@ -1880,14 +2364,23 @@ onUnmounted(() => {
           </button>
         </div>
         <p>
-          Each window shows the buy and sell decision, the change in price, and the signal snapshot that pushed the engine into the trade.
-          Use this section to compare buy and sell timing, profitability, and the price path that followed the window.
+          Each window shows the buy and sell decision, the change in price, and
+          the signal snapshot that pushed the engine into the trade. Use this
+          section to compare buy and sell timing, profitability, and the price
+          path that followed the window.
         </p>
         <div v-if="selectedWindowReviews.length" class="ledger-toolbar">
-          <button type="button" class="action-button ghost compact" :disabled="windowReviewPage === 0" @click="previousWindowPage">
+          <button
+            type="button"
+            class="action-button ghost compact"
+            :disabled="windowReviewPage === 0"
+            @click="previousWindowPage"
+          >
             Previous
           </button>
-          <span class="pager-label">{{ windowReviewPage + 1 }} / {{ windowReviewPageCount }}</span>
+          <span class="pager-label"
+            >{{ windowReviewPage + 1 }} / {{ windowReviewPageCount }}</span
+          >
           <button
             type="button"
             class="action-button ghost compact"
@@ -1898,7 +2391,10 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="two-column-body">
-          <div v-if="selectedWindowReviews.length" class="signal-list compact window-list">
+          <div
+            v-if="selectedWindowReviews.length"
+            class="signal-list compact window-list"
+          >
             <button
               v-for="review in selectedWindowReviews"
               :key="windowKey(review)"
@@ -1910,8 +2406,13 @@ onUnmounted(() => {
               <div>
                 <strong>{{ review.symbol }}</strong>
                 <p>
-                  {{ formatWindowStatusLabel(review.status) }} · {{ describeWindowOutcome(review.changePct) }} ·
-                  {{ review.minutesSinceLastSignal === null ? 'Pending' : formatMinutesAgo(review.minutesSinceLastSignal) }}
+                  {{ formatWindowStatusLabel(review.status) }} ·
+                  {{ describeWindowOutcome(review.changePct) }} ·
+                  {{
+                    review.minutesSinceLastSignal === null
+                      ? "Pending"
+                      : formatMinutesAgo(review.minutesSinceLastSignal)
+                  }}
                 </p>
               </div>
               <div class="scores">
@@ -1920,24 +2421,35 @@ onUnmounted(() => {
               </div>
             </button>
           </div>
-          <div v-else class="empty-state">No trade windows available for the selected filters and day.</div>
+          <div v-else class="empty-state">
+            No trade windows available for the selected filters and day.
+          </div>
           <div v-if="selectedWindowReview" class="detail-card window-detail">
             <div class="detail-title">
               <strong>{{ selectedWindowReview.symbol }}</strong>
-              <span>{{ formatWindowStatusLabel(selectedWindowReview.status) }}</span>
+              <span>{{
+                formatWindowStatusLabel(selectedWindowReview.status)
+              }}</span>
             </div>
             <div class="score-grid">
               <div>
                 <span>Change</span>
-                <strong>{{ describeWindowOutcome(selectedWindowReview.changePct) }}</strong>
+                <strong>{{
+                  describeWindowOutcome(selectedWindowReview.changePct)
+                }}</strong>
               </div>
               <div>
                 <span>Total duration</span>
-                <strong :class="{ 'duration-open': selectedWindowReview.durationMinutes === null }">
+                <strong
+                  :class="{
+                    'duration-open':
+                      selectedWindowReview.durationMinutes === null,
+                  }"
+                >
                   {{
                     selectedWindowReview.durationMinutes === null
                       ? selectedWindowReview.minutesSinceLastSignal === null
-                        ? 'Open'
+                        ? "Open"
                         : `Open for ${formatElapsedMinutes(selectedWindowReview.minutesSinceLastSignal)}`
                       : `${selectedWindowReview.durationMinutes} min`
                   }}
@@ -1945,38 +2457,87 @@ onUnmounted(() => {
               </div>
               <div>
                 <span>Last signal</span>
-                <strong>{{ selectedWindowReview.minutesSinceLastSignal === null ? 'Pending' : formatMinutesAgo(selectedWindowReview.minutesSinceLastSignal) }}</strong>
+                <strong>{{
+                  selectedWindowReview.minutesSinceLastSignal === null
+                    ? "Pending"
+                    : formatMinutesAgo(
+                        selectedWindowReview.minutesSinceLastSignal,
+                      )
+                }}</strong>
               </div>
               <div>
                 <span>Buy price</span>
-                <strong>{{ selectedWindowReview.entryPrice === null ? '--' : selectedWindowReview.entryPrice.toFixed(2) }}</strong>
+                <strong>{{
+                  selectedWindowReview.entryPrice === null
+                    ? "--"
+                    : selectedWindowReview.entryPrice.toFixed(2)
+                }}</strong>
               </div>
               <div>
                 <span>Sell price</span>
-                <strong>{{ selectedWindowReview.exitPrice === null ? '--' : selectedWindowReview.exitPrice.toFixed(2) }}</strong>
+                <strong>{{
+                  selectedWindowReview.exitPrice === null
+                    ? "--"
+                    : selectedWindowReview.exitPrice.toFixed(2)
+                }}</strong>
               </div>
             </div>
             <div class="window-summary-grid">
               <article>
-                <span>Buy signal · {{ formatLocaleTimestamp(selectedWindowReview.openedAt) }}</span>
+                <span
+                  >Buy signal ·
+                  {{
+                    formatLocaleTimestamp(selectedWindowReview.openedAt)
+                  }}</span
+                >
                 <div class="signal-summary-grid">
-                  <div v-for="row in snapshotSummaryRows(selectedWindowReview.buySnapshot)" :key="`buy-${row.label}`">
+                  <div
+                    v-for="row in snapshotSummaryRows(
+                      selectedWindowReview.buySnapshot,
+                    )"
+                    :key="`buy-${row.label}`"
+                  >
                     <span>{{ row.label }}</span>
                     <strong>{{ row.value }}</strong>
                   </div>
                 </div>
-                <p class="window-summary-note">{{ selectedWindowReview.buySummary }}</p>
+                <p class="window-summary-note">
+                  {{ selectedWindowReview.buySummary }}
+                </p>
               </article>
               <article>
-                <span>Sell signal · {{ selectedWindowReview.closedAt ? formatLocaleTimestamp(selectedWindowReview.closedAt) : 'Still open' }}</span>
-                <div class="signal-summary-grid" v-if="selectedWindowReview.sellSnapshot">
-                  <div v-for="row in snapshotSummaryRows(selectedWindowReview.sellSnapshot)" :key="`sell-${row.label}`">
+                <span
+                  >Sell signal ·
+                  {{
+                    selectedWindowReview.closedAt
+                      ? formatLocaleTimestamp(selectedWindowReview.closedAt)
+                      : "Still open"
+                  }}</span
+                >
+                <div
+                  class="signal-summary-grid"
+                  v-if="selectedWindowReview.sellSnapshot"
+                >
+                  <div
+                    v-for="row in snapshotSummaryRows(
+                      selectedWindowReview.sellSnapshot,
+                    )"
+                    :key="`sell-${row.label}`"
+                  >
                     <span>{{ row.label }}</span>
                     <strong>{{ row.value }}</strong>
                   </div>
                 </div>
-                <p class="window-summary-note" v-if="selectedWindowReview.sellSnapshot">{{ selectedWindowReview.sellSummary }}</p>
-                <p v-else class="empty-state compact">This window is still open, so the sell snapshot has not been recorded yet.</p>
+                <p
+                  class="window-summary-note"
+                  v-if="selectedWindowReview.sellSnapshot"
+                >
+                  {{ selectedWindowReview.sellSummary }}
+                </p>
+                <p v-else class="empty-state compact">
+                  This window is still open, so the sell snapshot has not been
+                  recorded yet.
+                </p>
               </article>
             </div>
           </div>
@@ -1988,10 +2549,18 @@ onUnmounted(() => {
           <div>
             <h2>Live market charts</h2>
             <p>
-              {{ selectedWindowReview ? `${selectedWindowReview.symbol} · ${formatWindowStatusLabel(selectedWindowReview.status)}` : 'Select a trade window to inspect its charts.' }}
+              {{
+                selectedWindowReview
+                  ? `${selectedWindowReview.symbol} · ${formatWindowStatusLabel(selectedWindowReview.status)}`
+                  : "Select a trade window to inspect its charts."
+              }}
             </p>
           </div>
-          <div class="chart-header-actions">
+          <div class="panel-header-actions">
+            <div class="chart-global-legend" aria-label="Signal legend">
+              <span title="Buy signals are highlighted in green."><i class="buy"></i>Buy</span>
+              <span title="Sell signals are highlighted in red."><i class="sell"></i>Sell</span>
+            </div>
             <span>{{ chartIntervalMinutes }}m interval</span>
           </div>
         </div>
@@ -2008,27 +2577,77 @@ onUnmounted(() => {
           </button>
         </div>
         <p class="panel-intro">
-          Each chart keeps its own scale and uses the selected trade window as its reference. Price uses candles plus moving averages, while oscillators use their native shape and thresholds.
+          Each chart keeps its own scale and uses the selected trade window as
+          its reference. Price uses candles plus one indicator family at a
+          time, while oscillators use their native shape and thresholds.
         </p>
-        <div v-if="selectedWindowReview && selectedChartSnapshots.length" class="chart-grid">
-          <article v-for="chart in marketChartDefs" :key="chart.id" class="chart-card">
-            <div class="chart-card-header">
+        <div
+          v-if="selectedWindowReview && selectedChartSnapshots.length"
+          class="chart-group-list"
+        >
+          <article
+            v-for="group in chartGroups"
+            :key="group.id"
+            class="chart-group"
+          >
+            <button
+              type="button"
+              class="chart-group-header"
+              :aria-expanded="!collapsedChartGroups[group.id]"
+              @click="collapsedChartGroups[group.id] = !collapsedChartGroups[group.id]"
+            >
               <div>
-                <h3>{{ chart.title }}</h3>
-                <p>{{ chart.subtitle }}</p>
+                <h3>{{ group.title }}</h3>
+                <p>{{ group.description }}</p>
               </div>
-              <div class="chart-header-actions">
-                <span>{{ chart.series.map((series) => series.label).join(' · ') }}</span>
-                <button type="button" class="action-button ghost compact" @click="openExpandedChart(chart.id)">
-                  Open large
-                </button>
+              <span>{{ collapsedChartGroups[group.id] ? 'Show' : 'Hide' }}</span>
+            </button>
+            <Transition name="collapse">
+              <div v-show="!collapsedChartGroups[group.id]" class="chart-grid">
+                <article
+                  v-for="chart in group.charts"
+                  :key="chart.id"
+                  class="chart-card"
+                >
+                  <div class="chart-card-header">
+                    <div>
+                      <h3>{{ chart.title }}</h3>
+                      <p>{{ chart.subtitle }}</p>
+                    </div>
+                    <div class="chart-header-actions">
+                      <div class="chart-series-legend">
+                        <span
+                          v-for="series in chart.series"
+                          :key="`${chart.id}-${series.label}`"
+                          :title="series.description ?? series.label"
+                        >
+                          <i :style="{ background: series.color }"></i>
+                          {{ series.label }}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        class="action-button ghost compact"
+                        @click="openExpandedChart(chart.id)"
+                      >
+                        Open large
+                      </button>
+                    </div>
+                  </div>
+                  <MarketChart
+                    :chart="chart"
+                    :snapshots="selectedChartSnapshots"
+                    :interval-minutes="chartIntervalMinutes"
+                    :height="320"
+                  />
+                </article>
               </div>
-            </div>
-            <MarketChart :chart="chart" :snapshots="selectedChartSnapshots" :interval-minutes="chartIntervalMinutes" :height="320" />
+            </Transition>
           </article>
         </div>
         <p v-else class="empty-state">
-          Select a trade window to load the chart history for that buy/sell window.
+          Select a trade window to load the chart history for that buy/sell
+          window.
         </p>
       </section>
 
@@ -2040,32 +2659,58 @@ onUnmounted(() => {
         <div class="config-editor-bar">
           <p>
             Active profile: <strong>{{ currentConfigVersion }}</strong>
-            <span v-if="selectedConfigVersion">Viewing: {{ selectedConfigVersion.version }}</span>
+            <span v-if="selectedConfigVersion"
+              >Viewing: {{ selectedConfigVersion.version }}</span
+            >
           </p>
-          <button type="button" class="action-button" :disabled="!liveDataAvailable" @click="saveConfigVersion">
+          <button
+            type="button"
+            class="action-button"
+            :disabled="!liveDataAvailable"
+            @click="saveConfigVersion"
+          >
             Save candidate
           </button>
         </div>
-        <p v-if="isConfigDraftDirty" class="status-warning config-dirty-warning">
+        <p
+          v-if="isConfigDraftDirty"
+          class="status-warning config-dirty-warning"
+        >
           Unsaved draft changes are active. Save before switching versions.
         </p>
         <p class="config-helper-text">
-          Tune buy and sell weights independently. Hover each label to see why the current value exists and use the review history above to keep the strategy moving in small, stable steps.
+          Tune buy and sell weights independently. Hover each label to see why
+          the current value exists and use the review history above to keep the
+          strategy moving in small, stable steps.
         </p>
         <div class="config-section-list">
-          <article v-for="group in configFieldGroups" :key="group.label" class="config-group">
+          <article
+            v-for="group in configFieldGroups"
+            :key="group.label"
+            class="config-group"
+          >
             <div class="panel-header compact">
               <h3>{{ group.label }}</h3>
               <span>{{ group.fields.length }} fields</span>
             </div>
             <div class="config-grid">
-              <article v-for="field in group.fields" :key="field.key" class="config-card" :class="{ warning: isConfigValueOutsideBounds(field) }">
-                <label :for="field.key" :title="field.description">{{ field.label }}</label>
+              <article
+                v-for="field in group.fields"
+                :key="field.key"
+                class="config-card"
+                :class="{ warning: isConfigValueOutsideBounds(field) }"
+              >
+                <label :for="field.key" :title="field.description">{{
+                  field.label
+                }}</label>
                 <p class="config-current-value">
                   Current value:
                   <strong>{{ stringifyConfigValue(field.value) }}</strong>
                 </p>
-                <div v-if="field.inputType === 'symbols'" class="symbol-chip-list">
+                <div
+                  v-if="field.inputType === 'symbols'"
+                  class="symbol-chip-list"
+                >
                   <button
                     v-for="option in symbolChipOptions(field)"
                     :key="option"
@@ -2077,7 +2722,10 @@ onUnmounted(() => {
                     {{ option }}
                   </button>
                 </div>
-                <div v-if="field.inputType === 'symbols'" class="symbol-add-row">
+                <div
+                  v-if="field.inputType === 'symbols'"
+                  class="symbol-add-row"
+                >
                   <input
                     v-model="symbolAddDrafts[field.key]"
                     type="text"
@@ -2086,7 +2734,11 @@ onUnmounted(() => {
                     class="symbol-add-input"
                     @keydown.enter.prevent="addDraftSymbol(field)"
                   />
-                  <button type="button" class="action-button ghost compact" @click="addDraftSymbol(field)">
+                  <button
+                    type="button"
+                    class="action-button ghost compact"
+                    @click="addDraftSymbol(field)"
+                  >
                     Add
                   </button>
                 </div>
@@ -2114,9 +2766,16 @@ onUnmounted(() => {
                       :class="{ outOfRange: isConfigValueOutsideBounds(field) }"
                     />
                   </div>
-                  <p class="config-range-note" :class="{ outOfRange: isConfigValueOutsideBounds(field) }">
-                    Range {{ configFieldBounds(field).min }} - {{ configFieldBounds(field).max }} · Current draft {{ draftNumberValue(field).toFixed(2) }}
-                    <span v-if="isConfigValueOutsideBounds(field)">Outside the recommended range.</span>
+                  <p
+                    class="config-range-note"
+                    :class="{ outOfRange: isConfigValueOutsideBounds(field) }"
+                  >
+                    Range {{ configFieldBounds(field).min }} -
+                    {{ configFieldBounds(field).max }} · Current draft
+                    {{ draftNumberValue(field).toFixed(2) }}
+                    <span v-if="isConfigValueOutsideBounds(field)"
+                      >Outside the recommended range.</span
+                    >
                   </p>
                 </template>
                 <input
@@ -2144,7 +2803,11 @@ onUnmounted(() => {
             v-for="version in configVersions"
             :key="version.id"
             class="signal-row history-row"
-            :class="{ active: selectedConfigVersion?.id === version.id, disabled: isConfigDraftDirty && selectedConfigVersion?.id !== version.id }"
+            :class="{
+              active: selectedConfigVersion?.id === version.id,
+              disabled:
+                isConfigDraftDirty && selectedConfigVersion?.id !== version.id,
+            }"
             @click="handleConfigVersionClick(version)"
           >
             <div>
@@ -2161,14 +2824,24 @@ onUnmounted(() => {
                 :disabled="!liveDataAvailable"
                 @click.stop="applySelectedVersion(version)"
               >
-                {{ version.status === 'candidate' ? 'Promote' : version.status === 'archived' ? 'Rollback' : 'Apply' }}
+                {{
+                  version.status === "candidate"
+                    ? "Promote"
+                    : version.status === "archived"
+                      ? "Rollback"
+                      : "Apply"
+                }}
               </button>
             </div>
           </article>
         </div>
       </section>
 
-      <div v-if="expandedChartDefinition" class="chart-modal" @click.self="closeExpandedChart">
+      <div
+        v-if="expandedChartDefinition"
+        class="chart-modal"
+        @click.self="closeExpandedChart"
+      >
         <article
           ref="chartModalCardRef"
           class="panel chart-modal-card"
@@ -2180,22 +2853,45 @@ onUnmounted(() => {
         >
           <div class="panel-header">
             <div>
-              <h2 :id="`expanded-chart-title-${expandedChartDefinition.id}`">{{ expandedChartDefinition.title }}</h2>
+              <h2 :id="`expanded-chart-title-${expandedChartDefinition.id}`">
+                {{ expandedChartDefinition.title }}
+              </h2>
               <p>{{ expandedChartDefinition.subtitle }}</p>
             </div>
-            <button ref="chartModalCloseButton" type="button" class="action-button ghost compact" @click="closeExpandedChart">
+            <button
+              ref="chartModalCloseButton"
+              type="button"
+              class="action-button ghost compact"
+              @click="closeExpandedChart"
+            >
               Close
             </button>
           </div>
           <div class="chart-legend">
-            <span v-for="series in expandedChartDefinition.series" :key="`${expandedChartDefinition.id}-${series.label}`" :title="series.label">
+            <span
+              v-for="series in expandedChartDefinition.series"
+              :key="`${expandedChartDefinition.id}-${series.label}`"
+              :title="series.description ?? series.label"
+            >
               <i :style="{ background: series.color }"></i>
               {{ series.label }}
             </span>
           </div>
-          <MarketChart :chart="expandedChartDefinition" :snapshots="selectedChartSnapshots" :interval-minutes="chartIntervalMinutes" :height="640" />
-          <p :id="`expanded-chart-desc-${expandedChartDefinition.id}`" class="status-warning">
-            {{ selectedWindowReview ? `${selectedWindowReview.symbol} · ${formatLocaleTimestamp(selectedWindowReview.lastSignalAt)}` : 'Select a trade window to populate the chart.' }}
+          <MarketChart
+            :chart="expandedChartDefinition"
+            :snapshots="selectedChartSnapshots"
+            :interval-minutes="chartIntervalMinutes"
+            :height="640"
+          />
+          <p
+            :id="`expanded-chart-desc-${expandedChartDefinition.id}`"
+            class="status-warning"
+          >
+            {{
+              selectedWindowReview
+                ? `${selectedWindowReview.symbol} · ${formatLocaleTimestamp(selectedWindowReview.lastSignalAt)}`
+                : "Select a trade window to populate the chart."
+            }}
           </p>
         </article>
       </div>

@@ -275,6 +275,71 @@ h1 {
   gap: 16px;
 }
 
+.chart-group-list {
+  display: grid;
+  gap: 18px;
+}
+
+.chart-group {
+  display: grid;
+  gap: 14px;
+}
+
+.chart-group-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  appearance: none;
+  cursor: pointer;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.58);
+  padding: 14px 16px;
+  color: inherit;
+  text-align: left;
+}
+
+.chart-group-header h3,
+.chart-group-header p {
+  margin: 0;
+}
+
+.chart-group-header p {
+  color: #9fb0ca;
+  font-size: 0.92rem;
+}
+
+.chart-group-header span {
+  color: #7dd3fc;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.collapse-enter-active,
+.collapse-leave-active {
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease,
+    max-height 220ms ease;
+  overflow: hidden;
+}
+
+.collapse-enter-from,
+.collapse-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+  max-height: 0;
+}
+
+.collapse-enter-to,
+.collapse-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+  max-height: 2000px;
+}
+
 .chart-card {
   border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 16px;
@@ -289,7 +354,7 @@ h1 {
   display: flex;
   justify-content: space-between;
   gap: 14px;
-  align-items: baseline;
+  align-items: flex-start;
   margin-bottom: 10px;
 }
 
@@ -303,6 +368,40 @@ h1 {
   display: grid;
   justify-items: end;
   gap: 6px;
+}
+
+.chart-series-legend,
+.chart-global-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: flex-end;
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.chart-series-legend span,
+.chart-global-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.chart-series-legend i,
+.chart-global-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.chart-global-legend i.buy {
+  background: #22c55e;
+}
+
+.chart-global-legend i.sell {
+  background: #ef4444;
 }
 
 .chart-card-header span {
@@ -347,44 +446,6 @@ h1 {
 }
 
 .chart-legend-inline i.exit {
-  background: #ef4444;
-}
-
-.window-toolbar {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.window-toolbar-legend {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 10px 14px;
-  margin-left: auto;
-  color: #cbd5e1;
-  font-size: 0.88rem;
-}
-
-.window-toolbar-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.window-toolbar-legend i {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  display: inline-block;
-}
-
-.window-toolbar-legend i.entry {
-  background: #22c55e;
-}
-
-.window-toolbar-legend i.exit {
   background: #ef4444;
 }
 
@@ -513,7 +574,23 @@ h1 {
 .panel-header-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
+  justify-content: flex-end;
+}
+
+.day-picker {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 0.88rem;
+}
+
+.day-picker::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.85;
 }
 
 .panel-header span {

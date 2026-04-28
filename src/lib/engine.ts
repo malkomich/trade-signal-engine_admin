@@ -46,6 +46,12 @@ export type WindowOptimizationSnapshot = {
   macd_histogram: number | null
   stochastic_k: number | null
   stochastic_d: number | null
+  bollinger_middle: number | null
+  bollinger_upper: number | null
+  bollinger_lower: number | null
+  obv: number | null
+  relative_volume: number | null
+  volume_profile: number | null
   entry_score: number
   exit_score: number
 }
@@ -129,7 +135,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_score_threshold',
     label: 'Buy score threshold',
-    value: 0.65,
+    value: 0.7,
     description: 'Minimum aggregated score required to emit a buy cue. Raise it to make buys stricter; lower it to allow more buys.',
     group: 'Buy rules',
     inputType: 'number',
@@ -138,7 +144,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'sell_score_threshold',
     label: 'Sell score threshold',
-    value: 0.55,
+    value: 0.6,
     description: 'Minimum aggregated score required to emit a sell cue. Raise it to require stronger sell evidence; lower it to close positions sooner.',
     group: 'Sell rules',
     inputType: 'number',
@@ -147,7 +153,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'entry_exit_margin',
     label: 'Buy-sell margin',
-    value: 0.05,
+    value: 0.1,
     description: 'Extra distance the buy score must keep above sell pressure before a flat-state buy is allowed. Lower values admit more signals; higher values make buys stricter.',
     group: 'Buy rules',
     inputType: 'number',
@@ -156,7 +162,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_weight_sma',
     label: 'Buy SMA weight',
-    value: 1.6,
+    value: 0.8,
     description: 'How much the SMA stack contributes to buy decisions. Increase it if trend alignment should matter more for buys.',
     group: 'Buy indicator weights',
     inputType: 'number',
@@ -165,7 +171,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_weight_ema',
     label: 'Buy EMA weight',
-    value: 1.4,
+    value: 1.0,
     description: 'How much the EMA stack contributes to buy decisions.',
     group: 'Buy indicator weights',
     inputType: 'number',
@@ -174,8 +180,17 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_weight_vwap',
     label: 'Buy VWAP weight',
-    value: 1.1,
+    value: 1.2,
     description: 'How much VWAP alignment influences buy decisions.',
+    group: 'Buy indicator weights',
+    inputType: 'number',
+    step: 0.1,
+  },
+  {
+    key: 'buy_weight_bollinger',
+    label: 'Buy Bollinger weight',
+    value: 0.9,
+    description: 'How much Bollinger band structure contributes to buy decisions.',
     group: 'Buy indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -183,7 +198,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_weight_rsi',
     label: 'Buy RSI weight',
-    value: 1.0,
+    value: 0.9,
     description: 'How much RSI momentum influences buy decisions.',
     group: 'Buy indicator weights',
     inputType: 'number',
@@ -192,7 +207,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_weight_atr',
     label: 'Buy ATR weight',
-    value: 0.7,
+    value: 0.4,
     description: 'How much ATR volatility contributes to buy decisions.',
     group: 'Buy indicator weights',
     inputType: 'number',
@@ -201,7 +216,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_weight_dm',
     label: 'Buy directional movement weight',
-    value: 0.8,
+    value: 0.5,
     description: 'How much DMI and ADX influence buy decisions.',
     group: 'Buy indicator weights',
     inputType: 'number',
@@ -210,7 +225,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_weight_macd',
     label: 'Buy MACD weight',
-    value: 1.2,
+    value: 1.0,
     description: 'How much MACD momentum influences buy decisions.',
     group: 'Buy indicator weights',
     inputType: 'number',
@@ -219,8 +234,35 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_weight_stochastic',
     label: 'Buy stochastic weight',
-    value: 0.8,
+    value: 0.5,
     description: 'How much stochastic turning points influence buy decisions.',
+    group: 'Buy indicator weights',
+    inputType: 'number',
+    step: 0.1,
+  },
+  {
+    key: 'buy_weight_obv',
+    label: 'Buy OBV weight',
+    value: 0.8,
+    description: 'How much on-balance volume supports buy decisions.',
+    group: 'Buy indicator weights',
+    inputType: 'number',
+    step: 0.1,
+  },
+  {
+    key: 'buy_weight_relative_volume',
+    label: 'Buy relative volume weight',
+    value: 1.1,
+    description: 'How much volume expansion supports buy decisions.',
+    group: 'Buy indicator weights',
+    inputType: 'number',
+    step: 0.1,
+  },
+  {
+    key: 'buy_weight_volume_profile',
+    label: 'Buy volume profile weight',
+    value: 0.7,
+    description: 'How much volume concentration around the active price zone supports buys.',
     group: 'Buy indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -255,7 +297,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'sell_weight_sma',
     label: 'Sell SMA weight',
-    value: 1.6,
+    value: 0.8,
     description: 'How much the SMA stack contributes to sell decisions.',
     group: 'Sell indicator weights',
     inputType: 'number',
@@ -264,7 +306,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'sell_weight_ema',
     label: 'Sell EMA weight',
-    value: 1.4,
+    value: 1.0,
     description: 'How much the EMA stack contributes to sell decisions.',
     group: 'Sell indicator weights',
     inputType: 'number',
@@ -273,8 +315,17 @@ export const configFields: ConfigField[] = [
   {
     key: 'sell_weight_vwap',
     label: 'Sell VWAP weight',
-    value: 1.1,
+    value: 1.2,
     description: 'How much VWAP alignment influences sell decisions.',
+    group: 'Sell indicator weights',
+    inputType: 'number',
+    step: 0.1,
+  },
+  {
+    key: 'sell_weight_bollinger',
+    label: 'Sell Bollinger weight',
+    value: 0.9,
+    description: 'How much Bollinger band stretch or mean reversion contributes to sell decisions.',
     group: 'Sell indicator weights',
     inputType: 'number',
     step: 0.1,
@@ -282,7 +333,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'sell_weight_rsi',
     label: 'Sell RSI weight',
-    value: 1.0,
+    value: 0.9,
     description: 'How much RSI momentum influences sell decisions.',
     group: 'Sell indicator weights',
     inputType: 'number',
@@ -291,7 +342,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'sell_weight_atr',
     label: 'Sell ATR weight',
-    value: 0.7,
+    value: 0.4,
     description: 'How much ATR volatility contributes to sell decisions.',
     group: 'Sell indicator weights',
     inputType: 'number',
@@ -300,7 +351,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'sell_weight_dm',
     label: 'Sell directional movement weight',
-    value: 0.8,
+    value: 0.5,
     description: 'How much DMI and ADX influence sell decisions.',
     group: 'Sell indicator weights',
     inputType: 'number',
@@ -309,7 +360,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'sell_weight_macd',
     label: 'Sell MACD weight',
-    value: 1.2,
+    value: 1.0,
     description: 'How much MACD momentum influences sell decisions.',
     group: 'Sell indicator weights',
     inputType: 'number',
@@ -318,8 +369,35 @@ export const configFields: ConfigField[] = [
   {
     key: 'sell_weight_stochastic',
     label: 'Sell stochastic weight',
-    value: 0.8,
+    value: 0.5,
     description: 'How much stochastic turning points influence sell decisions.',
+    group: 'Sell indicator weights',
+    inputType: 'number',
+    step: 0.1,
+  },
+  {
+    key: 'sell_weight_obv',
+    label: 'Sell OBV weight',
+    value: 0.8,
+    description: 'How much weakening accumulation or distribution influences sell decisions.',
+    group: 'Sell indicator weights',
+    inputType: 'number',
+    step: 0.1,
+  },
+  {
+    key: 'sell_weight_relative_volume',
+    label: 'Sell relative volume weight',
+    value: 1.1,
+    description: 'How much drying participation supports sell decisions.',
+    group: 'Sell indicator weights',
+    inputType: 'number',
+    step: 0.1,
+  },
+  {
+    key: 'sell_weight_volume_profile',
+    label: 'Sell volume profile weight',
+    value: 0.7,
+    description: 'How much poor volume acceptance around price supports sell decisions.',
     group: 'Sell indicator weights',
     inputType: 'number',
     step: 0.1,

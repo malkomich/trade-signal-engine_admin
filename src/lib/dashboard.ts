@@ -17,7 +17,7 @@ import {
   type WindowOptimizationSnapshot,
   type WindowOptimizationRecord,
 } from './engine'
-import { currentMarketDayKey, marketDayKeyForTimestamp } from './market-day'
+import { currentMarketDayKey, marketDayBounds, marketDayKeyForTimestamp } from './market-day'
 
 export type DashboardSource = 'live' | 'empty'
 
@@ -89,6 +89,12 @@ export type MarketSnapshotRecord = {
   macdHistogram: number | null
   stochasticK: number | null
   stochasticD: number | null
+  bollingerMiddle: number | null
+  bollingerUpper: number | null
+  bollingerLower: number | null
+  obv: number | null
+  relativeVolume: number | null
+  volumeProfile: number | null
   entryScore: number
   exitScore: number
   eventType: string
@@ -489,6 +495,12 @@ function accumulateOptimizationProfile(
     macd_histogram: snapshot.macd_histogram,
     stochastic_k: snapshot.stochastic_k,
     stochastic_d: snapshot.stochastic_d,
+    bollinger_middle: snapshot.bollinger_middle,
+    bollinger_upper: snapshot.bollinger_upper,
+    bollinger_lower: snapshot.bollinger_lower,
+    obv: snapshot.obv,
+    relative_volume: snapshot.relative_volume,
+    volume_profile: snapshot.volume_profile,
     entry_score: snapshot.entry_score,
     exit_score: snapshot.exit_score,
   } satisfies Record<string, number | null>
@@ -621,6 +633,12 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
           macdHistogram: toNullableNumber(data.macd_histogram),
           stochasticK: toNullableNumber(data.stochastic_k),
           stochasticD: toNullableNumber(data.stochastic_d),
+          bollingerMiddle: toNullableNumber(data.bollinger_middle ?? data.bollinger_mid),
+          bollingerUpper: toNullableNumber(data.bollinger_upper),
+          bollingerLower: toNullableNumber(data.bollinger_lower),
+          obv: toNullableNumber(data.obv),
+          relativeVolume: toNullableNumber(data.relative_volume ?? data.relativeVolume),
+          volumeProfile: toNullableNumber(data.volume_profile ?? data.volumeProfile),
           entryScore: Number(data.entry_score ?? 0),
           exitScore: Number(data.exit_score ?? 0),
           eventType: String(data.event_type ?? ''),
@@ -664,8 +682,21 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         } satisfies WindowOptimizationRecord
       })
 
+    const selectedDayRange = marketDayBounds(marketDayKey)
     const selectedDayWindows = windows.filter((window) => {
-      return marketDayKeyForTimestamp(window.openedAt) === marketDayKey || marketDayKeyForTimestamp(window.closedAt) === marketDayKey
+      const openedAt = Date.parse(window.openedAt)
+      const closedAt = window.closedAt ? Date.parse(window.closedAt) : Number.NaN
+      const inOpenedRange =
+        selectedDayRange !== null &&
+        Number.isFinite(openedAt) &&
+        openedAt >= selectedDayRange.start.getTime() &&
+        openedAt < selectedDayRange.end.getTime()
+      const inClosedRange =
+        selectedDayRange !== null &&
+        Number.isFinite(closedAt) &&
+        closedAt >= selectedDayRange.start.getTime() &&
+        closedAt < selectedDayRange.end.getTime()
+      return inOpenedRange || inClosedRange
     })
     const selectedDaySnapshots = marketSnapshots
     // These counters reflect signal events, not window lifecycle events, so they stay aligned with the buy/sell labels in the UI.
@@ -697,11 +728,11 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     const source = hasLiveData ? 'live' : 'empty'
     const warning = hasLiveData
       ? selectedDaySnapshots.length === 0
-            ? 'No live market snapshots are available for the selected day yet.'
+            ? 'No live trading snapshots are available for the selected day yet.'
         : signals.length === 0
-          ? 'No live signal events have been written for the selected day yet.'
+          ? 'No live trading decisions have been written for the selected day yet.'
           : null
-      : 'Live data is connected, but the selected session has not produced records for this day yet.'
+      : 'Live trading data is unavailable, so the dashboard is showing an empty state for this day.'
 
     return {
       source,
@@ -801,6 +832,12 @@ function toWindowOptimizationSnapshot(value: unknown): WindowOptimizationSnapsho
     macd_histogram: null,
     stochastic_k: null,
     stochastic_d: null,
+    bollinger_middle: null,
+    bollinger_upper: null,
+    bollinger_lower: null,
+    obv: null,
+    relative_volume: null,
+    volume_profile: null,
     entry_score: 0,
     exit_score: 0,
   }
@@ -826,6 +863,12 @@ function toWindowOptimizationSnapshot(value: unknown): WindowOptimizationSnapsho
     macd_histogram: toNullableNumber(data.macd_histogram),
     stochastic_k: toNullableNumber(data.stochastic_k),
     stochastic_d: toNullableNumber(data.stochastic_d),
+    bollinger_middle: toNullableNumber(data.bollinger_middle ?? data.bollinger_mid),
+    bollinger_upper: toNullableNumber(data.bollinger_upper),
+    bollinger_lower: toNullableNumber(data.bollinger_lower),
+    obv: toNullableNumber(data.obv),
+    relative_volume: toNullableNumber(data.relative_volume ?? data.relativeVolume),
+    volume_profile: toNullableNumber(data.volume_profile ?? data.volumeProfile),
     entry_score: Number(data.entry_score ?? data.entryScore ?? 0),
     exit_score: Number(data.exit_score ?? data.exitScore ?? 0),
   }
@@ -850,6 +893,12 @@ function snapshotToOptimizationPayload(snapshot: MarketSnapshotRecord) {
     macd_histogram: snapshot.macdHistogram,
     stochastic_k: snapshot.stochasticK,
     stochastic_d: snapshot.stochasticD,
+    bollinger_middle: snapshot.bollingerMiddle,
+    bollinger_upper: snapshot.bollingerUpper,
+    bollinger_lower: snapshot.bollingerLower,
+    obv: snapshot.obv,
+    relative_volume: snapshot.relativeVolume,
+    volume_profile: snapshot.volumeProfile,
     entry_score: snapshot.entryScore,
     exit_score: snapshot.exitScore,
   }
