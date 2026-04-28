@@ -668,8 +668,8 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       return marketDayKeyForTimestamp(window.openedAt) === marketDayKey || marketDayKeyForTimestamp(window.closedAt) === marketDayKey
     })
     const selectedDaySnapshots = marketSnapshots
-    const entrySignalCount = selectedDayWindows.filter((window) => marketDayKeyForTimestamp(window.openedAt) === marketDayKey).length
-    const exitSignalCount = selectedDayWindows.filter((window) => window.closedAt && marketDayKeyForTimestamp(window.closedAt) === marketDayKey).length
+    const buySignalCount = selectedDaySignals.filter((signal) => classifySignal(signal) === 'buy').length
+    const sellSignalCount = selectedDaySignals.filter((signal) => classifySignal(signal) === 'sell').length
     const openWindows = selectedDayWindows.filter((window) => window.status === 'open').length
     const closedWindows = selectedDayWindows.filter((window) => window.status === 'closed').length
     const latestVersionDocs = [...versionDocs].sort((left, right) => compareRealtimeDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
@@ -705,10 +705,10 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     return {
       source,
       warning,
-      snapshot: {
+        snapshot: {
         metrics: [
-          { label: 'Buy signals today', value: String(entrySignalCount) },
-          { label: 'Sell signals today', value: String(exitSignalCount) },
+          { label: 'Buy signals today', value: String(buySignalCount) },
+          { label: 'Sell signals today', value: String(sellSignalCount) },
           { label: 'Open windows now', value: String(openWindows) },
           { label: 'Closed windows today', value: String(closedWindows) },
         ],

@@ -1,16 +1,16 @@
 import { classifySignal, sampleSignals } from './engine'
 
 describe('signal classification', () => {
-  it('marks entry signals as entry', () => {
-    expect(classifySignal(sampleSignals[0])).toBe('entry')
+  it('marks entry signals as buy', () => {
+    expect(classifySignal(sampleSignals[0])).toBe('buy')
   })
 
-  it('marks exit signals as exit', () => {
-    expect(classifySignal(sampleSignals[2])).toBe('exit')
+  it('marks exit signals as sell', () => {
+    expect(classifySignal(sampleSignals[2])).toBe('sell')
   })
 
   it('counts accepted windows as entry signals', () => {
-    expect(classifySignal({ ...sampleSignals[0], state: 'ACCEPTED_OPEN' })).toBe('entry')
+    expect(classifySignal({ ...sampleSignals[0], state: 'ACCEPTED_OPEN' })).toBe('buy')
   })
 
   it('marks rejected signals as hold', () => {

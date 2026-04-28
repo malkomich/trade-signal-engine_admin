@@ -100,9 +100,9 @@ export const sampleSignals: AdminSignal[] = [
 export const configFields: ConfigField[] = [
   {
     key: 'monitored_symbols',
-    label: 'Monitored symbols',
+    label: 'Tracked symbols',
     value: ['AAPL', 'AMZN', 'GOOGL', 'META', 'MSFT', 'NVDA', 'PLTR', 'TSLA'],
-    description: 'Stocks scanned in real time by the edge worker.',
+    description: 'Symbols scanned in real time by the edge worker.',
     group: 'Trading universe',
     inputType: 'symbols',
     placeholder: 'One symbol per line',
@@ -110,16 +110,16 @@ export const configFields: ConfigField[] = [
   },
   {
     key: 'benchmark_symbol',
-    label: 'Benchmark proxy',
+    label: 'Market reference',
     value: 'QQQ',
-    description: 'Reference index or proxy used to compare the tracked stock against broader market movement.',
+    description: 'Reference used to compare the tracked stock against broader market movement.',
     group: 'Trading universe',
     inputType: 'text',
     placeholder: 'QQQ',
   },
   {
     key: 'session_timezone',
-    label: 'Market day timezone',
+    label: 'Trading day timezone',
     value: 'America/New_York',
     description: 'Timezone used to anchor the active trading day and the market calendar.',
     group: 'Trading universe',
@@ -378,20 +378,20 @@ export const configFields: ConfigField[] = [
  * explicit buy/sell action emitted by the backend. We fall back to the
  * stored state for older or partial records.
  */
-export function classifySignal(signal: AdminSignal): 'entry' | 'exit' | 'hold' {
+export function classifySignal(signal: AdminSignal): 'buy' | 'sell' | 'hold' {
   const action = signal.signalAction?.toUpperCase()
   if (action === 'BUY_ALERT') {
-    return 'entry'
+    return 'buy'
   }
   if (action === 'SELL_ALERT') {
-    return 'exit'
+    return 'sell'
   }
   switch (signal.state) {
     case 'ENTRY_SIGNALLED':
     case 'ACCEPTED_OPEN':
-      return 'entry'
+      return 'buy'
     case 'EXIT_SIGNALLED':
-      return 'exit'
+      return 'sell'
     default:
       return 'hold'
   }
