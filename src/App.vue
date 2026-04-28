@@ -124,9 +124,22 @@ const selectedDaySnapshots = computed(() => {
 });
 const selectedDaySignals = computed(() => {
   const signals = snapshot.value?.signals ?? [];
-  return signals.filter(
+  return signals
+    .filter(
     (signal) => getMarketDayKey(signal.updatedAt) === selectedMarketDay.value,
-  );
+    )
+    .slice()
+    .sort((left, right) => {
+      const leftTimestamp = Date.parse(left.updatedAt);
+      const rightTimestamp = Date.parse(right.updatedAt);
+      if (leftTimestamp !== rightTimestamp) {
+        return rightTimestamp - leftTimestamp;
+      }
+      if (left.symbol !== right.symbol) {
+        return left.symbol.localeCompare(right.symbol);
+      }
+      return (right.signalAction ?? "").localeCompare(left.signalAction ?? "");
+    });
 });
 const marketSymbols = computed(() => {
   const symbols = new Set<string>();
@@ -219,30 +232,31 @@ const marketWindowPageCount = computed(() => {
     Math.ceil(marketWindowReviews.value.length / windowReviewPageSize),
   );
 });
-const selectedMarketWindowReview = computed<WindowReviewView | null>(() => {
-  if (!marketWindowReviews.value.length) {
-    return null;
-  }
-  return (
-    marketWindowReviews.value.find(
-      (review) => review.id === selectedMarketWindowReviewId.value,
-    ) ?? marketWindowReviews.value[0]
-  );
-});
-const selectedMarketWindowSnapshots = computed(() => {
-  const review = selectedMarketWindowReview.value;
-  if (!review) {
-    return [];
-  }
-  return findWindowSnapshots(review);
-});
 const selectedChartSnapshots = computed(() => {
-  const review = selectedMarketWindowReview.value;
+  const review = selectedWindowReview.value;
   if (!review) {
     return [];
   }
-  const symbolSnapshots = selectedDaySnapshots.value
-    .filter((snapshot) => snapshot.symbol === review.symbol)
+  const timeframeKey = `${chartIntervalMinutes.value}m`;
+  const timeframeSnapshots = filterAndSortSnapshots(
+    selectedDaySnapshots.value,
+    review.symbol,
+    timeframeKey,
+  );
+  if (timeframeSnapshots.length > 0) {
+    return timeframeSnapshots;
+  }
+  return filterAndSortSnapshots(selectedDaySnapshots.value, review.symbol, '1m');
+});
+
+function filterAndSortSnapshots(
+  snapshots: MarketSnapshotRecord[],
+  symbol: string,
+  timeframe: string,
+) {
+  return snapshots
+    .filter((snapshot) => snapshot.symbol === symbol)
+    .filter((snapshot) => (snapshot.timeframe || '1m').trim().toLowerCase() === timeframe)
     .slice()
     .sort((left, right) => {
       const leftTimestamp = Date.parse(left.timestamp);
@@ -252,11 +266,7 @@ const selectedChartSnapshots = computed(() => {
       }
       return left.id.localeCompare(right.id);
     });
-  if (symbolSnapshots.length > 0) {
-    return symbolSnapshots;
-  }
-  return selectedMarketWindowSnapshots.value;
-});
+}
 const chartGroups = marketChartGroups;
 const marketLedgerPageSize = 12;
 const marketLedgerPage = ref(0);
@@ -280,7 +290,7 @@ const marketLedgerPageCount = computed(() =>
 const liveSignals = computed(() => {
   return selectedDaySignals.value
     .filter((signal) => classifySignal(signal) !== "hold")
-    .reverse();
+    .slice();
 });
 const liveSignalPageSignals = computed(() => {
   const start = liveSignalPage.value * LIVE_SIGNAL_PAGE_SIZE;
@@ -1183,7 +1193,7 @@ watch(
       !activeSignal ||
       !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))
     ) {
-      selectedSignal.value = signals.at(-1) ?? null;
+      selectedSignal.value = signals[0] ?? null;
     }
     triagePage.value = Math.min(
       triagePage.value,

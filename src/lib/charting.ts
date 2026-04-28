@@ -35,6 +35,15 @@ function formatTooltipValue(value: number | null, decimals = 2) {
   return value.toFixed(decimals)
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
 function buildSnapshotValues(record: MarketSnapshotRecord) {
   return {
     close: record.close,
@@ -273,12 +282,6 @@ function signalMarkerSeries(
             color,
             width: 1.5,
           },
-          label: {
-            show: true,
-            color,
-            formatter: marker.kind === 'buy' ? 'Buy' : 'Sell',
-            position: 'insideEndTop',
-          },
           data: [{ xAxis: timestamp }],
         },
       } as SeriesOption,
@@ -286,7 +289,7 @@ function signalMarkerSeries(
   })
 }
 
-function lineSeries(series: ChartSeries, points: AggregatedSnapshot[], smooth = false, withExtrema = true): SeriesOption {
+function lineSeries(series: ChartSeries, points: AggregatedSnapshot[], smooth = false): SeriesOption {
   return {
     type: 'line',
     name: series.label,
@@ -296,13 +299,6 @@ function lineSeries(series: ChartSeries, points: AggregatedSnapshot[], smooth = 
     lineStyle: { width: 2, color: series.color },
     itemStyle: { color: series.color },
     emphasis: { focus: 'series' },
-    markPoint: withExtrema
-      ? {
-          data: [{ type: 'max', name: 'Max' }, { type: 'min', name: 'Min' }],
-          symbolSize: 40,
-          label: { color: '#e2e8f0' },
-        }
-      : undefined,
   }
 }
 
@@ -320,7 +316,7 @@ function candleSeries(points: AggregatedSnapshot[]): SeriesOption {
   } satisfies SeriesOption
 }
 
-function histogramSeries(series: ChartSeries, points: AggregatedSnapshot[], withExtrema = false): SeriesOption {
+function histogramSeries(series: ChartSeries, points: AggregatedSnapshot[]): SeriesOption {
   return {
     type: 'bar',
     name: series.label,
@@ -332,13 +328,6 @@ function histogramSeries(series: ChartSeries, points: AggregatedSnapshot[], with
     })),
     itemStyle: { color: series.color },
     barMaxWidth: 14,
-    markPoint: withExtrema
-      ? {
-          data: [{ type: 'max', name: 'Max' }, { type: 'min', name: 'Min' }],
-          symbolSize: 36,
-          label: { color: '#e2e8f0' },
-        }
-      : undefined,
   } satisfies SeriesOption
 }
 
@@ -347,40 +336,99 @@ function buildTooltipFormatter(chart: ChartDefinition) {
     const items = Array.isArray(params) ? params : [params]
     const first = items[0] as { axisValue?: number; data?: unknown } | undefined
     const timestamp = typeof first?.axisValue === 'number' ? first.axisValue : null
-    const lines = [`<strong>${timestamp ? new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(timestamp)) : chart.title}</strong>`]
+    let rows = ''
+    let signalLabel: string | null = null
 
     for (const item of items as Array<{ seriesName?: string; data?: unknown }>) {
       const data = item.data
       if (item.seriesName === 'Price' && Array.isArray(data)) {
         const [, open, close, low, high] = data as [number, number, number, number, number]
-        lines.push(`Open ${open.toFixed(2)} · Close ${close.toFixed(2)} · Low ${low.toFixed(2)} · High ${high.toFixed(2)}`)
+        rows += `<tr><th>${escapeHtml('Open')}</th><td>${escapeHtml(open.toFixed(2))}</td></tr>`
+        rows += `<tr><th>${escapeHtml('High')}</th><td>${escapeHtml(high.toFixed(2))}</td></tr>`
+        rows += `<tr><th>${escapeHtml('Low')}</th><td>${escapeHtml(low.toFixed(2))}</td></tr>`
+        rows += `<tr><th>${escapeHtml('Close')}</th><td>${escapeHtml(close.toFixed(2))}</td></tr>`
         continue
       }
       if (item.seriesName === 'Buy' || item.seriesName === 'Sell') {
         const markerData = data as { value?: [number, number]; tooltipValue?: string } | undefined
-        const markerValue = markerData?.value?.[1]
+        signalLabel = item.seriesName
         if (markerData?.tooltipValue) {
-          lines.push(markerData.tooltipValue)
-        } else if (typeof markerValue === 'number') {
-          lines.push(`${item.seriesName} ${formatTooltipValue(markerValue, chart.series[0]?.decimals ?? 2)}`)
+          rows += `<tr><th>${escapeHtml('Signal')}</th><td>${escapeHtml(markerData.tooltipValue)}</td></tr>`
+        } else {
+          rows += `<tr><th>${escapeHtml('Signal')}</th><td>${escapeHtml(item.seriesName)}</td></tr>`
         }
         continue
       }
       if (item.seriesName && Array.isArray(data) && data.length >= 2 && typeof data[1] === 'number') {
         const series = chart.series.find((seriesItem) => seriesItem.label === item.seriesName)
-        lines.push(`${item.seriesName} ${formatTooltipValue(data[1], series?.decimals ?? 2)}`)
+        rows += `<tr><th>${escapeHtml(item.seriesName)}</th><td>${escapeHtml(formatTooltipValue(data[1], series?.decimals ?? 2))}</td></tr>`
         continue
       }
       if (item.seriesName && typeof data === 'object' && data !== null && 'value' in data) {
         const value = (data as { value?: unknown }).value
         if (Array.isArray(value) && value.length >= 2 && typeof value[1] === 'number') {
           const series = chart.series.find((seriesItem) => seriesItem.label === item.seriesName)
-          lines.push(`${item.seriesName} ${formatTooltipValue(value[1], series?.decimals ?? 2)}`)
+          rows += `<tr><th>${escapeHtml(item.seriesName)}</th><td>${escapeHtml(formatTooltipValue(value[1], series?.decimals ?? 2))}</td></tr>`
         }
       }
     }
 
-    return lines.join('<br/>')
+    const title = signalLabel ? `${signalLabel} signal` : chart.title
+    const timeLabel = timestamp
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(timestamp))
+      : 'Current value'
+    return `
+      <div class="chart-tooltip">
+        <div class="chart-tooltip__title">${escapeHtml(title)}</div>
+        <div class="chart-tooltip__time">${escapeHtml(timeLabel)}</div>
+        <table class="chart-tooltip__table">
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `
+  }
+}
+
+const WINDOW_FOCUS_SPANS = [
+  { maxDurationMs: 5 * 60 * 1000, visibleSpanMs: 20 * 60 * 1000 },
+  { maxDurationMs: 15 * 60 * 1000, visibleSpanMs: 30 * 60 * 1000 },
+  { maxDurationMs: 30 * 60 * 1000, visibleSpanMs: 60 * 60 * 1000 },
+  { maxDurationMs: 60 * 60 * 1000, visibleSpanMs: 120 * 60 * 1000 },
+] as const
+
+function visibleSpanForDuration(durationMs: number) {
+  const preset = WINDOW_FOCUS_SPANS.find((item) => durationMs <= item.maxDurationMs)
+  return preset ? preset.visibleSpanMs : Math.max(durationMs * 2, 120 * 60 * 1000)
+}
+
+function windowFocusRange(records: MarketSnapshotRecord[], windowId: string | null | undefined, intervalMinutes: number) {
+  if (!windowId) {
+    return null
+  }
+  const timestamps = records
+    .filter((record) => record.windowId === windowId)
+    .map((record) => parseTimestamp(record.timestamp))
+    .filter((value): value is number => value !== null)
+  if (timestamps.length === 0) {
+    return null
+  }
+  let min = timestamps[0]
+  let max = timestamps[0]
+  for (let index = 1; index < timestamps.length; index += 1) {
+    const value = timestamps[index]
+    if (value < min) {
+      min = value
+    }
+    if (value > max) {
+      max = value
+    }
+  }
+  const duration = Math.max(max - min, intervalMinutes * 60 * 1000)
+  const visibleSpan = visibleSpanForDuration(duration)
+  const center = min + (duration / 2)
+  return {
+    min: center - (visibleSpan / 2),
+    max: center + (visibleSpan / 2),
   }
 }
 
@@ -391,7 +439,7 @@ export function buildChartOption(
   windowId?: string | null,
 ): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
-  const range = axisRange(points, intervalMinutes)
+  const range = windowFocusRange(snapshots, windowId, intervalMinutes) ?? axisRange(points, intervalMinutes)
   const axisLabelFormatter = (value: number) =>
     new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
@@ -418,14 +466,16 @@ export function buildChartOption(
   const baseOption: EChartsOption = {
     animation: false,
     grid: { left: 70, right: 40, top: 38, bottom: 64, containLabel: true },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' },
-      backgroundColor: 'rgba(15, 23, 42, 0.96)',
-      borderColor: '#1e293b',
-      textStyle: { color: '#e2e8f0' },
-      formatter: buildTooltipFormatter(chart),
-    },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        backgroundColor: 'rgba(15, 23, 42, 0.96)',
+        borderColor: '#1e293b',
+        textStyle: { color: '#e2e8f0' },
+        confine: true,
+        extraCssText: 'border-radius: 12px; padding: 0;',
+        formatter: buildTooltipFormatter(chart),
+      },
     legend: { show: false },
     xAxis: {
       type: 'time',
@@ -496,7 +546,7 @@ export function buildChartOption(
       },
       series: [
         {
-          ...lineSeries(mainSeries, points, true, false),
+          ...lineSeries(mainSeries, points, true),
           markArea: {
             silent: true,
             itemStyle: { opacity: 0.18 },
@@ -545,7 +595,7 @@ export function buildChartOption(
         splitLine: { lineStyle: { color: '#1e293b' } },
       },
       series: [
-        histogramSeries(histogram, points, false),
+        histogramSeries(histogram, points),
         lineSeries(macd, points, false),
         lineSeries(signal, points, false),
         ...signalMarkerSeries(chart, snapshots, windowId),

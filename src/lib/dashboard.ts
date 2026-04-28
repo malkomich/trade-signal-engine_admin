@@ -68,6 +68,7 @@ export type MarketSnapshotRecord = {
   sessionId: string
   windowId: string
   symbol: string
+  timeframe: string
   timestamp: string
   open: number
   high: number
@@ -118,6 +119,26 @@ function toNullableNumber(value: unknown): number | null {
 
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+export function normalizeTimeframeLabel(value: unknown): string {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw) {
+    return '1m'
+  }
+  const plainNumberMatch = /^(\d+)$/.exec(raw)
+  if (plainNumberMatch) {
+    return `${plainNumberMatch[1]}m`
+  }
+  const match = /^(\d+)\s*(m|min|minutes?)$/.exec(raw)
+  if (match) {
+    return `${match[1]}m`
+  }
+  const hourMatch = /^(\d+)\s*(h|hr|hour|hours?)$/.exec(raw)
+  if (hourMatch) {
+    return `${Number(hourMatch[1]) * 60}m`
+  }
+  return raw
 }
 
 type RealtimeCollectionDoc<T = Record<string, unknown>> = {
@@ -594,7 +615,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       })
 
     const selectedDaySignals = selectedDaySignalDocs
-      .sort((left, right) => compareRealtimeDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
+      .sort((left, right) => compareRealtimeDoc(right, left, ['timestamp', 'updated_at', 'updatedAt']))
       .map((doc) => {
         const data = doc.data()
         return {
@@ -621,6 +642,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
           sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
           windowId: String(data.window_id ?? data.windowId ?? ''),
           symbol: String(data.symbol ?? doc.id),
+          timeframe: normalizeTimeframeLabel(data.timeframe ?? data.interval ?? '1m'),
           timestamp: formatRealtimeTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, new Date().toISOString()),
           open: Number(data.open ?? 0),
           high: Number(data.high ?? 0),
@@ -775,7 +797,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
               ? 'Live records are available for the selected day.'
               : 'No live records are available for the selected day yet.',
         },
-        selectedSignal: signals.at(-1) ?? null,
+        selectedSignal: signals[0] ?? null,
         signals,
         windows,
         marketSnapshots: selectedDaySnapshots,
