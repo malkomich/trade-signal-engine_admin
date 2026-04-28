@@ -275,6 +275,7 @@ function signalMarkerSeries(
         emphasis: { scale: 1.1 },
         z: 20,
         markLine: timestamp === null ? undefined : {
+          label: { show: false },
           symbol: 'none',
           silent: false,
           lineStyle: {
@@ -307,6 +308,9 @@ function candleSeries(points: AggregatedSnapshot[]): SeriesOption {
     type: 'candlestick',
     name: 'Price',
     data: points.map((point) => [point.timestamp, point.open, point.close, point.low, point.high]),
+    barWidth: 6,
+    barMaxWidth: 10,
+    barMinWidth: 3,
     itemStyle: {
       color: '#16a34a',
       color0: '#dc2626',
@@ -390,7 +394,7 @@ function buildTooltipFormatter(chart: ChartDefinition) {
 }
 
 const WINDOW_FOCUS_SPANS = [
-  { maxDurationMs: 5 * 60 * 1000, visibleSpanMs: 20 * 60 * 1000 },
+  { maxDurationMs: 5 * 60 * 1000, visibleSpanMs: 15 * 60 * 1000 },
   { maxDurationMs: 15 * 60 * 1000, visibleSpanMs: 30 * 60 * 1000 },
   { maxDurationMs: 30 * 60 * 1000, visibleSpanMs: 60 * 60 * 1000 },
   { maxDurationMs: 60 * 60 * 1000, visibleSpanMs: 120 * 60 * 1000 },
@@ -440,6 +444,9 @@ export function buildChartOption(
 ): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
   const range = windowFocusRange(snapshots, windowId, intervalMinutes) ?? axisRange(points, intervalMinutes)
+  const zoomWindow = range
+    ? { startValue: range.min, endValue: range.max }
+    : { start: 0, end: 100 }
   const axisLabelFormatter = (value: number) =>
     new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
@@ -466,25 +473,24 @@ export function buildChartOption(
   const baseOption: EChartsOption = {
     animation: false,
     grid: { left: 70, right: 40, top: 38, bottom: 64, containLabel: true },
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'cross' },
-        backgroundColor: 'rgba(15, 23, 42, 0.96)',
-        borderColor: '#1e293b',
-        textStyle: { color: '#e2e8f0' },
-        confine: true,
-        extraCssText: 'border-radius: 12px; padding: 0;',
-        formatter: buildTooltipFormatter(chart),
-      },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      backgroundColor: 'rgba(15, 23, 42, 0.96)',
+      borderColor: '#1e293b',
+      textStyle: { color: '#e2e8f0' },
+      confine: true,
+      extraCssText: 'border-radius: 12px; padding: 0;',
+      formatter: buildTooltipFormatter(chart),
+    },
     legend: { show: false },
     xAxis: {
       type: 'time',
-      min: range?.min,
-      max: range?.max,
+      boundaryGap: ['2%', '2%'],
       name: 'Time',
       nameLocation: 'middle',
       nameGap: 28,
-      axisLabel: { formatter: axisLabelFormatter, color: '#94a3b8' },
+      axisLabel: { formatter: axisLabelFormatter, color: '#94a3b8', hideOverlap: true },
       axisLine: { lineStyle: { color: '#334155' } },
       axisTick: { lineStyle: { color: '#334155' } },
       splitLine: { show: false },
@@ -504,8 +510,7 @@ export function buildChartOption(
         type: 'inside',
         xAxisIndex: 0,
         filterMode: 'none',
-        start: 0,
-        end: 100,
+        ...zoomWindow,
       },
       {
         type: 'slider',
@@ -515,8 +520,7 @@ export function buildChartOption(
         borderColor: '#334155',
         fillerColor: 'rgba(56, 189, 248, 0.2)',
         textStyle: { color: '#cbd5e1' },
-        start: 0,
-        end: 100,
+        ...zoomWindow,
       },
     ],
     series: [],

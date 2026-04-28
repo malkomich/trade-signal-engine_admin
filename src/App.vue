@@ -238,15 +238,11 @@ const selectedChartSnapshots = computed(() => {
     return [];
   }
   const timeframeKey = `${chartIntervalMinutes.value}m`;
-  const timeframeSnapshots = filterAndSortSnapshots(
+  return filterAndSortSnapshots(
     selectedDaySnapshots.value,
     review.symbol,
     timeframeKey,
   );
-  if (timeframeSnapshots.length > 0) {
-    return timeframeSnapshots;
-  }
-  return filterAndSortSnapshots(selectedDaySnapshots.value, review.symbol, '1m');
 });
 
 function filterAndSortSnapshots(
@@ -659,6 +655,15 @@ function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
   }
 
   selection.value = symbols[0];
+}
+
+function syncWindowSelectionSymbol(selection: Ref<string>, symbol: string) {
+  if (!selection.value) {
+    return;
+  }
+  if (selection.value !== symbol) {
+    selection.value = symbol;
+  }
 }
 
 function syncSelectedWindowSymbol(symbols: string[]) {
@@ -1462,8 +1467,8 @@ function setLedgerSnapshot(snapshotPoint: MarketSnapshotRecord) {
     selectedMarketWindowReviewId.value = matchingWindow.id;
     selectedWindowReviewId.value = matchingWindow.id;
     selectedOptimizationReviewId.value = matchingWindow.id;
-    selectedWindowSymbol.value = matchingWindow.symbol;
-    selectedOptimizationSymbol.value = matchingWindow.symbol;
+    syncWindowSelectionSymbol(selectedWindowSymbol, matchingWindow.symbol);
+    syncWindowSelectionSymbol(selectedOptimizationSymbol, matchingWindow.symbol);
     marketWindowPage.value = pageForWindowId(
       marketWindowReviews.value,
       matchingWindow.id,
@@ -1481,8 +1486,8 @@ function setWindowReview(review: WindowReviewView) {
   selectedMarketWindowReviewId.value = review.id;
   selectedWindowReviewId.value = review.id;
   selectedOptimizationReviewId.value = review.id;
-  selectedWindowSymbol.value = review.symbol;
-  selectedOptimizationSymbol.value = review.symbol;
+  syncWindowSelectionSymbol(selectedWindowSymbol, review.symbol);
+  syncWindowSelectionSymbol(selectedOptimizationSymbol, review.symbol);
   marketWindowPage.value = pageForWindowId(
     marketWindowReviews.value,
     review.id,
@@ -1506,8 +1511,8 @@ function setSelectedSignal(signal: AdminSignal) {
     selectedMarketWindowReviewId.value = matchingWindow.id;
     selectedWindowReviewId.value = matchingWindow.id;
     selectedOptimizationReviewId.value = matchingWindow.id;
-    selectedWindowSymbol.value = matchingWindow.symbol;
-    selectedOptimizationSymbol.value = matchingWindow.symbol;
+    syncWindowSelectionSymbol(selectedWindowSymbol, matchingWindow.symbol);
+    syncWindowSelectionSymbol(selectedOptimizationSymbol, matchingWindow.symbol);
     marketWindowPage.value = pageForWindowId(
       marketWindowReviews.value,
       matchingWindow.id,
