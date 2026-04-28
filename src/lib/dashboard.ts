@@ -668,6 +668,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       return marketDayKeyForTimestamp(window.openedAt) === marketDayKey || marketDayKeyForTimestamp(window.closedAt) === marketDayKey
     })
     const selectedDaySnapshots = marketSnapshots
+    // These counters reflect signal events, not window lifecycle events, so they stay aligned with the buy/sell labels in the UI.
     const buySignalCount = selectedDaySignals.filter((signal) => classifySignal(signal) === 'buy').length
     const sellSignalCount = selectedDaySignals.filter((signal) => classifySignal(signal) === 'sell').length
     const openWindows = selectedDayWindows.filter((window) => window.status === 'open').length

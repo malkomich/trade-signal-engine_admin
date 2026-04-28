@@ -16,6 +16,7 @@ type AggregatedSnapshot = {
 }
 
 type SignalMarkerKind = 'buy' | 'sell'
+type SignalMarkerDatum = { value: [number, number]; tooltipValue: string }
 
 function parseTimestamp(value: string) {
   const parsed = Date.parse(value)
@@ -55,20 +56,22 @@ function buildSnapshotValues(record: MarketSnapshotRecord) {
   } satisfies AggregatedSnapshot['values']
 }
 
+function mergeSnapshotValues(
+  current: AggregatedSnapshot['values'],
+  next: AggregatedSnapshot['values'],
+): AggregatedSnapshot['values'] {
+  const merged: AggregatedSnapshot['values'] = { ...current }
+  for (const key of Object.keys(next) as Array<keyof AggregatedSnapshot['values']>) {
+    const value = next[key]
+    if (value !== null && value !== undefined && Number.isFinite(value)) {
+      merged[key] = value
+    }
+  }
+  return merged
+}
+
 function aggregateSnapshots(records: MarketSnapshotRecord[], intervalMinutes: number): AggregatedSnapshot[] {
   const sortedRecords = records
-    .slice()
-    .sort((left, right) => {
-      const leftTimestamp = parseTimestamp(left.timestamp) ?? 0
-      const rightTimestamp = parseTimestamp(right.timestamp) ?? 0
-      if (leftTimestamp !== rightTimestamp) {
-        return leftTimestamp - rightTimestamp
-      }
-      if (left.symbol !== right.symbol) {
-        return left.symbol.localeCompare(right.symbol)
-      }
-      return left.id.localeCompare(right.id)
-    })
 
   if (intervalMinutes <= 1 || sortedRecords.length <= 1) {
     return sortedRecords
@@ -123,7 +126,7 @@ function aggregateSnapshots(records: MarketSnapshotRecord[], intervalMinutes: nu
     current.low = Math.min(current.low, record.low)
     current.close = record.close
     current.volume += record.volume
-    current.values = { ...current.values, ...values }
+    current.values = mergeSnapshotValues(current.values, values)
     current.snapshotId = record.id
     current.signalAction = record.signalAction?.trim().toUpperCase() ?? current.signalAction
     current.signalState = record.signalState
@@ -195,26 +198,20 @@ function extractPointValue(data: unknown): [number, number] | null {
 }
 
 function signalMarkerSeries(chart: ChartDefinition, snapshots: MarketSnapshotRecord[]): SeriesOption[] {
-  const buySnapshot = snapshots.find((snapshot) => snapshot.signalAction?.toUpperCase() === 'BUY_ALERT')
-  const sellSnapshot = [...snapshots].reverse().find((snapshot) => snapshot.signalAction?.toUpperCase() === 'SELL_ALERT')
-  const markers: Array<{ kind: SignalMarkerKind; snapshot: MarketSnapshotRecord }> = []
-  if (buySnapshot) {
-    markers.push({ kind: 'buy', snapshot: buySnapshot })
-  }
-  if (sellSnapshot) {
-    markers.push({ kind: 'sell', snapshot: sellSnapshot })
-  }
+  const markers: Array<{ kind: SignalMarkerKind; snapshot: MarketSnapshotRecord }> = snapshots
+    .filter((snapshot) => snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' || snapshot.signalAction?.toUpperCase() === 'SELL_ALERT')
+    .map((snapshot) => ({
+      kind: snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' ? 'buy' : 'sell',
+      snapshot,
+    }))
 
   return markers.map((marker) => {
     const timestamp = parseTimestamp(marker.snapshot.timestamp)
     const value = chartMarkerValue(marker.snapshot, chart)
-    const data: any =
-      timestamp === null
-        ? []
-        : ([{
-            value: [timestamp, value],
-            tooltipValue: markerTooltip(marker.snapshot, chart, marker.kind),
-          }] as Array<{ value: [number, number]; tooltipValue: string }>)
+    const data: SignalMarkerDatum[] = timestamp === null ? [] : [{
+      value: [timestamp, value],
+      tooltipValue: markerTooltip(marker.snapshot, chart, marker.kind),
+    }]
     return {
       type: 'scatter',
       name: marker.kind === 'buy' ? 'Buy' : 'Sell',
@@ -438,7 +435,18 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
   }
 
   if (chart.kind === 'histogram') {
-    const [macd, signal, histogram] = chart.series
+    const macd = chart.series.find((series) => series.key === 'macd')
+    const signal = chart.series.find((series) => series.key === 'macdSignal')
+    const histogram = chart.series.find((series) => series.key === 'macdHistogram')
+    if (!macd || !signal || !histogram) {
+      return {
+        ...baseOption,
+        series: [
+          ...chart.series.map((series) => lineSeries(series, points, false)),
+          ...signalMarkerSeries(chart, snapshots),
+        ],
+      }
+    }
     return {
       ...baseOption,
       yAxis: {

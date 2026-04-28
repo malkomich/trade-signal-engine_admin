@@ -40,10 +40,11 @@ onMounted(() => {
 })
 
 watch(
-  () => [props.chart.id, props.intervalMinutes, props.snapshots.length, props.snapshots.at(-1)?.id ?? '', props.snapshots.at(-1)?.timestamp ?? ''],
+  () => [props.chart.id, props.intervalMinutes, props.snapshots],
   () => {
     renderChart()
   },
+  { deep: true },
 )
 
 onBeforeUnmount(() => {

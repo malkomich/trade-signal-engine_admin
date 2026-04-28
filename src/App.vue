@@ -169,7 +169,7 @@ const marketWindowReviews = computed(() => {
     .filter((window) => !selectedMarketSymbol.value || window.symbol === selectedMarketSymbol.value)
     .slice()
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
-    .map((window) => decorateWindowReview(window))
+    .map((window) => decorateWindowReview(window, dashboardClock.value))
 })
 const selectedMarketWindowReviews = computed(() => {
   const start = marketWindowPage.value * windowReviewPageSize
@@ -193,7 +193,7 @@ const selectedMarketWindowSnapshots = computed(() => {
   return findWindowSnapshots(review)
 })
 const selectedChartSnapshots = computed(() => {
-  return resampleSnapshots(selectedMarketWindowSnapshots.value, chartIntervalMinutes.value)
+  return selectedMarketWindowSnapshots.value
 })
 const marketLedgerPageSize = 12
 const marketLedgerPage = ref(0)
@@ -268,13 +268,6 @@ const selectedWindowReviews = computed(() => {
 const windowReviewPageCount = computed(() => {
   return Math.max(1, Math.ceil(allWindowReviews.value.length / windowReviewPageSize))
 })
-const marketChartViews = computed(() =>
-  marketCharts.map((chart) => ({
-    chart,
-    view: buildChartView(selectedChartSnapshots.value, chart, selectedMarketWindowSnapshots.value),
-  })),
-)
-
 const windowChartMarkers = computed(() => {
   const review = selectedOptimizationReview.value
   if (!review) {
@@ -302,13 +295,6 @@ const selectedWindowOptimization = computed(() => {
     return null
   }
   return windowOptimizationHistory.value.find((optimization) => optimization.windowId === selectedOptimizationReview.value?.id) ?? null
-})
-
-const expandedChartView = computed(() => {
-  if (!expandedChartId.value) {
-    return null
-  }
-  return marketChartViews.value.find((item) => item.chart.id === expandedChartId.value) ?? null
 })
 
 const expandedChartDefinition = computed(() => {
@@ -706,22 +692,6 @@ function addDraftSymbol(field: ConfigField) {
   symbolAddDrafts[field.key] = ''
 }
 
-function promptDraftSymbol(field: ConfigField) {
-  const raw = window.prompt(`Add a ${field.label.toLowerCase()} symbol`, '')
-  if (raw === null) {
-    return
-  }
-  const normalized = raw.trim().toUpperCase()
-  if (!normalized) {
-    return
-  }
-
-  const current = readDraftSymbols(field)
-  if (!current.includes(normalized)) {
-    configDraft[field.key] = [...current, normalized].join('\n')
-  }
-}
-
 function isDraftSymbolSelected(field: ConfigField, symbol: string) {
   return readDraftSymbols(field).includes(symbol.trim().toUpperCase())
 }
@@ -787,66 +757,6 @@ const configEditorStatus = computed(() => {
   return selectedConfigVersion.value?.status ?? 'draft'
 })
 
-type ChartSeriesKey = keyof Pick<
-  MarketSnapshotRecord,
-  | 'close'
-  | 'smaFast'
-  | 'smaSlow'
-  | 'emaFast'
-  | 'emaSlow'
-  | 'vwap'
-  | 'rsi'
-  | 'atr'
-  | 'plusDi'
-  | 'minusDi'
-  | 'adx'
-  | 'macd'
-  | 'macdSignal'
-  | 'macdHistogram'
-  | 'stochasticK'
-  | 'stochasticD'
->
-
-type ChartSeries = {
-  key: ChartSeriesKey
-  label: string
-  color: string
-  decimals?: number
-}
-
-type ChartDefinition = {
-  id: string
-  title: string
-  subtitle: string
-  series: ChartSeries[]
-}
-
-type ChartPoint = {
-  x: number
-  y: number
-}
-
-type ChartMarker = ChartPoint & {
-  id: string
-  kind: 'entry' | 'exit'
-  snapshotId: string
-  tooltip: string
-}
-
-type ChartView = {
-  lines: Array<{
-    label: string
-    color: string
-    latestValue: string
-    points: string
-  }>
-  markers: ChartMarker[]
-  firstTimestamp: string | null
-  latestTimestamp: string | null
-  minValue: number
-  maxValue: number
-}
-
 type WindowReviewView = TradeWindowRecord & {
   buySnapshot: MarketSnapshotRecord | null
   sellSnapshot: MarketSnapshotRecord | null
@@ -858,93 +768,6 @@ type WindowReviewView = TradeWindowRecord & {
   minutesSinceLastSignal: number | null
   buySummary: string
   sellSummary: string
-}
-
-const marketCharts: ChartDefinition[] = [
-  {
-    id: 'price',
-    title: 'Price',
-    subtitle: 'Close price with simple and exponential moving averages',
-    series: [
-      { key: 'close', label: 'Close', color: '#7dd3fc', decimals: 2 },
-      { key: 'smaFast', label: 'Fast SMA', color: '#34d399', decimals: 2 },
-      { key: 'smaSlow', label: 'Slow SMA', color: '#f59e0b', decimals: 2 },
-      { key: 'emaFast', label: 'Fast EMA', color: '#60a5fa', decimals: 2 },
-      { key: 'emaSlow', label: 'Slow EMA', color: '#c084fc', decimals: 2 },
-    ],
-  },
-  {
-    id: 'sma',
-    title: 'SMA',
-    subtitle: 'Fast and slow simple moving averages',
-    series: [
-      { key: 'smaFast', label: 'Fast SMA', color: '#34d399', decimals: 2 },
-      { key: 'smaSlow', label: 'Slow SMA', color: '#f59e0b', decimals: 2 },
-    ],
-  },
-  {
-    id: 'ema',
-    title: 'EMA',
-    subtitle: 'Fast and slow exponential moving averages',
-    series: [
-      { key: 'emaFast', label: 'Fast EMA', color: '#60a5fa', decimals: 2 },
-      { key: 'emaSlow', label: 'Slow EMA', color: '#c084fc', decimals: 2 },
-    ],
-  },
-  {
-    id: 'vwap',
-    title: 'VWAP',
-    subtitle: 'Volume weighted price reference',
-    series: [{ key: 'vwap', label: 'VWAP', color: '#22d3ee', decimals: 2 }],
-  },
-  {
-    id: 'rsi',
-    title: 'RSI',
-    subtitle: 'Momentum oscillator',
-    series: [{ key: 'rsi', label: 'RSI', color: '#fb7185', decimals: 1 }],
-  },
-  {
-    id: 'atr',
-    title: 'ATR',
-    subtitle: 'Volatility range',
-    series: [{ key: 'atr', label: 'ATR', color: '#f97316', decimals: 2 }],
-  },
-  {
-    id: 'dmi',
-    title: 'DMI / ADX',
-    subtitle: 'Directional movement and trend strength',
-    series: [
-      { key: 'plusDi', label: '+DI', color: '#22c55e', decimals: 1 },
-      { key: 'minusDi', label: '-DI', color: '#ef4444', decimals: 1 },
-      { key: 'adx', label: 'ADX', color: '#f59e0b', decimals: 1 },
-    ],
-  },
-  {
-    id: 'macd',
-    title: 'MACD',
-    subtitle: 'Trend momentum and histogram',
-    series: [
-      { key: 'macd', label: 'MACD', color: '#38bdf8', decimals: 3 },
-      { key: 'macdSignal', label: 'Signal', color: '#c084fc', decimals: 3 },
-      { key: 'macdHistogram', label: 'Histogram', color: '#34d399', decimals: 3 },
-    ],
-  },
-  {
-    id: 'stochastic',
-    title: 'Stochastic',
-    subtitle: 'Momentum turning points',
-    series: [
-      { key: 'stochasticK', label: '%K', color: '#f472b6', decimals: 1 },
-      { key: 'stochasticD', label: '%D', color: '#fbbf24', decimals: 1 },
-    ],
-  },
-]
-
-const chartIntervals = [1, 5, 10, 30, 60] as const
-
-function readSeriesValue(record: MarketSnapshotRecord, key: ChartSeriesKey): number | null {
-  const value = record[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function formatChartValue(value: number | null, decimals = 2) {
@@ -968,155 +791,6 @@ function formatLocaleTimestamp(value: string | null | undefined) {
     dateStyle: 'medium',
     timeStyle: 'medium',
   }).format(parsed)
-}
-
-function buildChartView(records: MarketSnapshotRecord[], chart: ChartDefinition, markerRecords: MarketSnapshotRecord[] = records): ChartView {
-  const usableRecords = records.length > 0 ? records : []
-  const firstTimestamp = usableRecords.at(0)?.timestamp ?? null
-  const latestTimestamp = usableRecords.at(-1)?.timestamp ?? null
-  const timestampValues = usableRecords
-    .map((record) => Date.parse(record.timestamp))
-    .filter((value) => Number.isFinite(value))
-  const firstTimestampValue = timestampValues.at(0) ?? null
-  const latestTimestampValue = timestampValues.at(-1) ?? null
-  const values = chart.series
-    .flatMap((series) => usableRecords.map((record) => readSeriesValue(record, series.key)))
-    .filter((value): value is number => typeof value === 'number')
-  const minValue = values.length > 0 ? Math.min(...values) : 0
-  const maxValue = values.length > 0 ? Math.max(...values) : 1
-  const spread = maxValue - minValue || 1
-  const valuePadding = Math.max(spread * 0.08, Math.abs(maxValue) * 0.02, 0.5)
-  const paddedMinValue = minValue - valuePadding
-  const paddedMaxValue = maxValue + valuePadding
-  const paddedSpread = paddedMaxValue - paddedMinValue || 1
-  const xMin = firstTimestampValue ?? 0
-  const xMax = latestTimestampValue ?? xMin + 1
-  const xSpan = xMax - xMin || 1
-  const xPadding = Math.max(xSpan * 0.08, 60_000)
-  const paddedXMin = xMin - xPadding
-  const paddedXMax = xMax + xPadding
-  const paddedXSpan = paddedXMax - paddedXMin || 1
-  const leftPad = 6
-  const rightPad = 94
-  const topPad = 8
-  const bottomPad = 92
-  const plotWidth = rightPad - leftPad
-  const plotHeight = bottomPad - topPad
-
-  const toPoint = (timestamp: number, value: number): ChartPoint => {
-    const x = usableRecords.length > 1 ? leftPad + ((timestamp - paddedXMin) / paddedXSpan) * plotWidth : 50
-    const y = bottomPad - ((value - paddedMinValue) / paddedSpread) * plotHeight
-    return {
-      x: Number.isFinite(x) ? Math.min(rightPad, Math.max(leftPad, x)) : 50,
-      y: Number.isFinite(y) ? Math.min(bottomPad, Math.max(topPad, y)) : 50,
-    }
-  }
-
-  const lines = chart.series.map((series) => {
-    const coords: ChartPoint[] = []
-    usableRecords.forEach((record) => {
-      const value = readSeriesValue(record, series.key)
-      if (value === null) {
-        return
-      }
-      const timestamp = Date.parse(record.timestamp)
-      if (!Number.isFinite(timestamp)) {
-        return
-      }
-      coords.push(toPoint(timestamp, value))
-    })
-    const points = coords.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
-    const latestRecord = usableRecords.at(-1)
-    return {
-      label: series.label,
-      color: series.color,
-      latestValue: formatChartValue(latestRecord ? readSeriesValue(latestRecord, series.key) : null, series.decimals ?? 2),
-      points,
-    }
-  })
-
-  const markers: ChartMarker[] = []
-  const entrySnapshot = [...markerRecords].find((record) => record.signalAction === 'BUY_ALERT') ?? null
-  const exitSnapshot = [...markerRecords].reverse().find((record) => record.signalAction === 'SELL_ALERT') ?? null
-
-  if (entrySnapshot) {
-    const entryTimestamp = Date.parse(entrySnapshot.timestamp)
-    const entryValue = chartMarkerValue(entrySnapshot, chart)
-    markers.push({
-      id: `${entrySnapshot.id}:entry`,
-      snapshotId: entrySnapshot.id,
-      x: Number.isFinite(entryTimestamp) ? toPoint(entryTimestamp, entryValue).x : 50,
-      y: Number.isFinite(entryTimestamp) ? toPoint(entryTimestamp, entryValue).y : 50,
-      kind: 'entry',
-      tooltip: [
-        'Buy signal',
-        formatLocaleTimestamp(entrySnapshot.timestamp),
-        `Value ${formatChartValue(entryValue, chart.series[0]?.decimals ?? 2)}`,
-        ...chart.series.map(
-          (series) => `${series.label} ${formatChartValue(readSeriesValue(entrySnapshot, series.key), series.decimals ?? 2)}`,
-        ),
-      ].join(' · '),
-    })
-  }
-
-  if (exitSnapshot) {
-    const exitTimestamp = Date.parse(exitSnapshot.timestamp)
-    const exitValue = chartMarkerValue(exitSnapshot, chart)
-    markers.push({
-      id: `${exitSnapshot.id}:exit`,
-      snapshotId: exitSnapshot.id,
-      x: Number.isFinite(exitTimestamp) ? toPoint(exitTimestamp, exitValue).x : 50,
-      y: Number.isFinite(exitTimestamp) ? toPoint(exitTimestamp, exitValue).y : 50,
-      kind: 'exit',
-      tooltip: [
-        'Sell signal',
-        formatLocaleTimestamp(exitSnapshot.timestamp),
-        `Value ${formatChartValue(exitValue, chart.series[0]?.decimals ?? 2)}`,
-        ...chart.series.map(
-          (series) => `${series.label} ${formatChartValue(readSeriesValue(exitSnapshot, series.key), series.decimals ?? 2)}`,
-        ),
-      ].join(' · '),
-    })
-  }
-
-  return {
-    lines,
-    markers,
-    firstTimestamp,
-    latestTimestamp,
-    minValue,
-    maxValue,
-  }
-}
-
-function chartMarkerValue(record: MarketSnapshotRecord, chart: ChartDefinition) {
-  const values = chart.series
-    .map((series) => readSeriesValue(record, series.key))
-    .filter((value): value is number => typeof value === 'number')
-  if (values.length === 0) {
-    return record.close
-  }
-  return values.reduce((total, value) => total + value, 0) / values.length
-}
-
-function resampleSnapshots(records: MarketSnapshotRecord[], intervalMinutes: number) {
-  if (intervalMinutes <= 1 || records.length <= 1) {
-    return records
-  }
-  const intervalMs = intervalMinutes * 60 * 1000
-  const buckets = new Map<number, MarketSnapshotRecord>()
-  // Expects ascending timestamps and keeps the latest sample per interval bucket.
-  for (const record of records) {
-    const timestamp = Date.parse(record.timestamp)
-    if (!Number.isFinite(timestamp)) {
-      continue
-    }
-    const bucketKey = Math.floor(timestamp / intervalMs)
-    buckets.set(bucketKey, record)
-  }
-  return Array.from(buckets.entries())
-    .sort((left, right) => left[0] - right[0])
-    .map(([, record]) => record)
 }
 
 function decorateWindowReview(window: TradeWindowRecord, now = Date.now()): WindowReviewView {
@@ -2404,8 +2078,16 @@ onUnmounted(() => {
                   </button>
                 </div>
                 <div v-if="field.inputType === 'symbols'" class="symbol-add-row">
-                  <button type="button" class="action-button ghost compact" @click="promptDraftSymbol(field)">
-                    Add symbol
+                  <input
+                    v-model="symbolAddDrafts[field.key]"
+                    type="text"
+                    :placeholder="`Add ${field.label.toLowerCase()} symbol`"
+                    :aria-label="`Add ${field.label.toLowerCase()} symbol`"
+                    class="symbol-add-input"
+                    @keydown.enter.prevent="addDraftSymbol(field)"
+                  />
+                  <button type="button" class="action-button ghost compact" @click="addDraftSymbol(field)">
+                    Add
                   </button>
                 </div>
                 <template v-else-if="field.inputType === 'number'">

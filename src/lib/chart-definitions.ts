@@ -93,7 +93,7 @@ export const marketCharts: ChartDefinition[] = [
     id: 'stochastic',
     title: 'Stochastic',
     subtitle: 'Momentum turning points',
-    kind: 'line',
+    kind: 'oscillator',
     series: [
       { key: 'stochasticK', label: '%K', color: '#f472b6', decimals: 1 },
       { key: 'stochasticD', label: '%D', color: '#fbbf24', decimals: 1 },
