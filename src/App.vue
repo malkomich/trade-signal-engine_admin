@@ -219,30 +219,15 @@ const marketWindowPageCount = computed(() => {
     Math.ceil(marketWindowReviews.value.length / windowReviewPageSize),
   );
 });
-const selectedMarketWindowReview = computed<WindowReviewView | null>(() => {
-  if (!marketWindowReviews.value.length) {
-    return null;
-  }
-  return (
-    marketWindowReviews.value.find(
-      (review) => review.id === selectedMarketWindowReviewId.value,
-    ) ?? marketWindowReviews.value[0]
-  );
-});
-const selectedMarketWindowSnapshots = computed(() => {
-  const review = selectedMarketWindowReview.value;
-  if (!review) {
-    return [];
-  }
-  return findWindowSnapshots(review);
-});
 const selectedChartSnapshots = computed(() => {
-  const review = selectedMarketWindowReview.value;
+  const review = selectedWindowReview.value;
   if (!review) {
     return [];
   }
-  const symbolSnapshots = selectedDaySnapshots.value
+  const timeframeKey = `${chartIntervalMinutes.value}m`;
+  const timeframeSnapshots = selectedDaySnapshots.value
     .filter((snapshot) => snapshot.symbol === review.symbol)
+    .filter((snapshot) => (snapshot.timeframe || '1m').trim().toLowerCase() === timeframeKey)
     .slice()
     .sort((left, right) => {
       const leftTimestamp = Date.parse(left.timestamp);
@@ -252,10 +237,22 @@ const selectedChartSnapshots = computed(() => {
       }
       return left.id.localeCompare(right.id);
     });
-  if (symbolSnapshots.length > 0) {
-    return symbolSnapshots;
+  if (timeframeSnapshots.length > 0) {
+    return timeframeSnapshots;
   }
-  return selectedMarketWindowSnapshots.value;
+  const fallbackSnapshots = selectedDaySnapshots.value
+    .filter((snapshot) => snapshot.symbol === review.symbol)
+    .filter((snapshot) => (snapshot.timeframe || '1m').trim().toLowerCase() === '1m')
+    .slice()
+    .sort((left, right) => {
+      const leftTimestamp = Date.parse(left.timestamp);
+      const rightTimestamp = Date.parse(right.timestamp);
+      if (leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp;
+      }
+      return left.id.localeCompare(right.id);
+    });
+  return fallbackSnapshots;
 });
 const chartGroups = marketChartGroups;
 const marketLedgerPageSize = 12;

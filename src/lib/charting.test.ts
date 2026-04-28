@@ -9,6 +9,7 @@ function makeSnapshot(overrides: Partial<MarketSnapshotRecord>): MarketSnapshotR
     sessionId: overrides.sessionId ?? 'nasdaq-live',
     windowId: overrides.windowId ?? 'window-1',
     symbol: overrides.symbol ?? 'AAPL',
+    timeframe: overrides.timeframe ?? '1m',
     timestamp: overrides.timestamp ?? '2026-04-24T13:30:00.000Z',
     open: overrides.open ?? 100,
     high: overrides.high ?? 101,
@@ -112,5 +113,41 @@ describe('charting', () => {
     const markerSeries = series.filter((item) => item.type === 'scatter')
     expect(markerSeries).toHaveLength(1)
     expect(markerSeries[0]?.name).toBe('Buy')
+  })
+
+  it('centers the visible range around the selected window duration', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-vwap')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({
+          id: 'snapshot-a',
+          windowId: 'window-1',
+          timestamp: '2026-04-24T13:30:00.000Z',
+          signalAction: 'BUY_ALERT',
+        }),
+        makeSnapshot({
+          id: 'snapshot-b',
+          windowId: 'window-1',
+          timestamp: '2026-04-24T13:34:00.000Z',
+          signalAction: 'SELL_ALERT',
+        }),
+        makeSnapshot({
+          id: 'snapshot-c',
+          windowId: 'window-2',
+          timestamp: '2026-04-24T14:10:00.000Z',
+          signalAction: 'BUY_ALERT',
+        }),
+      ],
+      1,
+      'window-1',
+    )
+
+    const xAxis = option.xAxis as { min?: number; max?: number }
+    expect(typeof xAxis.min).toBe('number')
+    expect(typeof xAxis.max).toBe('number')
+    expect((xAxis.max ?? 0) - (xAxis.min ?? 0)).toBeGreaterThanOrEqual(20 * 60 * 1000)
+    expect(xAxis.min ?? 0).toBeLessThan(Date.parse('2026-04-24T13:30:00.000Z'))
+    expect(xAxis.max ?? 0).toBeGreaterThan(Date.parse('2026-04-24T13:34:00.000Z'))
   })
 })

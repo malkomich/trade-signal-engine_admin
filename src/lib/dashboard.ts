@@ -68,6 +68,7 @@ export type MarketSnapshotRecord = {
   sessionId: string
   windowId: string
   symbol: string
+  timeframe: string
   timestamp: string
   open: number
   high: number
@@ -118,6 +119,18 @@ function toNullableNumber(value: unknown): number | null {
 
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+function normalizeTimeframeLabel(value: unknown): string {
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw) {
+    return '1m'
+  }
+  const match = /^(\d+)\s*(m|min)$/.exec(raw)
+  if (match) {
+    return `${match[1]}m`
+  }
+  return raw
 }
 
 type RealtimeCollectionDoc<T = Record<string, unknown>> = {
@@ -621,6 +634,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
           sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
           windowId: String(data.window_id ?? data.windowId ?? ''),
           symbol: String(data.symbol ?? doc.id),
+          timeframe: normalizeTimeframeLabel(data.timeframe ?? data.interval ?? '1m'),
           timestamp: formatRealtimeTimestamp(data.timestamp ?? data.created_at ?? data.updated_at, new Date().toISOString()),
           open: Number(data.open ?? 0),
           high: Number(data.high ?? 0),
