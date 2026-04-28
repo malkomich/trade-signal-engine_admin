@@ -150,4 +150,38 @@ describe('charting', () => {
     expect(xAxis.min ?? 0).toBeLessThan(Date.parse('2026-04-24T13:30:00.000Z'))
     expect(xAxis.max ?? 0).toBeGreaterThan(Date.parse('2026-04-24T13:34:00.000Z'))
   })
+
+  it('escapes tooltip content before rendering HTML', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-ema')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({
+          id: 'snapshot-a',
+          timestamp: '2026-04-24T13:30:00.000Z',
+          signalAction: 'BUY_ALERT',
+          reasons: ['<img src=x onerror=alert(1)>'],
+        }),
+      ],
+      1,
+      'window-1',
+    )
+
+    const tooltip = option.tooltip && typeof option.tooltip === 'object' ? option.tooltip as { formatter?: unknown } : null
+    const formatter = tooltip?.formatter
+    const html = typeof formatter === 'function'
+      ? formatter([
+          {
+            seriesName: 'Buy',
+            axisValue: Date.parse('2026-04-24T13:30:00.000Z'),
+            data: {
+              value: [Date.parse('2026-04-24T13:30:00.000Z'), 100],
+              tooltipValue: '<img src=x onerror=alert(1)>',
+            },
+          },
+        ])
+      : ''
+
+    expect(String(html)).not.toContain('<img src=x onerror=alert(1)>')
+  })
 })

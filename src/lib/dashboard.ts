@@ -121,14 +121,22 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function normalizeTimeframeLabel(value: unknown): string {
+export function normalizeTimeframeLabel(value: unknown): string {
   const raw = String(value ?? '').trim().toLowerCase()
   if (!raw) {
     return '1m'
   }
-  const match = /^(\d+)\s*(m|min)$/.exec(raw)
+  const plainNumberMatch = /^(\d+)$/.exec(raw)
+  if (plainNumberMatch) {
+    return `${plainNumberMatch[1]}m`
+  }
+  const match = /^(\d+)\s*(m|min|minutes?)$/.exec(raw)
   if (match) {
     return `${match[1]}m`
+  }
+  const hourMatch = /^(\d+)\s*(h|hr|hour|hours?)$/.exec(raw)
+  if (hourMatch) {
+    return `${Number(hourMatch[1]) * 60}m`
   }
   return raw
 }

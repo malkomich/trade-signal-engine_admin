@@ -35,6 +35,15 @@ function formatTooltipValue(value: number | null, decimals = 2) {
   return value.toFixed(decimals)
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
 function buildSnapshotValues(record: MarketSnapshotRecord) {
   return {
     close: record.close,
@@ -327,39 +336,39 @@ function buildTooltipFormatter(chart: ChartDefinition) {
     const items = Array.isArray(params) ? params : [params]
     const first = items[0] as { axisValue?: number; data?: unknown } | undefined
     const timestamp = typeof first?.axisValue === 'number' ? first.axisValue : null
-    const rows: string[] = []
+    let rows = ''
     let signalLabel: string | null = null
 
     for (const item of items as Array<{ seriesName?: string; data?: unknown }>) {
       const data = item.data
       if (item.seriesName === 'Price' && Array.isArray(data)) {
         const [, open, close, low, high] = data as [number, number, number, number, number]
-        rows.push(`<tr><th>Open</th><td>${open.toFixed(2)}</td></tr>`)
-        rows.push(`<tr><th>High</th><td>${high.toFixed(2)}</td></tr>`)
-        rows.push(`<tr><th>Low</th><td>${low.toFixed(2)}</td></tr>`)
-        rows.push(`<tr><th>Close</th><td>${close.toFixed(2)}</td></tr>`)
+        rows += `<tr><th>${escapeHtml('Open')}</th><td>${escapeHtml(open.toFixed(2))}</td></tr>`
+        rows += `<tr><th>${escapeHtml('High')}</th><td>${escapeHtml(high.toFixed(2))}</td></tr>`
+        rows += `<tr><th>${escapeHtml('Low')}</th><td>${escapeHtml(low.toFixed(2))}</td></tr>`
+        rows += `<tr><th>${escapeHtml('Close')}</th><td>${escapeHtml(close.toFixed(2))}</td></tr>`
         continue
       }
       if (item.seriesName === 'Buy' || item.seriesName === 'Sell') {
         const markerData = data as { value?: [number, number]; tooltipValue?: string } | undefined
         signalLabel = item.seriesName
         if (markerData?.tooltipValue) {
-          rows.push(`<tr><th>Signal</th><td>${markerData.tooltipValue}</td></tr>`)
+          rows += `<tr><th>${escapeHtml('Signal')}</th><td>${escapeHtml(markerData.tooltipValue)}</td></tr>`
         } else {
-          rows.push(`<tr><th>Signal</th><td>${item.seriesName}</td></tr>`)
+          rows += `<tr><th>${escapeHtml('Signal')}</th><td>${escapeHtml(item.seriesName)}</td></tr>`
         }
         continue
       }
       if (item.seriesName && Array.isArray(data) && data.length >= 2 && typeof data[1] === 'number') {
         const series = chart.series.find((seriesItem) => seriesItem.label === item.seriesName)
-        rows.push(`<tr><th>${item.seriesName}</th><td>${formatTooltipValue(data[1], series?.decimals ?? 2)}</td></tr>`)
+        rows += `<tr><th>${escapeHtml(item.seriesName)}</th><td>${escapeHtml(formatTooltipValue(data[1], series?.decimals ?? 2))}</td></tr>`
         continue
       }
       if (item.seriesName && typeof data === 'object' && data !== null && 'value' in data) {
         const value = (data as { value?: unknown }).value
         if (Array.isArray(value) && value.length >= 2 && typeof value[1] === 'number') {
           const series = chart.series.find((seriesItem) => seriesItem.label === item.seriesName)
-          rows.push(`<tr><th>${item.seriesName}</th><td>${formatTooltipValue(value[1], series?.decimals ?? 2)}</td></tr>`)
+          rows += `<tr><th>${escapeHtml(item.seriesName)}</th><td>${escapeHtml(formatTooltipValue(value[1], series?.decimals ?? 2))}</td></tr>`
         }
       }
     }
@@ -370,14 +379,26 @@ function buildTooltipFormatter(chart: ChartDefinition) {
       : 'Current value'
     return `
       <div class="chart-tooltip">
-        <div class="chart-tooltip__title">${title}</div>
-        <div class="chart-tooltip__time">${timeLabel}</div>
+        <div class="chart-tooltip__title">${escapeHtml(title)}</div>
+        <div class="chart-tooltip__time">${escapeHtml(timeLabel)}</div>
         <table class="chart-tooltip__table">
-          <tbody>${rows.join('')}</tbody>
+          <tbody>${rows}</tbody>
         </table>
       </div>
     `
   }
+}
+
+const WINDOW_FOCUS_SPANS = [
+  { maxDurationMs: 5 * 60 * 1000, visibleSpanMs: 20 * 60 * 1000 },
+  { maxDurationMs: 15 * 60 * 1000, visibleSpanMs: 30 * 60 * 1000 },
+  { maxDurationMs: 30 * 60 * 1000, visibleSpanMs: 60 * 60 * 1000 },
+  { maxDurationMs: 60 * 60 * 1000, visibleSpanMs: 120 * 60 * 1000 },
+] as const
+
+function visibleSpanForDuration(durationMs: number) {
+  const preset = WINDOW_FOCUS_SPANS.find((item) => durationMs <= item.maxDurationMs)
+  return preset ? preset.visibleSpanMs : Math.max(durationMs * 2, 120 * 60 * 1000)
 }
 
 function windowFocusRange(records: MarketSnapshotRecord[], windowId: string | null | undefined, intervalMinutes: number) {
@@ -403,15 +424,7 @@ function windowFocusRange(records: MarketSnapshotRecord[], windowId: string | nu
     }
   }
   const duration = Math.max(max - min, intervalMinutes * 60 * 1000)
-  const visibleSpan = duration <= 5 * 60 * 1000
-    ? 20 * 60 * 1000
-    : duration <= 15 * 60 * 1000
-      ? 30 * 60 * 1000
-      : duration <= 30 * 60 * 1000
-        ? 60 * 60 * 1000
-        : duration <= 60 * 60 * 1000
-          ? 120 * 60 * 1000
-          : Math.max(duration * 2, 120 * 60 * 1000)
+  const visibleSpan = visibleSpanForDuration(duration)
   const center = min + (duration / 2)
   return {
     min: center - (visibleSpan / 2),

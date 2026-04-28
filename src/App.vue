@@ -238,24 +238,25 @@ const selectedChartSnapshots = computed(() => {
     return [];
   }
   const timeframeKey = `${chartIntervalMinutes.value}m`;
-  const timeframeSnapshots = selectedDaySnapshots.value
-    .filter((snapshot) => snapshot.symbol === review.symbol)
-    .filter((snapshot) => (snapshot.timeframe || '1m').trim().toLowerCase() === timeframeKey)
-    .slice()
-    .sort((left, right) => {
-      const leftTimestamp = Date.parse(left.timestamp);
-      const rightTimestamp = Date.parse(right.timestamp);
-      if (leftTimestamp !== rightTimestamp) {
-        return leftTimestamp - rightTimestamp;
-      }
-      return left.id.localeCompare(right.id);
-    });
+  const timeframeSnapshots = filterAndSortSnapshots(
+    selectedDaySnapshots.value,
+    review.symbol,
+    timeframeKey,
+  );
   if (timeframeSnapshots.length > 0) {
     return timeframeSnapshots;
   }
-  const fallbackSnapshots = selectedDaySnapshots.value
-    .filter((snapshot) => snapshot.symbol === review.symbol)
-    .filter((snapshot) => (snapshot.timeframe || '1m').trim().toLowerCase() === '1m')
+  return filterAndSortSnapshots(selectedDaySnapshots.value, review.symbol, '1m');
+});
+
+function filterAndSortSnapshots(
+  snapshots: MarketSnapshotRecord[],
+  symbol: string,
+  timeframe: string,
+) {
+  return snapshots
+    .filter((snapshot) => snapshot.symbol === symbol)
+    .filter((snapshot) => (snapshot.timeframe || '1m').trim().toLowerCase() === timeframe)
     .slice()
     .sort((left, right) => {
       const leftTimestamp = Date.parse(left.timestamp);
@@ -265,8 +266,7 @@ const selectedChartSnapshots = computed(() => {
       }
       return left.id.localeCompare(right.id);
     });
-  return fallbackSnapshots;
-});
+}
 const chartGroups = marketChartGroups;
 const marketLedgerPageSize = 12;
 const marketLedgerPage = ref(0);
