@@ -495,6 +495,12 @@ function accumulateOptimizationProfile(
     macd_histogram: snapshot.macd_histogram,
     stochastic_k: snapshot.stochastic_k,
     stochastic_d: snapshot.stochastic_d,
+    bollinger_middle: snapshot.bollinger_middle,
+    bollinger_upper: snapshot.bollinger_upper,
+    bollinger_lower: snapshot.bollinger_lower,
+    obv: snapshot.obv,
+    relative_volume: snapshot.relative_volume,
+    volume_profile: snapshot.volume_profile,
     entry_score: snapshot.entry_score,
     exit_score: snapshot.exit_score,
   } satisfies Record<string, number | null>
@@ -696,7 +702,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     // These counters reflect signal events, not window lifecycle events, so they stay aligned with the buy/sell labels in the UI.
     const buySignalCount = selectedDaySignals.filter((signal) => classifySignal(signal) === 'buy').length
     const sellSignalCount = selectedDaySignals.filter((signal) => classifySignal(signal) === 'sell').length
-    const openWindows = windows.filter((window) => window.status === 'open').length
+    const openWindows = selectedDayWindows.filter((window) => window.status === 'open').length
     const closedWindows = selectedDayWindows.filter((window) => window.status === 'closed').length
     const latestVersionDocs = [...versionDocs].sort((left, right) => compareRealtimeDoc(left, right, ['updatedAt', 'updated_at', 'created_at']))
     const signals = [...decisionSignals]
@@ -726,7 +732,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         : signals.length === 0
           ? 'No live trading decisions have been written for the selected day yet.'
           : null
-      : 'Live trading data is available, but the selected session has not produced records for this day yet.'
+      : 'Live trading data is unavailable, so the dashboard is showing an empty state for this day.'
 
     return {
       source,

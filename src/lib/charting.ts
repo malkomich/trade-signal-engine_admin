@@ -298,7 +298,7 @@ function candleSeries(points: AggregatedSnapshot[]): SeriesOption {
   } satisfies SeriesOption
 }
 
-function histogramSeries(series: ChartSeries, points: AggregatedSnapshot[]): SeriesOption {
+function histogramSeries(series: ChartSeries, points: AggregatedSnapshot[], withExtrema = false): SeriesOption {
   return {
     type: 'bar',
     name: series.label,
@@ -310,11 +310,13 @@ function histogramSeries(series: ChartSeries, points: AggregatedSnapshot[]): Ser
     })),
     itemStyle: { color: series.color },
     barMaxWidth: 14,
-    markPoint: {
-      data: [{ type: 'max', name: 'Max' }, { type: 'min', name: 'Min' }],
-      symbolSize: 36,
-      label: { color: '#e2e8f0' },
-    },
+    markPoint: withExtrema
+      ? {
+          data: [{ type: 'max', name: 'Max' }, { type: 'min', name: 'Min' }],
+          symbolSize: 36,
+          label: { color: '#e2e8f0' },
+        }
+      : undefined,
   } satisfies SeriesOption
 }
 
@@ -340,6 +342,11 @@ function buildTooltipFormatter(chart: ChartDefinition) {
         } else if (typeof markerValue === 'number') {
           lines.push(`${item.seriesName} ${formatTooltipValue(markerValue, chart.series[0]?.decimals ?? 2)}`)
         }
+        continue
+      }
+      if (item.seriesName && Array.isArray(data) && data.length >= 2 && typeof data[1] === 'number') {
+        const series = chart.series.find((seriesItem) => seriesItem.label === item.seriesName)
+        lines.push(`${item.seriesName} ${formatTooltipValue(data[1], series?.decimals ?? 2)}`)
         continue
       }
       if (item.seriesName && typeof data === 'object' && data !== null && 'value' in data) {
@@ -462,7 +469,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
       },
       series: [
         {
-          ...lineSeries(mainSeries, points, true),
+          ...lineSeries(mainSeries, points, true, false),
           markArea: {
             silent: true,
             itemStyle: { opacity: 0.18 },
@@ -511,7 +518,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
         splitLine: { lineStyle: { color: '#1e293b' } },
       },
       series: [
-        histogramSeries(histogram, points),
+        histogramSeries(histogram, points, false),
         lineSeries(macd, points, false),
         lineSeries(signal, points, false),
         ...signalMarkerSeries(chart, snapshots),
