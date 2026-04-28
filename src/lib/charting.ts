@@ -9,7 +9,7 @@ type AggregatedSnapshot = {
   low: number
   close: number
   volume: number
-  values: Partial<Record<keyof MarketSnapshotRecord, number | null>>
+  values: Partial<Record<keyof MarketSnapshotRecord, number | null | undefined>>
   snapshotId: string
   signalAction: string | null
   signalState: string
@@ -53,6 +53,12 @@ function buildSnapshotValues(record: MarketSnapshotRecord) {
     macdHistogram: record.macdHistogram,
     stochasticK: record.stochasticK,
     stochasticD: record.stochasticD,
+    bollingerMiddle: record.bollingerMiddle,
+    bollingerUpper: record.bollingerUpper,
+    bollingerLower: record.bollingerLower,
+    obv: record.obv,
+    relativeVolume: record.relativeVolume,
+    volumeProfile: record.volumeProfile,
   } satisfies AggregatedSnapshot['values']
 }
 
@@ -71,11 +77,21 @@ function mergeSnapshotValues(
 }
 
 function aggregateSnapshots(records: MarketSnapshotRecord[], intervalMinutes: number): AggregatedSnapshot[] {
-  const sortedRecords = records
+  const sortedRecords = [...records].sort((left, right) => {
+    const leftTimestamp = parseTimestamp(left.timestamp) ?? 0
+    const rightTimestamp = parseTimestamp(right.timestamp) ?? 0
+    if (leftTimestamp !== rightTimestamp) {
+      return leftTimestamp - rightTimestamp
+    }
+    if (left.symbol !== right.symbol) {
+      return left.symbol.localeCompare(right.symbol)
+    }
+    return left.id.localeCompare(right.id)
+  })
 
   if (intervalMinutes <= 1 || sortedRecords.length <= 1) {
     return sortedRecords
-      .map((record) => {
+      .map<AggregatedSnapshot | null>((record) => {
         const timestamp = parseTimestamp(record.timestamp)
         if (timestamp === null) {
           return null
@@ -91,7 +107,7 @@ function aggregateSnapshots(records: MarketSnapshotRecord[], intervalMinutes: nu
           snapshotId: record.id,
           signalAction: record.signalAction?.trim().toUpperCase() ?? null,
           signalState: record.signalState,
-        } as AggregatedSnapshot
+        } satisfies AggregatedSnapshot
       })
       .filter((value): value is AggregatedSnapshot => value !== null)
   }
@@ -104,11 +120,12 @@ function aggregateSnapshots(records: MarketSnapshotRecord[], intervalMinutes: nu
       continue
     }
     const bucketKey = Math.floor(timestamp / intervalMs)
+    const bucketTimestamp = bucketKey * intervalMs
     const current = buckets.get(bucketKey)
     const values = buildSnapshotValues(record)
     if (!current) {
       buckets.set(bucketKey, {
-        timestamp,
+        timestamp: bucketTimestamp,
         open: record.open,
         high: record.high,
         low: record.low,
@@ -121,7 +138,7 @@ function aggregateSnapshots(records: MarketSnapshotRecord[], intervalMinutes: nu
       })
       continue
     }
-    current.timestamp = timestamp
+    current.timestamp = bucketTimestamp
     current.high = Math.max(current.high, record.high)
     current.low = Math.min(current.low, record.low)
     current.close = record.close
@@ -178,23 +195,22 @@ function markerTooltip(record: MarketSnapshotRecord, chart: ChartDefinition, kin
   return parts.join(' · ')
 }
 
-function extractPointValue(data: unknown): [number, number] | null {
-  if (Array.isArray(data) && data.length >= 2) {
-    const [timestamp, value] = data
-    if (typeof timestamp === 'number' && typeof value === 'number') {
-      return [timestamp, value]
-    }
+function axisRange(points: AggregatedSnapshot[]) {
+  if (points.length === 0) {
+    return null
   }
-  if (data && typeof data === 'object' && 'value' in data) {
-    const value = (data as { value?: unknown }).value
-    if (Array.isArray(value) && value.length >= 2) {
-      const [timestamp, pointValue] = value
-      if (typeof timestamp === 'number' && typeof pointValue === 'number') {
-        return [timestamp, pointValue]
-      }
-    }
+  const timestamps = points.map((point) => point.timestamp).filter((value) => Number.isFinite(value))
+  if (timestamps.length === 0) {
+    return null
   }
-  return null
+  const min = Math.min(...timestamps)
+  const max = Math.max(...timestamps)
+  const span = Math.max(max - min, 60 * 1000)
+  const padding = Math.max(span * 0.15, 2 * 60 * 1000)
+  return {
+    min: min - padding,
+    max: max + padding,
+  }
 }
 
 function signalMarkerSeries(chart: ChartDefinition, snapshots: MarketSnapshotRecord[]): SeriesOption[] {
@@ -205,31 +221,50 @@ function signalMarkerSeries(chart: ChartDefinition, snapshots: MarketSnapshotRec
       snapshot,
     }))
 
-  return markers.map((marker) => {
+  return markers.flatMap((marker) => {
     const timestamp = parseTimestamp(marker.snapshot.timestamp)
     const value = chartMarkerValue(marker.snapshot, chart)
     const data: SignalMarkerDatum[] = timestamp === null ? [] : [{
       value: [timestamp, value],
       tooltipValue: markerTooltip(marker.snapshot, chart, marker.kind),
     }]
-    return {
-      type: 'scatter',
-      name: marker.kind === 'buy' ? 'Buy' : 'Sell',
-      data,
-      symbol: marker.kind === 'buy' ? 'triangle' : 'diamond',
-      symbolSize: 14,
-      itemStyle: {
-        color: marker.kind === 'buy' ? '#22c55e' : '#ef4444',
-        borderColor: '#ffffff',
-        borderWidth: 1,
-      },
-      emphasis: { scale: 1.1 },
-      z: 20,
-    } as SeriesOption
+    const color = marker.kind === 'buy' ? '#22c55e' : '#ef4444'
+    return [
+      {
+        type: 'scatter',
+        name: marker.kind === 'buy' ? 'Buy' : 'Sell',
+        data,
+        symbol: marker.kind === 'buy' ? 'triangle' : 'diamond',
+        symbolSize: 14,
+        itemStyle: {
+          color,
+          borderColor: '#ffffff',
+          borderWidth: 1,
+        },
+        emphasis: { scale: 1.1 },
+        z: 20,
+        markLine: timestamp === null ? undefined : {
+          symbol: 'none',
+          silent: false,
+          lineStyle: {
+            type: 'dashed',
+            color,
+            width: 1.5,
+          },
+          label: {
+            show: true,
+            color,
+            formatter: marker.kind === 'buy' ? 'Buy' : 'Sell',
+            position: 'insideEndTop',
+          },
+          data: [{ xAxis: timestamp }],
+        },
+      } as SeriesOption,
+    ]
   })
 }
 
-function lineSeries(series: ChartSeries, points: AggregatedSnapshot[], smooth = false): SeriesOption {
+function lineSeries(series: ChartSeries, points: AggregatedSnapshot[], smooth = false, withExtrema = true): SeriesOption {
   return {
     type: 'line',
     name: series.label,
@@ -239,6 +274,13 @@ function lineSeries(series: ChartSeries, points: AggregatedSnapshot[], smooth = 
     lineStyle: { width: 2, color: series.color },
     itemStyle: { color: series.color },
     emphasis: { focus: 'series' },
+    markPoint: withExtrema
+      ? {
+          data: [{ type: 'max', name: 'Max' }, { type: 'min', name: 'Min' }],
+          symbolSize: 40,
+          label: { color: '#e2e8f0' },
+        }
+      : undefined,
   }
 }
 
@@ -268,6 +310,11 @@ function histogramSeries(series: ChartSeries, points: AggregatedSnapshot[]): Ser
     })),
     itemStyle: { color: series.color },
     barMaxWidth: 14,
+    markPoint: {
+      data: [{ type: 'max', name: 'Max' }, { type: 'min', name: 'Min' }],
+      symbolSize: 36,
+      label: { color: '#e2e8f0' },
+    },
   } satisfies SeriesOption
 }
 
@@ -295,11 +342,12 @@ function buildTooltipFormatter(chart: ChartDefinition) {
         }
         continue
       }
-      const pointValue = extractPointValue(data)
-      if (item.seriesName && pointValue) {
-        const series = chart.series.find((seriesItem) => seriesItem.label === item.seriesName)
-        const value = pointValue[1]
-        lines.push(`${item.seriesName} ${formatTooltipValue(value, series?.decimals ?? 2)}`)
+      if (item.seriesName && typeof data === 'object' && data !== null && 'value' in data) {
+        const value = (data as { value?: unknown }).value
+        if (Array.isArray(value) && value.length >= 2 && typeof value[1] === 'number') {
+          const series = chart.series.find((seriesItem) => seriesItem.label === item.seriesName)
+          lines.push(`${item.seriesName} ${formatTooltipValue(value[1], series?.decimals ?? 2)}`)
+        }
       }
     }
 
@@ -309,6 +357,7 @@ function buildTooltipFormatter(chart: ChartDefinition) {
 
 export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapshotRecord[], intervalMinutes: number): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
+  const range = axisRange(points)
   const axisLabelFormatter = (value: number) =>
     new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
@@ -334,7 +383,7 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
 
   const baseOption: EChartsOption = {
     animation: false,
-    grid: { left: 60, right: 24, top: 22, bottom: 52, containLabel: true },
+    grid: { left: 70, right: 40, top: 38, bottom: 64, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'cross' },
@@ -346,6 +395,11 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
     legend: { show: false },
     xAxis: {
       type: 'time',
+      min: range?.min,
+      max: range?.max,
+      name: 'Time',
+      nameLocation: 'middle',
+      nameGap: 28,
       axisLabel: { formatter: axisLabelFormatter, color: '#94a3b8' },
       axisLine: { lineStyle: { color: '#334155' } },
       axisTick: { lineStyle: { color: '#334155' } },
@@ -354,6 +408,9 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
     yAxis: {
       type: 'value',
       scale: true,
+      name: chart.kind === 'price' ? 'Price' : 'Value',
+      nameLocation: 'middle',
+      nameGap: 42,
       axisLabel: { color: '#94a3b8' },
       axisLine: { lineStyle: { color: '#334155' } },
       splitLine: { lineStyle: { color: '#1e293b' } },
@@ -363,15 +420,19 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
         type: 'inside',
         xAxisIndex: 0,
         filterMode: 'none',
+        start: 0,
+        end: 100,
       },
       {
         type: 'slider',
         xAxisIndex: 0,
         height: 18,
-        bottom: 6,
+        bottom: 8,
         borderColor: '#334155',
         fillerColor: 'rgba(56, 189, 248, 0.2)',
         textStyle: { color: '#cbd5e1' },
+        start: 0,
+        end: 100,
       },
     ],
     series: [],
@@ -380,12 +441,6 @@ export function buildChartOption(chart: ChartDefinition, snapshots: MarketSnapsh
   if (chart.kind === 'price') {
     return {
       ...baseOption,
-      yAxis: {
-        type: 'value',
-        scale: true,
-        axisLabel: { color: '#94a3b8' },
-        splitLine: { lineStyle: { color: '#1e293b' } },
-      },
       series: [
         candleSeries(points),
         ...chart.series.map((series) => lineSeries(series, points, true)),

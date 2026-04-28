@@ -30,6 +30,12 @@ function makeSnapshot(overrides: Partial<MarketSnapshotRecord>): MarketSnapshotR
     macdHistogram: overrides.macdHistogram ?? 0.05,
     stochasticK: overrides.stochasticK ?? 48,
     stochasticD: overrides.stochasticD ?? 45,
+    bollingerMiddle: overrides.bollingerMiddle ?? 100,
+    bollingerUpper: overrides.bollingerUpper ?? 101.5,
+    bollingerLower: overrides.bollingerLower ?? 98.5,
+    obv: overrides.obv ?? 1_500,
+    relativeVolume: overrides.relativeVolume ?? 1.2,
+    volumeProfile: overrides.volumeProfile ?? 0.22,
     entryScore: overrides.entryScore ?? 0.7,
     exitScore: overrides.exitScore ?? 0.3,
     eventType: overrides.eventType ?? 'market.snapshot',
@@ -55,7 +61,7 @@ describe('charting', () => {
 
     const series = option.series as Array<{ name?: string; data?: Array<[number, number]> }>
     expect(series[0]?.name).toBe('RSI')
-    expect(series[0]?.data).toEqual([[Date.parse('2026-04-24T13:31:00.000Z'), 55]])
+    expect(series[0]?.data).toEqual([[Date.parse('2026-04-24T13:30:00.000Z'), 55]])
   })
 
   it('renders histogram charts by series key rather than positional order', () => {
