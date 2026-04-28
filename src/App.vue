@@ -124,9 +124,22 @@ const selectedDaySnapshots = computed(() => {
 });
 const selectedDaySignals = computed(() => {
   const signals = snapshot.value?.signals ?? [];
-  return signals.filter(
+  return signals
+    .filter(
     (signal) => getMarketDayKey(signal.updatedAt) === selectedMarketDay.value,
-  );
+    )
+    .slice()
+    .sort((left, right) => {
+      const leftTimestamp = Date.parse(left.updatedAt);
+      const rightTimestamp = Date.parse(right.updatedAt);
+      if (leftTimestamp !== rightTimestamp) {
+        return rightTimestamp - leftTimestamp;
+      }
+      if (left.symbol !== right.symbol) {
+        return left.symbol.localeCompare(right.symbol);
+      }
+      return (right.signalAction ?? "").localeCompare(left.signalAction ?? "");
+    });
 });
 const marketSymbols = computed(() => {
   const symbols = new Set<string>();
@@ -277,7 +290,7 @@ const marketLedgerPageCount = computed(() =>
 const liveSignals = computed(() => {
   return selectedDaySignals.value
     .filter((signal) => classifySignal(signal) !== "hold")
-    .reverse();
+    .slice();
 });
 const liveSignalPageSignals = computed(() => {
   const start = liveSignalPage.value * LIVE_SIGNAL_PAGE_SIZE;
@@ -1180,7 +1193,7 @@ watch(
       !activeSignal ||
       !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))
     ) {
-      selectedSignal.value = signals.at(-1) ?? null;
+      selectedSignal.value = signals[0] ?? null;
     }
     triagePage.value = Math.min(
       triagePage.value,

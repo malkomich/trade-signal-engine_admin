@@ -607,7 +607,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       })
 
     const selectedDaySignals = selectedDaySignalDocs
-      .sort((left, right) => compareRealtimeDoc(left, right, ['timestamp', 'updated_at', 'updatedAt']))
+      .sort((left, right) => compareRealtimeDoc(right, left, ['timestamp', 'updated_at', 'updatedAt']))
       .map((doc) => {
         const data = doc.data()
         return {
@@ -789,7 +789,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
               ? 'Live records are available for the selected day.'
               : 'No live records are available for the selected day yet.',
         },
-        selectedSignal: signals.at(-1) ?? null,
+        selectedSignal: signals[0] ?? null,
         signals,
         windows,
         marketSnapshots: selectedDaySnapshots,
