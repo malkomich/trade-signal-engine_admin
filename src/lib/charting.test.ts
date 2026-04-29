@@ -148,7 +148,7 @@ describe('charting', () => {
       : null
     expect(typeof dataZoom?.startValue).toBe('number')
     expect(typeof dataZoom?.endValue).toBe('number')
-    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeGreaterThanOrEqual(15 * 60 * 1000)
+    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeGreaterThanOrEqual(12 * 60 * 1000)
     expect(dataZoom?.startValue ?? 0).toBeLessThan(Date.parse('2026-04-24T13:30:00.000Z'))
     expect(dataZoom?.endValue ?? 0).toBeGreaterThan(Date.parse('2026-04-24T13:34:00.000Z'))
   })

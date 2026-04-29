@@ -228,7 +228,7 @@ function axisRange(points: AggregatedSnapshot[], intervalMinutes: number) {
     }
   }
   const span = Math.max(max - min, 60 * 1000)
-  const padding = Math.max(span * 0.2, intervalMinutes * 60 * 1000 * 4)
+  const padding = Math.max(span * 0.12, intervalMinutes * 60 * 1000 * 3)
   return {
     min: min - padding,
     max: max + padding,
@@ -444,9 +444,6 @@ export function buildChartOption(
 ): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
   const range = windowFocusRange(snapshots, windowId, intervalMinutes) ?? axisRange(points, intervalMinutes)
-  const zoomWindow = range
-    ? { startValue: range.min, endValue: range.max }
-    : { start: 0, end: 100 }
   const axisLabelFormatter = (value: number) =>
     new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
@@ -486,14 +483,22 @@ export function buildChartOption(
     legend: { show: false },
     xAxis: {
       type: 'time',
-      boundaryGap: ['2%', '2%'],
+      boundaryGap: ['1%', '1%'],
       name: 'Time',
       nameLocation: 'middle',
       nameGap: 28,
-      axisLabel: { formatter: axisLabelFormatter, color: '#94a3b8', hideOverlap: true },
+      axisLabel: {
+        formatter: axisLabelFormatter,
+        color: '#94a3b8',
+        hideOverlap: true,
+        showMinLabel: true,
+        showMaxLabel: true,
+      },
       axisLine: { lineStyle: { color: '#334155' } },
       axisTick: { lineStyle: { color: '#334155' } },
       splitLine: { show: false },
+      min: range?.min,
+      max: range?.max,
     },
     yAxis: {
       type: 'value',
@@ -510,7 +515,8 @@ export function buildChartOption(
         type: 'inside',
         xAxisIndex: 0,
         filterMode: 'none',
-        ...zoomWindow,
+        startValue: range?.min,
+        endValue: range?.max,
       },
       {
         type: 'slider',
@@ -520,7 +526,8 @@ export function buildChartOption(
         borderColor: '#334155',
         fillerColor: 'rgba(56, 189, 248, 0.2)',
         textStyle: { color: '#cbd5e1' },
-        ...zoomWindow,
+        startValue: range?.min,
+        endValue: range?.max,
       },
     ],
     series: [],

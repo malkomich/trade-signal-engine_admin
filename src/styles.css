@@ -252,7 +252,7 @@ h1 {
 }
 
 .decision-queue-panel {
-  max-height: 500px;
+  max-height: 700px;
   display: flex;
   flex-direction: column;
 }
@@ -378,6 +378,16 @@ h1 {
   justify-content: flex-end;
   color: #cbd5e1;
   font-size: 0.82rem;
+}
+
+.chart-global-legend .legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 5px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.76);
 }
 
 .chart-series-legend span,
@@ -657,10 +667,17 @@ h1 {
 }
 
 .signal-row-badge-row {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 0;
+}
+
+.signal-row-title-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .triage-pill {
