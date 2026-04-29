@@ -2348,7 +2348,6 @@ onUnmounted(() => {
           <div class="panel-header">
             <h2>Decision queue</h2>
             <div class="panel-header-actions">
-              <span>{{ selectedDecisionSymbol || "All tracked stocks" }}</span>
               <input
                 v-model="selectedMarketDay"
                 type="date"
@@ -2365,6 +2364,16 @@ onUnmounted(() => {
               >
                 Today
               </button>
+              <span
+                class="queue-filter-summary"
+                :title="
+                  selectedDecisionSymbol
+                    ? `Decision queue filtered by ${selectedDecisionSymbol}`
+                    : 'Decision queue showing all symbols'
+                "
+              >
+                {{ selectedDecisionSymbol || "All" }}
+              </span>
             </div>
           </div>
           <div class="symbol-tabs">
@@ -2455,16 +2464,18 @@ onUnmounted(() => {
               @click="setSelectedSignal(row.signal)"
             >
               <div>
-                <strong>{{ row.signal.symbol }}</strong>
-                <div v-if="row.meta" class="signal-row-badge-row">
-                  <span
-                    class="signal-tier-badge"
-                    :class="row.meta.tier"
-                    :title="row.meta.description"
-                  >
-                    <i>{{ row.meta.icon }}</i>
-                    {{ row.label }}
-                  </span>
+                <div class="signal-row-title-line">
+                  <strong>{{ row.signal.symbol }}</strong>
+                  <div v-if="row.meta" class="signal-row-badge-row">
+                    <span
+                      class="signal-tier-badge"
+                      :class="row.meta.tier"
+                      :title="row.meta.description"
+                    >
+                      <i>{{ row.meta.icon }}</i>
+                      {{ row.label }}
+                    </span>
+                  </div>
                 </div>
                 <p>
                   {{ formatSignalRegimeLabel(row.signal) }} ·
@@ -2538,10 +2549,7 @@ onUnmounted(() => {
         <div class="panel-header">
           <h2>Trade windows</h2>
           <div class="panel-header-actions">
-            <span
-              >{{ allWindowReviews.length }} windows ·
-              {{ selectedWindowSymbol || "All tracked stocks" }}</span
-            >
+            <span>{{ allWindowReviews.length }} windows</span>
             <input
               v-model="selectedMarketDay"
               type="date"
@@ -2775,8 +2783,8 @@ onUnmounted(() => {
           </div>
           <div class="panel-header-actions">
             <div class="chart-global-legend" aria-label="Signal legend">
-              <span title="Buy signals are highlighted in green."><i class="buy"></i>Buy</span>
-              <span title="Sell signals are highlighted in red."><i class="sell"></i>Sell</span>
+              <span class="legend-chip" title="Buy signals are highlighted in green."><i class="buy"></i>Buy</span>
+              <span class="legend-chip" title="Sell signals are highlighted in red."><i class="sell"></i>Sell</span>
             </div>
             <span>{{ chartIntervalMinutes }}m interval</span>
           </div>
