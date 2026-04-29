@@ -1296,6 +1296,13 @@ const triagePageSignals = computed(() => {
   const end = start + triagePageSize;
   return triageSignals.value.slice(start, end);
 });
+const triagePageSignalRows = computed(() =>
+  triagePageSignals.value.map((signal) => ({
+    signal,
+    meta: signalMetaForSignal(signal),
+    label: formatSignalQueueLabel(signal),
+  })),
+);
 const triagePageCount = computed(() =>
   Math.max(1, Math.ceil(triageSignals.value.length / triagePageSize)),
 );
@@ -2439,34 +2446,34 @@ onUnmounted(() => {
               Next
             </button>
           </div>
-          <div v-if="triagePageSignals.length" class="signal-list">
+          <div v-if="triagePageSignalRows.length" class="signal-list">
             <button
-              v-for="signal in triagePageSignals"
-              :key="signalKey(signal)"
+              v-for="row in triagePageSignalRows"
+              :key="signalKey(row.signal)"
               class="signal-row"
-              :class="[classifySignal(signal), signalMetaForSignal(signal)?.tier ?? '']"
-              @click="setSelectedSignal(signal)"
+              :class="[classifySignal(row.signal), row.meta?.tier ?? '']"
+              @click="setSelectedSignal(row.signal)"
             >
               <div>
-                <strong>{{ signal.symbol }}</strong>
-                <div v-if="signalMetaForSignal(signal)" class="signal-row-badge-row">
+                <strong>{{ row.signal.symbol }}</strong>
+                <div v-if="row.meta" class="signal-row-badge-row">
                   <span
                     class="signal-tier-badge"
-                    :class="signalMetaForSignal(signal)?.tier"
-                    :title="signalMetaForSignal(signal)?.description"
+                    :class="row.meta.tier"
+                    :title="row.meta.description"
                   >
-                    <i>{{ signalMetaForSignal(signal)?.icon }}</i>
-                    {{ formatSignalQueueLabel(signal) }}
+                    <i>{{ row.meta.icon }}</i>
+                    {{ row.label }}
                   </span>
                 </div>
                 <p>
-                  {{ formatSignalRegimeLabel(signal) }} ·
-                  {{ signal.windowId ? "Linked window" : "Window pending" }}
+                  {{ formatSignalRegimeLabel(row.signal) }} ·
+                  {{ row.signal.windowId ? "Linked window" : "Window pending" }}
                 </p>
               </div>
               <div class="scores">
-                <span>{{ signal.entryScore.toFixed(2) }}</span>
-                <span>{{ signal.exitScore.toFixed(2) }}</span>
+                <span>{{ row.signal.entryScore.toFixed(2) }}</span>
+                <span>{{ row.signal.exitScore.toFixed(2) }}</span>
               </div>
             </button>
           </div>

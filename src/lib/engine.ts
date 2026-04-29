@@ -573,6 +573,10 @@ export function classifySignal(signal: AdminSignal): 'buy' | 'sell' | 'hold' {
 }
 
 export function classifySignalTier(signal: AdminSignal): SignalTier | null {
+  if (classifySignal(signal) !== 'buy') {
+    return null
+  }
+
   const explicitTier = signal.signalTier?.trim().toLowerCase()
   if (
     explicitTier === 'conviction_buy' ||
@@ -581,10 +585,6 @@ export function classifySignalTier(signal: AdminSignal): SignalTier | null {
     explicitTier === 'speculative_buy'
   ) {
     return explicitTier
-  }
-
-  if (classifySignal(signal) !== 'buy') {
-    return null
   }
   if (signal.entryScore >= 0.78 && signal.exitScore <= 0.28) {
     return 'conviction_buy'
