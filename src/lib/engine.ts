@@ -586,6 +586,9 @@ export function classifySignalTier(signal: AdminSignal): SignalTier | null {
   ) {
     return explicitTier
   }
+  if (classifySignal(signal) !== 'buy') {
+    return null
+  }
   if (signal.entryScore >= 0.78 && signal.exitScore <= 0.28) {
     return 'conviction_buy'
   }
