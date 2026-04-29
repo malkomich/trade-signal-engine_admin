@@ -2364,6 +2364,16 @@ onUnmounted(() => {
               >
                 Today
               </button>
+              <span
+                class="queue-filter-summary"
+                :title="
+                  selectedDecisionSymbol
+                    ? `Decision queue filtered by ${selectedDecisionSymbol}`
+                    : 'Decision queue showing all symbols'
+                "
+              >
+                {{ selectedDecisionSymbol || "All" }}
+              </span>
             </div>
           </div>
           <div class="symbol-tabs">

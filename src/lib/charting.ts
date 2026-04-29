@@ -18,6 +18,9 @@ type AggregatedSnapshot = {
 type SignalMarkerKind = 'buy' | 'sell'
 type SignalMarkerDatum = { value: [number, number]; tooltipValue: string }
 
+const CHART_AXIS_MIN_PADDING_RATIO = 0.12
+const CHART_AXIS_MIN_PADDING_INTERVAL_MULTIPLIER = 3
+
 function parseTimestamp(value: string) {
   const parsed = Date.parse(value)
   return Number.isFinite(parsed) ? parsed : null
@@ -228,7 +231,10 @@ function axisRange(points: AggregatedSnapshot[], intervalMinutes: number) {
     }
   }
   const span = Math.max(max - min, 60 * 1000)
-  const padding = Math.max(span * 0.12, intervalMinutes * 60 * 1000 * 3)
+  const padding = Math.max(
+    span * CHART_AXIS_MIN_PADDING_RATIO,
+    intervalMinutes * 60 * 1000 * CHART_AXIS_MIN_PADDING_INTERVAL_MULTIPLIER,
+  )
   return {
     min: min - padding,
     max: max + padding,

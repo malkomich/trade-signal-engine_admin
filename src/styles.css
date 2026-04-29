@@ -627,6 +627,17 @@ h1 {
   justify-content: flex-end;
 }
 
+.queue-filter-summary {
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  border-radius: 999px;
+  color: #dbeafe;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  padding: 8px 12px;
+  text-transform: uppercase;
+}
+
 .day-picker {
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.2);
