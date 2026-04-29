@@ -648,6 +648,21 @@ h1 {
   margin-bottom: 16px;
 }
 
+.signal-tier-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.signal-row-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .triage-pill {
   display: flex;
   align-items: baseline;
@@ -696,6 +711,26 @@ h1 {
   border-color: rgba(148, 163, 184, 0.22);
 }
 
+.signal-row.conviction_buy {
+  border-color: rgba(52, 211, 153, 0.8);
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.14);
+}
+
+.signal-row.balanced_buy {
+  border-color: rgba(96, 165, 250, 0.8);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.14);
+}
+
+.signal-row.opportunistic_buy {
+  border-color: rgba(251, 191, 36, 0.8);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.14);
+}
+
+.signal-row.speculative_buy {
+  border-color: rgba(244, 114, 182, 0.8);
+  box-shadow: 0 0 0 1px rgba(244, 114, 182, 0.14);
+}
+
 .signal-row:focus-visible,
 .triage-pill:focus-visible,
 .config-card input:focus-visible {
@@ -710,6 +745,74 @@ h1 {
 .scores {
   display: grid;
   justify-items: end;
+  color: #dbeafe;
+}
+
+.signal-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.77rem;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  background: rgba(15, 23, 42, 0.8);
+  color: #dbeafe;
+}
+
+.signal-tier-badge i {
+  font-style: normal;
+  line-height: 1;
+  font-size: 0.9rem;
+}
+
+.signal-tier-badge.conviction_buy,
+.signal-tier-banner.conviction_buy {
+  border-color: rgba(52, 211, 153, 0.45);
+  background: rgba(52, 211, 153, 0.12);
+  color: #bbf7d0;
+}
+
+.signal-tier-badge.balanced_buy,
+.signal-tier-banner.balanced_buy {
+  border-color: rgba(96, 165, 250, 0.45);
+  background: rgba(96, 165, 250, 0.12);
+  color: #bfdbfe;
+}
+
+.signal-tier-badge.opportunistic_buy,
+.signal-tier-banner.opportunistic_buy {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+}
+
+.signal-tier-badge.speculative_buy,
+.signal-tier-banner.speculative_buy {
+  border-color: rgba(244, 114, 182, 0.45);
+  background: rgba(244, 114, 182, 0.12);
+  color: #f9a8d4;
+}
+
+.signal-tier-badge.sell {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
+}
+
+.signal-tier-banner {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  margin-top: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.signal-tier-banner p {
+  margin-bottom: 0;
   color: #dbeafe;
 }
 

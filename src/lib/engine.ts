@@ -4,12 +4,26 @@ export type AdminSignal = {
   symbol: string
   windowId?: string
   signalAction?: string
+  signalTier?: string | null
   state: SignalState
   entryScore: number
   exitScore: number
   regime: string
   updatedAt: string
   reasons: string[]
+}
+
+export type SignalTier =
+  | 'conviction_buy'
+  | 'balanced_buy'
+  | 'opportunistic_buy'
+  | 'speculative_buy'
+
+export type SignalTierMeta = {
+  tier: SignalTier
+  label: string
+  icon: string
+  description: string
 }
 
 export type ConfigFieldValue = number | string | string[]
@@ -79,6 +93,7 @@ export const sampleSignals: AdminSignal[] = [
     state: 'ENTRY_SIGNALLED',
     entryScore: 0.84,
     exitScore: 0.22,
+    signalTier: 'conviction_buy',
     regime: 'Trend + Volume confirmation',
     updatedAt: '2026-04-20 15:41 UTC',
     reasons: ['SMA stack aligned', 'MACD positive', 'VWAP support'],
@@ -88,6 +103,7 @@ export const sampleSignals: AdminSignal[] = [
     state: 'ACCEPTED_OPEN',
     entryScore: 0.77,
     exitScore: 0.31,
+    signalTier: 'balanced_buy',
     regime: 'Low volatility trend',
     updatedAt: '2026-04-20 15:42 UTC',
     reasons: ['EMA continuation', 'RSI mid-range'],
@@ -97,11 +113,39 @@ export const sampleSignals: AdminSignal[] = [
     state: 'EXIT_SIGNALLED',
     entryScore: 0.51,
     exitScore: 0.74,
+    signalTier: null,
     regime: 'Volatility expansion',
     updatedAt: '2026-04-20 15:43 UTC',
     reasons: ['ATR elevated', 'Stochastic stretched'],
   },
 ]
+
+export const signalTierLegend: Record<SignalTier, SignalTierMeta> = {
+  conviction_buy: {
+    tier: 'conviction_buy',
+    label: 'Conviction buy',
+    icon: '▲',
+    description: 'High-confidence long setup with strong alignment and lower risk.',
+  },
+  balanced_buy: {
+    tier: 'balanced_buy',
+    label: 'Balanced buy',
+    icon: '◆',
+    description: 'Solid long setup with healthy trend, momentum, and participation.',
+  },
+  opportunistic_buy: {
+    tier: 'opportunistic_buy',
+    label: 'Opportunistic buy',
+    icon: '●',
+    description: 'Valid long setup with acceptable risk and still usable upside.',
+  },
+  speculative_buy: {
+    tier: 'speculative_buy',
+    label: 'Speculative buy',
+    icon: '◌',
+    description: 'Weaker long setup that still clears the minimum risk-adjusted floor.',
+  },
+}
 
 export const configFields: ConfigField[] = [
   {
@@ -526,4 +570,30 @@ export function classifySignal(signal: AdminSignal): 'buy' | 'sell' | 'hold' {
     return 'sell'
   }
   return 'hold'
+}
+
+export function classifySignalTier(signal: AdminSignal): SignalTier | null {
+  if (classifySignal(signal) !== 'buy') {
+    return null
+  }
+
+  const explicitTier = signal.signalTier?.trim().toLowerCase()
+  if (
+    explicitTier === 'conviction_buy' ||
+    explicitTier === 'balanced_buy' ||
+    explicitTier === 'opportunistic_buy' ||
+    explicitTier === 'speculative_buy'
+  ) {
+    return explicitTier
+  }
+  if (signal.entryScore >= 0.78 && signal.exitScore <= 0.28) {
+    return 'conviction_buy'
+  }
+  if (signal.entryScore >= 0.68 && signal.exitScore <= 0.35) {
+    return 'balanced_buy'
+  }
+  if (signal.entryScore >= 0.58 && signal.exitScore <= 0.45) {
+    return 'opportunistic_buy'
+  }
+  return 'speculative_buy'
 }

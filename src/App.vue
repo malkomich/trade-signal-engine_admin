@@ -59,6 +59,8 @@ import {
   type AdminSignal,
   type ConfigField,
   type ConfigFieldValue,
+  classifySignalTier,
+  signalTierLegend,
 } from "./lib/engine";
 
 const snapshot = ref<DashboardSnapshot | null>(null);
@@ -390,6 +392,9 @@ const selectedSignalWindowReview = computed<WindowReviewView | null>(() => {
 const selectedSignalDrivers = computed(() =>
   buildSignalDrivers(selectedSignal.value, selectedSignalWindowReview.value),
 );
+const selectedSignalTierMeta = computed(() =>
+  signalMetaForSignal(selectedSignal.value),
+);
 const selectedWindowReviews = computed(() => {
   const start = windowReviewPage.value * windowReviewPageSize;
   const end = start + windowReviewPageSize;
@@ -528,14 +533,23 @@ function formatSignalStateLabel(state: string) {
 }
 
 function formatSignalQueueLabel(signal: AdminSignal) {
-  switch (classifySignal(signal)) {
-    case "buy":
-      return "Buy";
-    case "sell":
-      return "Sell";
-    default:
-      return "Signal";
+  const side = classifySignal(signal);
+  if (side === "buy") {
+    const tier = signalMetaForSignal(signal);
+    return tier ? tier.label : "Buy";
   }
+  if (side === "sell") {
+    return "Sell";
+  }
+  return "Signal";
+}
+
+function signalMetaForSignal(signal: AdminSignal | null) {
+  if (!signal) {
+    return null;
+  }
+  const tier = classifySignalTier(signal);
+  return tier ? signalTierLegend[tier] : null;
 }
 
 function formatSignalRegimeLabel(
@@ -1282,6 +1296,13 @@ const triagePageSignals = computed(() => {
   const end = start + triagePageSize;
   return triageSignals.value.slice(start, end);
 });
+const triagePageSignalRows = computed(() =>
+  triagePageSignals.value.map((signal) => ({
+    signal,
+    meta: signalMetaForSignal(signal),
+    label: formatSignalQueueLabel(signal),
+  })),
+);
 const triagePageCount = computed(() =>
   Math.max(1, Math.ceil(triageSignals.value.length / triagePageSize)),
 );
@@ -2366,6 +2387,22 @@ onUnmounted(() => {
               {{ symbol }}
             </button>
           </div>
+          <div class="signal-tier-legend" aria-label="Buy signal legend">
+            <span
+              v-for="tier in Object.values(signalTierLegend)"
+              :key="tier.tier"
+              class="signal-tier-badge"
+              :class="tier.tier"
+              :title="tier.description"
+            >
+              <i>{{ tier.icon }}</i>
+              {{ tier.label }}
+            </span>
+            <span class="signal-tier-badge sell" title="Sell signals close or protect existing windows.">
+              <i>▼</i>
+              Sell
+            </span>
+          </div>
           <div class="triage-toolbar">
             <button
               v-for="filter in triageFilters"
@@ -2409,24 +2446,34 @@ onUnmounted(() => {
               Next
             </button>
           </div>
-          <div v-if="triagePageSignals.length" class="signal-list">
+          <div v-if="triagePageSignalRows.length" class="signal-list">
             <button
-              v-for="signal in triagePageSignals"
-              :key="signalKey(signal)"
+              v-for="row in triagePageSignalRows"
+              :key="signalKey(row.signal)"
               class="signal-row"
-              :class="classifySignal(signal)"
-              @click="setSelectedSignal(signal)"
+              :class="[classifySignal(row.signal), row.meta?.tier ?? '']"
+              @click="setSelectedSignal(row.signal)"
             >
               <div>
-                <strong>{{ signal.symbol }}</strong>
+                <strong>{{ row.signal.symbol }}</strong>
+                <div v-if="row.meta" class="signal-row-badge-row">
+                  <span
+                    class="signal-tier-badge"
+                    :class="row.meta.tier"
+                    :title="row.meta.description"
+                  >
+                    <i>{{ row.meta.icon }}</i>
+                    {{ row.label }}
+                  </span>
+                </div>
                 <p>
-                  {{ formatSignalRegimeLabel(signal) }} ·
-                  {{ signal.windowId ? "Linked window" : "Window pending" }}
+                  {{ formatSignalRegimeLabel(row.signal) }} ·
+                  {{ row.signal.windowId ? "Linked window" : "Window pending" }}
                 </p>
               </div>
               <div class="scores">
-                <span>{{ signal.entryScore.toFixed(2) }}</span>
-                <span>{{ signal.exitScore.toFixed(2) }}</span>
+                <span>{{ row.signal.entryScore.toFixed(2) }}</span>
+                <span>{{ row.signal.exitScore.toFixed(2) }}</span>
               </div>
             </button>
           </div>
@@ -2449,6 +2496,17 @@ onUnmounted(() => {
                 >Updated
                 {{ formatLocaleTimestamp(selectedSignal.updatedAt) }}</span
               >
+            </div>
+            <div
+              v-if="selectedSignalTierMeta"
+              class="signal-tier-banner"
+              :class="selectedSignalTierMeta.tier"
+            >
+              <span class="signal-tier-badge" :class="selectedSignalTierMeta.tier">
+                <i>{{ selectedSignalTierMeta.icon }}</i>
+                {{ selectedSignalTierMeta.label }}
+              </span>
+              <p>{{ selectedSignalTierMeta.description }}</p>
             </div>
             <div class="score-grid">
               <div>

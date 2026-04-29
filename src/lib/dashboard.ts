@@ -100,6 +100,7 @@ export type MarketSnapshotRecord = {
   exitScore: number
   eventType: string
   signalAction: string
+  signalTier?: string | null
   signalState: string
   signalRegime: string
   benchmarkSymbol: string
@@ -618,10 +619,12 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
       .sort((left, right) => compareRealtimeDoc(right, left, ['timestamp', 'updated_at', 'updatedAt']))
       .map((doc) => {
         const data = doc.data()
+        const rawSignalTier = data.signal_tier ?? data.signalTier
         return {
           symbol: String(data.symbol ?? doc.id),
           windowId: String(data.window_id ?? data.windowId ?? ''),
           signalAction: String(data.signal_action ?? data.signalAction ?? data.action ?? ''),
+          signalTier: rawSignalTier == null || rawSignalTier === 'null' ? null : String(rawSignalTier),
           state: (data.state as AdminSignal['state']) ?? 'ENTRY_SIGNALLED',
           entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
           exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
@@ -637,6 +640,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
     ))
       .map((doc) => {
         const data = doc.data()
+        const rawSignalTier = data.signal_tier ?? data.signalTier
         return {
           id: doc.id,
           sessionId: String(data.session_id ?? data.sessionId ?? latestSessionId),
@@ -674,6 +678,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
           exitScore: Number(data.exit_score ?? 0),
           eventType: String(data.event_type ?? ''),
           signalAction: String(data.signal_action ?? data.action ?? 'HOLD'),
+          signalTier: rawSignalTier == null || rawSignalTier === 'null' ? null : String(rawSignalTier),
           signalState: String(data.signal_state ?? data.state ?? 'FLAT'),
           signalRegime: String(data.signal_regime ?? data.regime ?? 'Live market session'),
           benchmarkSymbol: String(data.benchmark_symbol ?? ''),
