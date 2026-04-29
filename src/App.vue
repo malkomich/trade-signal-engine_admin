@@ -59,6 +59,8 @@ import {
   type AdminSignal,
   type ConfigField,
   type ConfigFieldValue,
+  classifySignalTier,
+  signalTierLegend,
 } from "./lib/engine";
 
 const snapshot = ref<DashboardSnapshot | null>(null);
@@ -390,6 +392,9 @@ const selectedSignalWindowReview = computed<WindowReviewView | null>(() => {
 const selectedSignalDrivers = computed(() =>
   buildSignalDrivers(selectedSignal.value, selectedSignalWindowReview.value),
 );
+const selectedSignalTierMeta = computed(() =>
+  signalMetaForSignal(selectedSignal.value),
+);
 const selectedWindowReviews = computed(() => {
   const start = windowReviewPage.value * windowReviewPageSize;
   const end = start + windowReviewPageSize;
@@ -528,14 +533,23 @@ function formatSignalStateLabel(state: string) {
 }
 
 function formatSignalQueueLabel(signal: AdminSignal) {
-  switch (classifySignal(signal)) {
-    case "buy":
-      return "Buy";
-    case "sell":
-      return "Sell";
-    default:
-      return "Signal";
+  const side = classifySignal(signal);
+  if (side === "buy") {
+    const tier = signalMetaForSignal(signal);
+    return tier ? tier.label : "Buy";
   }
+  if (side === "sell") {
+    return "Sell";
+  }
+  return "Signal";
+}
+
+function signalMetaForSignal(signal: AdminSignal | null) {
+  if (!signal) {
+    return null;
+  }
+  const tier = classifySignalTier(signal);
+  return tier ? signalTierLegend[tier] : null;
 }
 
 function formatSignalRegimeLabel(
@@ -2366,6 +2380,22 @@ onUnmounted(() => {
               {{ symbol }}
             </button>
           </div>
+          <div class="signal-tier-legend" aria-label="Buy signal legend">
+            <span
+              v-for="tier in Object.values(signalTierLegend)"
+              :key="tier.tier"
+              class="signal-tier-badge"
+              :class="tier.tier"
+              :title="tier.description"
+            >
+              <i>{{ tier.icon }}</i>
+              {{ tier.label }}
+            </span>
+            <span class="signal-tier-badge sell" title="Sell signals close or protect existing windows.">
+              <i>▼</i>
+              Sell
+            </span>
+          </div>
           <div class="triage-toolbar">
             <button
               v-for="filter in triageFilters"
@@ -2414,11 +2444,21 @@ onUnmounted(() => {
               v-for="signal in triagePageSignals"
               :key="signalKey(signal)"
               class="signal-row"
-              :class="classifySignal(signal)"
+              :class="[classifySignal(signal), signalMetaForSignal(signal)?.tier ?? '']"
               @click="setSelectedSignal(signal)"
             >
               <div>
                 <strong>{{ signal.symbol }}</strong>
+                <div v-if="signalMetaForSignal(signal)" class="signal-row-badge-row">
+                  <span
+                    class="signal-tier-badge"
+                    :class="signalMetaForSignal(signal)?.tier"
+                    :title="signalMetaForSignal(signal)?.description"
+                  >
+                    <i>{{ signalMetaForSignal(signal)?.icon }}</i>
+                    {{ formatSignalQueueLabel(signal) }}
+                  </span>
+                </div>
                 <p>
                   {{ formatSignalRegimeLabel(signal) }} ·
                   {{ signal.windowId ? "Linked window" : "Window pending" }}
@@ -2449,6 +2489,17 @@ onUnmounted(() => {
                 >Updated
                 {{ formatLocaleTimestamp(selectedSignal.updatedAt) }}</span
               >
+            </div>
+            <div
+              v-if="selectedSignalTierMeta"
+              class="signal-tier-banner"
+              :class="selectedSignalTierMeta.tier"
+            >
+              <span class="signal-tier-badge" :class="selectedSignalTierMeta.tier">
+                <i>{{ selectedSignalTierMeta.icon }}</i>
+                {{ selectedSignalTierMeta.label }}
+              </span>
+              <p>{{ selectedSignalTierMeta.description }}</p>
             </div>
             <div class="score-grid">
               <div>

@@ -100,6 +100,7 @@ export type MarketSnapshotRecord = {
   exitScore: number
   eventType: string
   signalAction: string
+  signalTier?: string | null
   signalState: string
   signalRegime: string
   benchmarkSymbol: string
@@ -622,6 +623,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
           symbol: String(data.symbol ?? doc.id),
           windowId: String(data.window_id ?? data.windowId ?? ''),
           signalAction: String(data.signal_action ?? data.signalAction ?? data.action ?? ''),
+          signalTier: String(data.signal_tier ?? data.signalTier ?? '') || null,
           state: (data.state as AdminSignal['state']) ?? 'ENTRY_SIGNALLED',
           entryScore: Number(data.entryScore ?? data.entry_score ?? 0),
           exitScore: Number(data.exitScore ?? data.exit_score ?? 0),
@@ -674,6 +676,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
           exitScore: Number(data.exit_score ?? 0),
           eventType: String(data.event_type ?? ''),
           signalAction: String(data.signal_action ?? data.action ?? 'HOLD'),
+          signalTier: String(data.signal_tier ?? data.signalTier ?? '') || null,
           signalState: String(data.signal_state ?? data.state ?? 'FLAT'),
           signalRegime: String(data.signal_regime ?? data.regime ?? 'Live market session'),
           benchmarkSymbol: String(data.benchmark_symbol ?? ''),
