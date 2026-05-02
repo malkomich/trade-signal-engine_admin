@@ -415,6 +415,14 @@ const selectedSignalReasonSummary = computed(() => {
   const reasons = selectedSignalReasonItems.value.slice(0, 3);
   return reasons.length ? `Key drivers: ${reasons.join(" · ")}` : "";
 });
+const canCopySelectedSignalId = computed(() => {
+  const signalId = selectedSignal.value?.id?.trim();
+  return Boolean(
+    signalId &&
+      typeof navigator !== "undefined" &&
+      navigator.clipboard?.writeText,
+  );
+});
 const selectedSignalTierMeta = computed(() =>
   signalMetaForSignal(selectedSignal.value),
 );
@@ -1947,11 +1955,7 @@ function closeExpandedChart() {
 
 async function copySelectedSignalId() {
   const signalId = selectedSignal.value?.id?.trim();
-  if (!signalId || typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
-    return;
-  }
-
-  const scheduleSelectedSignalCopyFeedback = (message: string) => {
+  const setFeedback = (message: string) => {
     selectedSignalCopyState.value = message;
     if (selectedSignalCopyTimer !== null) {
       window.clearTimeout(selectedSignalCopyTimer);
@@ -1963,13 +1967,21 @@ async function copySelectedSignalId() {
       selectedSignalCopyTimer = null;
     }, selectedSignalCopyFeedbackDurationMs);
   };
+  if (
+    !signalId ||
+    typeof navigator === "undefined" ||
+    !navigator.clipboard?.writeText
+  ) {
+    setFeedback("Copy unavailable");
+    return;
+  }
 
   try {
     await navigator.clipboard.writeText(signalId);
-    scheduleSelectedSignalCopyFeedback("Copied signal id");
+    setFeedback("Copied signal id");
   } catch (error) {
     console.error("Failed to copy signal id:", error);
-    scheduleSelectedSignalCopyFeedback("Copy failed");
+    setFeedback("Copy failed");
   }
 }
 
@@ -2578,13 +2590,19 @@ onUnmounted(() => {
               <button
                 type="button"
                 class="action-button ghost compact"
-                :disabled="!selectedSignal?.id"
-                :title="selectedSignal?.id ? 'Copy signal id to clipboard' : 'No signal id available'"
+                :disabled="!canCopySelectedSignalId"
+                :title="canCopySelectedSignalId ? 'Copy signal id to clipboard' : 'Clipboard unavailable or no signal id available'"
                 @click="copySelectedSignalId"
               >
                 Copy ID
               </button>
-              <span v-if="selectedSignalCopyState" class="copy-feedback">
+              <span
+                v-if="selectedSignalCopyState"
+                class="copy-feedback"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
                 {{ selectedSignalCopyState }}
               </span>
             </div>

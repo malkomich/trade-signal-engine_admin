@@ -172,6 +172,24 @@ describe('charting', () => {
     expect((yAxis?.max ?? 0) - (yAxis?.min ?? 0)).toBeLessThan(4)
   })
 
+  it('keeps low-amplitude series centered on their true midpoint', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-ema')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', low: 0.05, high: 0.08, open: 0.06, close: 0.07, emaFast: 0.05, emaSlow: 0.08 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:31:00.000Z', low: 0.12, high: 0.2, open: 0.15, close: 0.17, emaFast: 0.14, emaSlow: 0.18 }),
+      ],
+      1,
+      'window-1',
+    )
+
+    const yAxis = option.yAxis as { min?: number; max?: number } | undefined
+    const center = ((yAxis?.min ?? 0) + (yAxis?.max ?? 0)) / 2
+    expect(center).toBeGreaterThan(0.05)
+    expect(center).toBeLessThan(0.2)
+  })
+
   it('respects explicit zoom overrides for the expanded chart modal', () => {
     const chart = marketCharts.find((item) => item.id === 'price-ema')!
     const defaultOption = buildChartOption(

@@ -480,10 +480,11 @@ function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY 
     return { min: lower, max: upper }
   }
 
-  const span = Math.max(max - min, 1)
+  const actualSpan = max - min
+  const span = Math.max(actualSpan, 1)
   const kindPadding = CHART_Y_PADDING_RATIO[chart.kind]
   const padding = Math.max(span * kindPadding * Math.max(zoomY, 0.1), span * 0.02)
-  const center = min + (span / 2)
+  const center = (min + max) / 2
   return {
     min: center - (span / 2) - padding,
     max: center + (span / 2) + padding,
