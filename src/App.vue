@@ -656,7 +656,7 @@ function humanizeReason(reason: string) {
     return "Market reference snapshot";
   }
   if (trimmed === "live market session") {
-    return "";
+    return "Live market context";
   }
   if (trimmed === "market context aligned") {
     return "Benchmark confirms the move";
@@ -1976,11 +1976,7 @@ async function copySelectedSignalId() {
       selectedSignalCopyTimer = null;
     }, selectedSignalCopyFeedbackDurationMs);
   };
-  if (
-    !signalId ||
-    typeof navigator === "undefined" ||
-    !navigator.clipboard?.writeText
-  ) {
+  if (!signalId || typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
     setFeedback("Copy unavailable");
     return;
   }
