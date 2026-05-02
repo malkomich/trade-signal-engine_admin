@@ -607,9 +607,10 @@ export function buildChartOption(
     return {
       ...baseOption,
       yAxis: {
-        min: 0,
-        max: 100,
         type: 'value',
+        scale: true,
+        min: valueRange?.min,
+        max: valueRange?.max,
         axisLabel: { color: '#94a3b8' },
         splitLine: { lineStyle: { color: '#1e293b' } },
       },
