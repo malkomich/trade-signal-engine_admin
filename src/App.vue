@@ -93,6 +93,7 @@ const expandedChartZoomY = ref(1);
 const chartModalCardRef = ref<HTMLElement | null>(null);
 const chartModalCloseButton = ref<HTMLButtonElement | null>(null);
 let selectedSignalCopyTimer: number | null = null;
+const selectedSignalCopyFeedbackDurationMs = 1800;
 let chartModalPreviousFocus: HTMLElement | null = null;
 let notificationSetupGeneration = 0;
 let isMounted = true;
@@ -401,11 +402,14 @@ const selectedSignalReasonItems = computed(() => {
   if (!signal) {
     return [] as string[];
   }
-  return signal.reasons
-    .map((reason) => humanizeReason(reason))
-    .map((reason) => reason.trim())
-    .filter((reason) => reason.length > 0)
-    .filter((reason, index, reasons) => reasons.indexOf(reason) === index);
+  return Array.from(
+    new Set(
+      signal.reasons
+        .map((reason) => humanizeReason(reason))
+        .map((reason) => reason.trim())
+        .filter((reason) => reason.length > 0 && reason !== "Live market context"),
+    ),
+  );
 });
 const selectedSignalReasonSummary = computed(() => {
   const reasons = selectedSignalReasonItems.value.slice(0, 3);
@@ -644,7 +648,7 @@ function humanizeReason(reason: string) {
     return "Market reference snapshot";
   }
   if (trimmed === "live market session") {
-    return "";
+    return "Live market context";
   }
   if (trimmed === "market context aligned") {
     return "Benchmark confirms the move";
@@ -1116,11 +1120,14 @@ function findWindowSnapshots(window: TradeWindowRecord) {
 }
 
 function summarizeSnapshotReason(snapshot: MarketSnapshotRecord) {
-  const reasons = snapshot.reasons
-    .map((reason) => humanizeReason(reason))
-    .map((reason) => reason.trim())
-    .filter((reason) => reason.length > 0)
-    .slice(0, 2);
+  const reasons = Array.from(
+    new Set(
+      snapshot.reasons
+        .map((reason) => humanizeReason(reason))
+        .map((reason) => reason.trim())
+        .filter((reason) => reason.length > 0 && reason !== "Live market context"),
+    ),
+  ).slice(0, 2);
   if (reasons.length > 0) {
     return reasons.join(" · ");
   }
@@ -1944,30 +1951,25 @@ async function copySelectedSignalId() {
     return;
   }
 
+  const scheduleSelectedSignalCopyFeedback = (message: string) => {
+    selectedSignalCopyState.value = message;
+    if (selectedSignalCopyTimer !== null) {
+      window.clearTimeout(selectedSignalCopyTimer);
+    }
+    selectedSignalCopyTimer = window.setTimeout(() => {
+      if (selectedSignalCopyState.value === message) {
+        selectedSignalCopyState.value = null;
+      }
+      selectedSignalCopyTimer = null;
+    }, selectedSignalCopyFeedbackDurationMs);
+  };
+
   try {
     await navigator.clipboard.writeText(signalId);
-    selectedSignalCopyState.value = "Copied signal id";
-    if (selectedSignalCopyTimer !== null) {
-      window.clearTimeout(selectedSignalCopyTimer);
-    }
-    selectedSignalCopyTimer = window.setTimeout(() => {
-      if (selectedSignalCopyState.value === "Copied signal id") {
-        selectedSignalCopyState.value = null;
-      }
-      selectedSignalCopyTimer = null;
-    }, 1800);
+    scheduleSelectedSignalCopyFeedback("Copied signal id");
   } catch (error) {
     console.error("Failed to copy signal id:", error);
-    selectedSignalCopyState.value = "Copy failed";
-    if (selectedSignalCopyTimer !== null) {
-      window.clearTimeout(selectedSignalCopyTimer);
-    }
-    selectedSignalCopyTimer = window.setTimeout(() => {
-      if (selectedSignalCopyState.value === "Copy failed") {
-        selectedSignalCopyState.value = null;
-      }
-      selectedSignalCopyTimer = null;
-    }, 1800);
+    scheduleSelectedSignalCopyFeedback("Copy failed");
   }
 }
 

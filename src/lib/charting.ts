@@ -35,9 +35,9 @@ const CHART_AXIS_FOCUS_MULTIPLIERS = [
 const CHART_Y_PADDING_RATIO = {
   price: 0.035,
   line: 0.055,
-  oscillator: 0.035,
   histogram: 0.08,
 } as const
+const OSCILLATOR_Y_PADDING = 2.5
 
 function parseTimestamp(value: string) {
   const parsed = Date.parse(value)
@@ -370,6 +370,7 @@ function buildTooltipFormatter(chart: ChartDefinition) {
       }
       if (item.seriesName === 'Buy' || item.seriesName === 'Sell') {
         signalLabel = item.seriesName
+        rows += `<tr><th>${escapeHtml('Signal')}</th><td>${escapeHtml(`${item.seriesName} marker`)}</td></tr>`
         continue
       }
       if (item.seriesName && Array.isArray(data) && data.length >= 2 && typeof data[1] === 'number') {
@@ -451,7 +452,7 @@ function collectChartValues(chart: ChartDefinition, points: AggregatedSnapshot[]
       }
     }
   }
-  return values.filter((value) => Number.isFinite(value))
+  return values
 }
 
 function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY = 1) {
@@ -473,8 +474,9 @@ function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY 
   }
 
   if (chart.kind === 'oscillator') {
-    const lower = Math.max(0, Math.min(min, 0) - 4 * Math.max(zoomY, 0.1))
-    const upper = Math.min(100, Math.max(max, 100) + 4 * Math.max(zoomY, 0.1))
+    const padding = OSCILLATOR_Y_PADDING * Math.max(zoomY, 0.1)
+    const lower = Math.min(min, 0) - padding
+    const upper = Math.max(max, 100) + padding
     return { min: lower, max: upper }
   }
 
@@ -658,6 +660,8 @@ export function buildChartOption(
       yAxis: {
         type: 'value',
         scale: true,
+        min: valueRange?.min,
+        max: valueRange?.max,
         axisLabel: { color: '#94a3b8' },
         splitLine: { lineStyle: { color: '#1e293b' } },
       },

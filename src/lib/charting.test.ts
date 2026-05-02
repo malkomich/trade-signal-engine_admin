@@ -211,6 +211,25 @@ describe('charting', () => {
     )
   })
 
+  it('applies zoom overrides to histogram charts as well', () => {
+    const chart = marketCharts.find((item) => item.id === 'macd')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', macd: 120, macdSignal: 100, macdHistogram: 20 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', macd: 118, macdSignal: 99, macdHistogram: 19 }),
+      ],
+      1,
+      'window-1',
+      { x: 1, y: 0.7 },
+    )
+
+    const yAxis = option.yAxis as { min?: number; max?: number } | undefined
+    expect(typeof yAxis?.min).toBe('number')
+    expect(typeof yAxis?.max).toBe('number')
+    expect((yAxis?.max ?? 0)).toBeGreaterThan(100)
+  })
+
   it('escapes tooltip content before rendering HTML', () => {
     const chart = marketCharts.find((item) => item.id === 'price-ema')!
     const option = buildChartOption(
