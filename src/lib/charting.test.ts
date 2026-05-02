@@ -209,7 +209,7 @@ describe('charting', () => {
       ],
       1,
       'window-1',
-      { x: 0.7, y: 0.7 },
+      { x: 1.4, y: 1.4 },
     )
 
     const defaultRange = Array.isArray(defaultOption.dataZoom)
@@ -292,7 +292,7 @@ describe('charting', () => {
       ],
       1,
       'window-1',
-      { x: 1, y: 0.7 },
+      { x: 1, y: 1.4 },
     )
 
     const yAxis = option.yAxis as { min?: number; max?: number } | undefined

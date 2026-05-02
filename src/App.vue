@@ -3237,8 +3237,8 @@ onUnmounted(() => {
               <input
                 v-model.number="expandedChartZoomX"
                 type="range"
-                min="0.55"
-                max="1.75"
+                min="0.4"
+                max="2.5"
                 step="0.05"
               />
               <strong>{{ Math.round(expandedChartZoomX * 100) }}%</strong>
@@ -3248,8 +3248,8 @@ onUnmounted(() => {
               <input
                 v-model.number="expandedChartZoomY"
                 type="range"
-                min="0.55"
-                max="1.75"
+                min="0.4"
+                max="2.5"
                 step="0.05"
               />
               <strong>{{ Math.round(expandedChartZoomY * 100) }}%</strong>
