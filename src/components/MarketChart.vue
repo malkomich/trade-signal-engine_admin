@@ -12,6 +12,10 @@ const props = defineProps<{
   intervalMinutes: 1 | 5 | 10 | 30 | 60
   windowId?: string | null
   height?: number
+  zoom?: {
+    x: number
+    y: number
+  }
 }>()
 
 const chartHost = ref<HTMLDivElement | null>(null)
@@ -27,6 +31,7 @@ function renderChart() {
     props.snapshots,
     props.intervalMinutes,
     props.windowId,
+    props.zoom ?? { x: 1, y: 1 },
   )
   chartInstance.setOption(option, true)
 }
@@ -46,7 +51,7 @@ onMounted(() => {
 })
 
 watch(
-  () => [props.chart.id, props.intervalMinutes, props.windowId, props.snapshots],
+  () => [props.chart.id, props.intervalMinutes, props.windowId, props.snapshots, props.zoom?.x, props.zoom?.y],
   () => {
     renderChart()
   },

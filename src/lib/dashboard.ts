@@ -621,6 +621,7 @@ export async function loadDashboardSnapshot(options: { allowLiveData?: boolean; 
         const data = doc.data()
         const rawSignalTier = data.signal_tier ?? data.signalTier
         return {
+          id: doc.id,
           symbol: String(data.symbol ?? doc.id),
           windowId: String(data.window_id ?? data.windowId ?? ''),
           signalAction: String(data.signal_action ?? data.signalAction ?? data.action ?? ''),

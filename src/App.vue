@@ -82,13 +82,18 @@ const snapshotWarning = ref<string | null>(null);
 const liveDataAvailable = ref(true);
 const notificationState = ref<NotificationSetupState>("unsupported");
 const notificationMessage = ref<string | null>(null);
+const selectedSignalCopyState = ref<string | null>(null);
 const selectedLedgerSnapshotId = ref<string>("");
 const selectedWindowReviewId = ref<string>("");
 const selectedOptimizationReviewId = ref<string>("");
 const liveSignalPage = ref(0);
 const expandedChartId = ref<string | null>(null);
+const expandedChartZoomX = ref(1);
+const expandedChartZoomY = ref(1);
 const chartModalCardRef = ref<HTMLElement | null>(null);
 const chartModalCloseButton = ref<HTMLButtonElement | null>(null);
+let selectedSignalCopyTimer: number | null = null;
+const selectedSignalCopyFeedbackDurationMs = 1800;
 let chartModalPreviousFocus: HTMLElement | null = null;
 let notificationSetupGeneration = 0;
 let isMounted = true;
@@ -392,6 +397,32 @@ const selectedSignalWindowReview = computed<WindowReviewView | null>(() => {
 const selectedSignalDrivers = computed(() =>
   buildSignalDrivers(selectedSignal.value, selectedSignalWindowReview.value),
 );
+const selectedSignalReasonItems = computed(() => {
+  const signal = selectedSignal.value;
+  if (!signal) {
+    return [] as string[];
+  }
+  return Array.from(
+    new Set(
+      signal.reasons
+        .map((reason) => humanizeReason(reason))
+        .map((reason) => reason.trim())
+        .filter((reason) => reason.length > 0 && reason !== "Live market context"),
+    ),
+  );
+});
+const selectedSignalReasonSummary = computed(() => {
+  const reasons = selectedSignalReasonItems.value.slice(0, 3);
+  return reasons.length ? `Key drivers: ${reasons.join(" · ")}` : "";
+});
+const canCopySelectedSignalId = computed(() => {
+  const signalId = selectedSignal.value?.id?.trim();
+  return Boolean(
+    signalId &&
+      typeof navigator !== "undefined" &&
+      navigator.clipboard?.writeText,
+  );
+});
 const selectedSignalTierMeta = computed(() =>
   signalMetaForSignal(selectedSignal.value),
 );
@@ -488,7 +519,7 @@ function signalKey(signal: AdminSignal | null) {
   if (!signal) {
     return "";
   }
-  return `${signal.symbol}:${signal.windowId || "no-window"}:${signal.updatedAt}`;
+  return signal.id || `${signal.symbol}:${signal.windowId || "no-window"}:${signal.updatedAt}`;
 }
 
 function windowKey(window: TradeWindowRecord | null) {
@@ -627,6 +658,15 @@ function humanizeReason(reason: string) {
   if (trimmed === "live market session") {
     return "Live market context";
   }
+  if (trimmed === "market context aligned") {
+    return "Benchmark confirms the move";
+  }
+  if (trimmed === "market context under pressure") {
+    return "Benchmark is under pressure";
+  }
+  if (trimmed === "mixed market context") {
+    return "Benchmark context is mixed";
+  }
   const benchmarkMatch =
     /^([A-Z]{1,6})\s+(market context aligned|market context under pressure|mixed market context)$/.exec(
       trimmed,
@@ -634,12 +674,12 @@ function humanizeReason(reason: string) {
   if (benchmarkMatch) {
     const label = benchmarkMatch[2];
     if (label === "market context aligned") {
-      return "Market aligned";
+      return "Benchmark confirms the move";
     }
     if (label === "market context under pressure") {
-      return "Market under pressure";
+      return "Benchmark is under pressure";
     }
-    return "Mixed market context";
+    return "Benchmark context is mixed";
   }
   if (trimmed.includes("market context")) {
     return trimmed.replace(/-/g, " ");
@@ -1088,9 +1128,16 @@ function findWindowSnapshots(window: TradeWindowRecord) {
 }
 
 function summarizeSnapshotReason(snapshot: MarketSnapshotRecord) {
-  const reasons = snapshot.reasons.slice(0, 2);
+  const reasons = Array.from(
+    new Set(
+      snapshot.reasons
+        .map((reason) => humanizeReason(reason))
+        .map((reason) => reason.trim())
+        .filter((reason) => reason.length > 0 && reason !== "Live market context"),
+    ),
+  ).slice(0, 2);
   if (reasons.length > 0) {
-    return reasons.map(humanizeReason).join(" · ");
+    return reasons.join(" · ");
   }
   return formatSignalRegimeLabel(snapshot);
 }
@@ -1387,6 +1434,10 @@ watch(
     }
   },
 );
+
+watch(selectedSignal, () => {
+  selectedSignalCopyState.value = null;
+});
 
 watch(
   selectedConfigVersion,
@@ -1894,10 +1945,44 @@ function openExpandedChart(chartId: string) {
       ? document.activeElement
       : null;
   expandedChartId.value = chartId;
+  expandedChartZoomX.value = 1;
+  expandedChartZoomY.value = 1;
 }
 
 function closeExpandedChart() {
   expandedChartId.value = null;
+}
+
+async function copySelectedSignalId() {
+  const signalId = selectedSignal.value?.id?.trim();
+  const setFeedback = (message: string) => {
+    selectedSignalCopyState.value = message;
+    if (selectedSignalCopyTimer !== null) {
+      window.clearTimeout(selectedSignalCopyTimer);
+    }
+    selectedSignalCopyTimer = window.setTimeout(() => {
+      if (selectedSignalCopyState.value === message) {
+        selectedSignalCopyState.value = null;
+      }
+      selectedSignalCopyTimer = null;
+    }, selectedSignalCopyFeedbackDurationMs);
+  };
+  if (
+    !signalId ||
+    typeof navigator === "undefined" ||
+    !navigator.clipboard?.writeText
+  ) {
+    setFeedback("Copy unavailable");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(signalId);
+    setFeedback("Copied signal id");
+  } catch (error) {
+    console.error("Failed to copy signal id:", error);
+    setFeedback("Copy failed");
+  }
 }
 
 function getFocusableElements(root: HTMLElement) {
@@ -2249,6 +2334,10 @@ watch(selectedMarketDay, (marketDayKey) => {
 
 onUnmounted(() => {
   isMounted = false;
+  if (selectedSignalCopyTimer !== null) {
+    window.clearTimeout(selectedSignalCopyTimer);
+    selectedSignalCopyTimer = null;
+  }
   if (dashboardRefreshTimer !== null) {
     window.clearTimeout(dashboardRefreshTimer);
     dashboardRefreshTimer = null;
@@ -2496,7 +2585,27 @@ onUnmounted(() => {
         <article class="panel decision-queue-panel">
           <div class="panel-header">
             <h2>Selected signal</h2>
-            <span>{{ selectedSignal?.symbol ?? "No signal selected" }}</span>
+            <div class="panel-header-actions selected-signal-actions">
+              <span>{{ selectedSignal?.symbol ?? "No signal selected" }}</span>
+              <button
+                type="button"
+                class="action-button ghost compact"
+                :disabled="!canCopySelectedSignalId"
+                :title="canCopySelectedSignalId ? 'Copy signal id to clipboard' : 'Clipboard unavailable or no signal id available'"
+                @click="copySelectedSignalId"
+              >
+                Copy ID
+              </button>
+              <span
+                v-if="selectedSignalCopyState"
+                class="copy-feedback"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {{ selectedSignalCopyState }}
+              </span>
+            </div>
           </div>
           <div class="detail-card" v-if="selectedSignal">
             <div class="detail-title">
@@ -2535,12 +2644,20 @@ onUnmounted(() => {
                 <strong>{{ driver.value }}</strong>
               </div>
             </div>
-            <p>{{ formatSignalRegimeLabel(selectedSignal) }}</p>
-            <ul class="reason-list">
-              <li v-for="reason in selectedSignal.reasons" :key="reason">
-                {{ humanizeReason(reason) }}
+            <p v-if="selectedSignalReasonSummary" class="signal-reason-summary">
+              {{ selectedSignalReasonSummary }}
+            </p>
+            <ul
+              v-if="selectedSignalReasonItems.length"
+              class="reason-list reason-card-list"
+            >
+              <li v-for="reason in selectedSignalReasonItems" :key="reason">
+                {{ reason }}
               </li>
             </ul>
+            <p v-else class="empty-state compact">
+              No detailed signal reasons were recorded for this signal.
+            </p>
           </div>
         </article>
       </section>
@@ -3084,14 +3201,16 @@ onUnmounted(() => {
               </h2>
               <p>{{ expandedChartDefinition.subtitle }}</p>
             </div>
-            <button
-              ref="chartModalCloseButton"
-              type="button"
-              class="action-button ghost compact"
-              @click="closeExpandedChart"
-            >
-              Close
-            </button>
+            <div class="chart-modal-actions">
+              <button
+                ref="chartModalCloseButton"
+                type="button"
+                class="action-button ghost compact"
+                @click="closeExpandedChart"
+              >
+                Close
+              </button>
+            </div>
           </div>
           <div class="chart-legend">
             <span
@@ -3103,11 +3222,36 @@ onUnmounted(() => {
               {{ series.label }}
             </span>
           </div>
+          <div class="chart-zoom-controls">
+            <label>
+              <span>Time zoom</span>
+              <input
+                v-model.number="expandedChartZoomX"
+                type="range"
+                min="0.55"
+                max="1.75"
+                step="0.05"
+              />
+              <strong>{{ Math.round(expandedChartZoomX * 100) }}%</strong>
+            </label>
+            <label>
+              <span>Value zoom</span>
+              <input
+                v-model.number="expandedChartZoomY"
+                type="range"
+                min="0.55"
+                max="1.75"
+                step="0.05"
+              />
+              <strong>{{ Math.round(expandedChartZoomY * 100) }}%</strong>
+            </label>
+          </div>
           <MarketChart
             :chart="expandedChartDefinition"
             :snapshots="selectedChartSnapshots"
             :interval-minutes="chartIntervalMinutes"
             :window-id="selectedWindowReview?.id ?? null"
+            :zoom="{ x: expandedChartZoomX, y: expandedChartZoomY }"
             :height="640"
           />
           <p
