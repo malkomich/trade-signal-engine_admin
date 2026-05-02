@@ -667,15 +667,6 @@ function humanizeReason(reason: string) {
   if (trimmed === "mixed market context") {
     return "Benchmark context is mixed";
   }
-  if (trimmed === "market context aligned") {
-    return "Benchmark confirms the move";
-  }
-  if (trimmed === "market context under pressure") {
-    return "Benchmark is under pressure";
-  }
-  if (trimmed === "mixed market context") {
-    return "Benchmark context is mixed";
-  }
   const benchmarkMatch =
     /^([A-Z]{1,6})\s+(market context aligned|market context under pressure|mixed market context)$/.exec(
       trimmed,

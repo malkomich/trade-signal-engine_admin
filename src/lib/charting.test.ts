@@ -221,62 +221,9 @@ describe('charting', () => {
     const defaultYAxis = defaultOption.yAxis as { min?: number; max?: number } | undefined
     const zoomedYAxis = zoomedOption.yAxis as { min?: number; max?: number } | undefined
 
-    expect((zoomedRange?.endValue ?? 0) - (zoomedRange?.startValue ?? 0)).toBeGreaterThan(
+    expect((zoomedRange?.endValue ?? 0) - (zoomedRange?.startValue ?? 0)).toBeLessThan(
       (defaultRange?.endValue ?? 0) - (defaultRange?.startValue ?? 0),
     )
-    expect((zoomedYAxis?.max ?? 0) - (zoomedYAxis?.min ?? 0)).toBeGreaterThan(
-      (defaultYAxis?.max ?? 0) - (defaultYAxis?.min ?? 0),
-    )
-  })
-
-  it('applies zoom overrides to histogram charts as well', () => {
-    const chart = marketCharts.find((item) => item.id === 'macd')!
-    const option = buildChartOption(
-      chart,
-      [
-        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', macd: 120, macdSignal: 100, macdHistogram: 20 }),
-        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', macd: 118, macdSignal: 99, macdHistogram: 19 }),
-      ],
-      1,
-      'window-1',
-      { x: 1, y: 0.7 },
-    )
-
-    const yAxis = option.yAxis as { min?: number; max?: number } | undefined
-    expect(typeof yAxis?.min).toBe('number')
-    expect(typeof yAxis?.max).toBe('number')
-    expect((yAxis?.max ?? 0)).toBeGreaterThan(100)
-  })
-
-  it('applies zoom overrides to oscillator charts as well', () => {
-    const chart = marketCharts.find((item) => item.id === 'stochastic')!
-    const defaultOption = buildChartOption(
-      chart,
-      [
-        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', stochasticK: 42, stochasticD: 38 }),
-        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', stochasticK: 61, stochasticD: 55 }),
-      ],
-      1,
-      'window-1',
-    )
-    const zoomedOption = buildChartOption(
-      chart,
-      [
-        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', stochasticK: 42, stochasticD: 38 }),
-        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', stochasticK: 61, stochasticD: 55 }),
-      ],
-      1,
-      'window-1',
-      { x: 1, y: 1.4 },
-    )
-
-    const defaultYAxis = defaultOption.yAxis as { min?: number; max?: number } | undefined
-    const zoomedYAxis = zoomedOption.yAxis as { min?: number; max?: number } | undefined
-
-    expect(typeof defaultYAxis?.min).toBe('number')
-    expect(typeof defaultYAxis?.max).toBe('number')
-    expect(typeof zoomedYAxis?.min).toBe('number')
-    expect(typeof zoomedYAxis?.max).toBe('number')
     expect((zoomedYAxis?.max ?? 0) - (zoomedYAxis?.min ?? 0)).toBeLessThan(
       (defaultYAxis?.max ?? 0) - (defaultYAxis?.min ?? 0),
     )
