@@ -1976,7 +1976,11 @@ async function copySelectedSignalId() {
       selectedSignalCopyTimer = null;
     }, selectedSignalCopyFeedbackDurationMs);
   };
-  if (!signalId || typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+  if (
+    !signalId ||
+    typeof navigator === "undefined" ||
+    !navigator.clipboard?.writeText
+  ) {
     setFeedback("Copy unavailable");
     return;
   }
