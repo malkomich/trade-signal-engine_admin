@@ -115,6 +115,35 @@ describe('charting', () => {
     expect(markerSeries[0]?.name).toBe('Buy')
   })
 
+  it('recognizes buy and sell aliases in signal markers', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-ema')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({
+          id: 'snapshot-a',
+          windowId: 'window-1',
+          timestamp: '2026-04-24T13:30:00.000Z',
+          signalAction: 'BUY',
+        }),
+        makeSnapshot({
+          id: 'snapshot-b',
+          windowId: 'window-1',
+          timestamp: '2026-04-24T13:35:00.000Z',
+          signalAction: 'SELL',
+        }),
+      ],
+      1,
+      'window-1',
+    )
+
+    const series = option.series as Array<{ type?: string; name?: string }>
+    const markerSeries = series.filter((item) => item.type === 'scatter')
+    expect(markerSeries).toHaveLength(2)
+    expect(markerSeries.map((item) => item.name)).toContain('Buy')
+    expect(markerSeries.map((item) => item.name)).toContain('Sell')
+  })
+
   it('centers the visible range around the selected window duration', () => {
     const chart = marketCharts.find((item) => item.id === 'price-vwap')!
     const option = buildChartOption(
@@ -209,6 +238,7 @@ describe('charting', () => {
       ],
       1,
       'window-1',
+      null,
       { x: 1.4, y: 1.4 },
     )
 
@@ -239,6 +269,7 @@ describe('charting', () => {
       ],
       1,
       'window-1',
+      null,
       { x: 1, y: 1.4 },
     )
 
@@ -267,6 +298,7 @@ describe('charting', () => {
       ],
       1,
       'window-1',
+      null,
       { x: 1, y: 1.4 },
     )
 

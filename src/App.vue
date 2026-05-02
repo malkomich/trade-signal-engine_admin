@@ -251,6 +251,25 @@ const selectedChartSnapshots = computed(() => {
     timeframeKey,
   );
 });
+const selectedWindowFocusRange = computed(() => {
+  const review = selectedWindowReview.value;
+  if (!review) {
+    return null;
+  }
+  const start =
+    review.buySnapshot?.timestamp ??
+    review.openedAt ??
+    review.lastSignalAt ??
+    null;
+  const end =
+    review.sellSnapshot?.timestamp ??
+    review.closedAt ??
+    new Date(dashboardClock.value).toISOString();
+  if (!start) {
+    return null;
+  }
+  return { start, end };
+});
 
 function filterAndSortSnapshots(
   snapshots: MarketSnapshotRecord[],
@@ -2981,6 +3000,7 @@ onUnmounted(() => {
                     :snapshots="selectedChartSnapshots"
                     :interval-minutes="chartIntervalMinutes"
                     :window-id="selectedWindowReview?.id ?? null"
+                    :focus-range="selectedWindowFocusRange"
                     :height="320"
                   />
                 </article>
@@ -3251,6 +3271,7 @@ onUnmounted(() => {
             :snapshots="selectedChartSnapshots"
             :interval-minutes="chartIntervalMinutes"
             :window-id="selectedWindowReview?.id ?? null"
+            :focus-range="selectedWindowFocusRange"
             :zoom="{ x: expandedChartZoomX, y: expandedChartZoomY }"
             :height="640"
           />

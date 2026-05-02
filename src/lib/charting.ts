@@ -23,6 +23,11 @@ export type ChartZoom = {
   y: number
 }
 
+export type ChartFocusRange = {
+  start: string
+  end?: string | null
+}
+
 const CHART_AXIS_MIN_PADDING_RATIO = 0.06
 const CHART_AXIS_MIN_PADDING_INTERVAL_MULTIPLIER = 1.5
 const CHART_AXIS_MIN_DURATION_MS = 5 * 60 * 1000
@@ -254,6 +259,16 @@ function visibleSpanForDuration(durationMs: number, zoomX = 1) {
   return Math.max(baseVisibleSpan / Math.max(zoomX, 0.1), durationMs, CHART_AXIS_MIN_DURATION_MS)
 }
 
+function isBuySignalAction(action: string | null | undefined) {
+  const normalized = action?.trim().toUpperCase()
+  return normalized === 'BUY_ALERT' || normalized === 'BUY' || normalized === 'ACCEPT'
+}
+
+function isSellSignalAction(action: string | null | undefined) {
+  const normalized = action?.trim().toUpperCase()
+  return normalized === 'SELL_ALERT' || normalized === 'SELL' || normalized === 'EXIT'
+}
+
 function signalMarkerSeries(
   chart: ChartDefinition,
   snapshots: MarketSnapshotRecord[],
@@ -264,10 +279,10 @@ function signalMarkerSeries(
       if (windowId && snapshot.windowId !== windowId) {
         return false
       }
-      return snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' || snapshot.signalAction?.toUpperCase() === 'SELL_ALERT'
+      return isBuySignalAction(snapshot.signalAction) || isSellSignalAction(snapshot.signalAction)
     })
     .map((snapshot) => ({
-      kind: snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' ? 'buy' : 'sell',
+      kind: isBuySignalAction(snapshot.signalAction) ? 'buy' : 'sell',
       snapshot,
     }))
 
@@ -408,8 +423,23 @@ function windowFocusRange(
   records: MarketSnapshotRecord[],
   windowId: string | null | undefined,
   intervalMinutes: number,
+  focusRange: ChartFocusRange | null | undefined,
   zoomX = 1,
 ) {
+  if (focusRange?.start) {
+    const start = parseTimestamp(focusRange.start)
+    if (start !== null) {
+      const end = focusRange.end ? parseTimestamp(focusRange.end) : start
+      const focusEnd = end !== null ? Math.max(end, start) : start
+      const duration = Math.max(focusEnd - start, intervalMinutes * 60 * 1000)
+      const visibleSpan = visibleSpanForDuration(duration, zoomX)
+      const center = start + (duration / 2)
+      return {
+        min: center - (visibleSpan / 2),
+        max: center + (visibleSpan / 2),
+      }
+    }
+  }
   if (!windowId) {
     return null
   }
@@ -497,10 +527,11 @@ export function buildChartOption(
   snapshots: MarketSnapshotRecord[],
   intervalMinutes: number,
   windowId?: string | null,
+  focusRange?: ChartFocusRange | null,
   zoom: ChartZoom = { x: 1, y: 1 },
 ): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
-  const range = windowFocusRange(snapshots, windowId, intervalMinutes, zoom.x) ?? axisRange(points, intervalMinutes, zoom.x)
+  const range = windowFocusRange(snapshots, windowId, intervalMinutes, focusRange, zoom.x) ?? axisRange(points, intervalMinutes, zoom.x)
   const valueRange = yAxisRange(chart, points, zoom.y)
   const axisLabelFormatter = (value: number) =>
     new Intl.DateTimeFormat(undefined, {
