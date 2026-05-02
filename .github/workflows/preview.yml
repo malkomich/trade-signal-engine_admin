@@ -39,4 +39,4 @@ jobs:
         run: npm run build
 
       - name: Deploy preview channel
-        run: npx firebase-tools hosting:channel:deploy pr-${{ github.event.pull_request.number }} --only hosting:admin --project trade-signal-engine --expires 7d --non-interactive
+        run: npx firebase-tools hosting:channel:deploy pr-${{ github.event.pull_request.number }} --only admin --project trade-signal-engine --expires 7d --non-interactive
