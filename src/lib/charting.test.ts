@@ -148,9 +148,67 @@ describe('charting', () => {
       : null
     expect(typeof dataZoom?.startValue).toBe('number')
     expect(typeof dataZoom?.endValue).toBe('number')
-    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeGreaterThanOrEqual(12 * 60 * 1000)
+    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeGreaterThanOrEqual(9 * 60 * 1000)
+    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeLessThanOrEqual(12 * 60 * 1000)
     expect(dataZoom?.startValue ?? 0).toBeLessThan(Date.parse('2026-04-24T13:30:00.000Z'))
     expect(dataZoom?.endValue ?? 0).toBeGreaterThan(Date.parse('2026-04-24T13:34:00.000Z'))
+  })
+
+  it('keeps price charts tightly fitted around their actual values', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-ema')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', low: 99.8, high: 101.1, close: 100.7, emaFast: 100.8, emaSlow: 100.2 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:31:00.000Z', low: 100.0, high: 101.4, close: 101.0, emaFast: 101.1, emaSlow: 100.4 }),
+      ],
+      1,
+      'window-1',
+    )
+
+    const yAxis = option.yAxis as { min?: number; max?: number } | undefined
+    expect(typeof yAxis?.min).toBe('number')
+    expect(typeof yAxis?.max).toBe('number')
+    expect((yAxis?.max ?? 0) - (yAxis?.min ?? 0)).toBeLessThan(4)
+  })
+
+  it('respects explicit zoom overrides for the expanded chart modal', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-ema')!
+    const defaultOption = buildChartOption(
+      chart,
+      [
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', low: 99.8, high: 101.1, close: 100.7 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', low: 100.0, high: 101.4, close: 101.0 }),
+      ],
+      1,
+      'window-1',
+    )
+    const zoomedOption = buildChartOption(
+      chart,
+      [
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', low: 99.8, high: 101.1, close: 100.7 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', low: 100.0, high: 101.4, close: 101.0 }),
+      ],
+      1,
+      'window-1',
+      { x: 0.7, y: 0.7 },
+    )
+
+    const defaultRange = Array.isArray(defaultOption.dataZoom)
+      ? (defaultOption.dataZoom[0] as { startValue?: number; endValue?: number } | undefined)
+      : null
+    const zoomedRange = Array.isArray(zoomedOption.dataZoom)
+      ? (zoomedOption.dataZoom[0] as { startValue?: number; endValue?: number } | undefined)
+      : null
+    const defaultYAxis = defaultOption.yAxis as { min?: number; max?: number } | undefined
+    const zoomedYAxis = zoomedOption.yAxis as { min?: number; max?: number } | undefined
+
+    expect((zoomedRange?.endValue ?? 0) - (zoomedRange?.startValue ?? 0)).toBeLessThan(
+      (defaultRange?.endValue ?? 0) - (defaultRange?.startValue ?? 0),
+    )
+    expect((zoomedYAxis?.max ?? 0) - (zoomedYAxis?.min ?? 0)).toBeLessThan(
+      (defaultYAxis?.max ?? 0) - (defaultYAxis?.min ?? 0),
+    )
   })
 
   it('escapes tooltip content before rendering HTML', () => {
@@ -178,7 +236,6 @@ describe('charting', () => {
             axisValue: Date.parse('2026-04-24T13:30:00.000Z'),
             data: {
               value: [Date.parse('2026-04-24T13:30:00.000Z'), 100],
-              tooltipValue: '<img src=x onerror=alert(1)>',
             },
           },
         ])

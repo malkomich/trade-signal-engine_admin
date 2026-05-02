@@ -1,6 +1,7 @@
 export type SignalState = 'FLAT' | 'ENTRY_SIGNALLED' | 'ACCEPTED_OPEN' | 'EXIT_SIGNALLED' | 'CLOSED' | 'REJECTED' | 'EXPIRED'
 
 export type AdminSignal = {
+  id: string
   symbol: string
   windowId?: string
   signalAction?: string
@@ -89,6 +90,7 @@ export type WindowOptimizationRecord = {
 
 export const sampleSignals: AdminSignal[] = [
   {
+    id: 'sample-signal-1',
     symbol: 'NVDA',
     state: 'ENTRY_SIGNALLED',
     entryScore: 0.84,
@@ -99,6 +101,7 @@ export const sampleSignals: AdminSignal[] = [
     reasons: ['SMA stack aligned', 'MACD positive', 'VWAP support'],
   },
   {
+    id: 'sample-signal-2',
     symbol: 'MSFT',
     state: 'ACCEPTED_OPEN',
     entryScore: 0.77,
@@ -109,6 +112,7 @@ export const sampleSignals: AdminSignal[] = [
     reasons: ['EMA continuation', 'RSI mid-range'],
   },
   {
+    id: 'sample-signal-3',
     symbol: 'TSLA',
     state: 'EXIT_SIGNALLED',
     entryScore: 0.51,
