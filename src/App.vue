@@ -656,7 +656,16 @@ function humanizeReason(reason: string) {
     return "Market reference snapshot";
   }
   if (trimmed === "live market session") {
-    return "Live market context";
+    return "";
+  }
+  if (trimmed === "market context aligned") {
+    return "Benchmark confirms the move";
+  }
+  if (trimmed === "market context under pressure") {
+    return "Benchmark is under pressure";
+  }
+  if (trimmed === "mixed market context") {
+    return "Benchmark context is mixed";
   }
   if (trimmed === "market context aligned") {
     return "Benchmark confirms the move";

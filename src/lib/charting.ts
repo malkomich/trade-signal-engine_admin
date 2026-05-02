@@ -27,10 +27,10 @@ const CHART_AXIS_MIN_PADDING_RATIO = 0.06
 const CHART_AXIS_MIN_PADDING_INTERVAL_MULTIPLIER = 1.5
 const CHART_AXIS_MIN_DURATION_MS = 5 * 60 * 1000
 const CHART_AXIS_FOCUS_MULTIPLIERS = [
-  { maxDurationMs: 5 * 60 * 1000, visibleSpanMs: 10 * 60 * 1000 },
-  { maxDurationMs: 15 * 60 * 1000, visibleSpanMs: 18 * 60 * 1000 },
-  { maxDurationMs: 30 * 60 * 1000, visibleSpanMs: 30 * 60 * 1000 },
-  { maxDurationMs: 60 * 60 * 1000, visibleSpanMs: 60 * 60 * 1000 },
+  { maxDurationMs: 5 * 60 * 1000, visibleSpanMs: 15 * 60 * 1000 },
+  { maxDurationMs: 15 * 60 * 1000, visibleSpanMs: 30 * 60 * 1000 },
+  { maxDurationMs: 30 * 60 * 1000, visibleSpanMs: 60 * 60 * 1000 },
+  { maxDurationMs: 60 * 60 * 1000, visibleSpanMs: 120 * 60 * 1000 },
 ] as const
 const CHART_Y_PADDING_RATIO = {
   price: 0.035,
@@ -239,7 +239,8 @@ function axisRange(points: AggregatedSnapshot[], intervalMinutes: number, zoomX 
     span * CHART_AXIS_MIN_PADDING_RATIO,
     intervalMinutes * 60 * 1000 * CHART_AXIS_MIN_PADDING_INTERVAL_MULTIPLIER,
   )
-  const visibleSpan = Math.max(span + (padding * 2), intervalMinutes * 60 * 1000 * 4) * Math.max(zoomX, 0.1)
+  const zoomScale = Math.max(zoomX, 0.1)
+  const visibleSpan = Math.max(span + (padding * 2), intervalMinutes * 60 * 1000 * 4) / zoomScale
   const center = min + (span / 2)
   return {
     min: center - (visibleSpan / 2),
@@ -250,7 +251,7 @@ function axisRange(points: AggregatedSnapshot[], intervalMinutes: number, zoomX 
 function visibleSpanForDuration(durationMs: number, zoomX = 1) {
   const preset = CHART_AXIS_FOCUS_MULTIPLIERS.find((item) => durationMs <= item.maxDurationMs)
   const baseVisibleSpan = preset ? preset.visibleSpanMs : Math.max(durationMs * 1.5, 75 * 60 * 1000)
-  return Math.max(baseVisibleSpan * Math.max(zoomX, 0.1), CHART_AXIS_MIN_DURATION_MS)
+  return Math.max(baseVisibleSpan / Math.max(zoomX, 0.1), CHART_AXIS_MIN_DURATION_MS)
 }
 
 function signalMarkerSeries(
@@ -474,7 +475,7 @@ function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY 
   }
 
   if (chart.kind === 'oscillator') {
-    const padding = OSCILLATOR_Y_PADDING * Math.max(zoomY, 0.1)
+    const padding = OSCILLATOR_Y_PADDING / Math.max(zoomY, 0.1)
     const lower = Math.min(min, 0) - padding
     const upper = Math.max(max, 100) + padding
     return { min: lower, max: upper }
@@ -483,7 +484,7 @@ function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY 
   const actualSpan = max - min
   const span = Math.max(actualSpan, 1)
   const kindPadding = CHART_Y_PADDING_RATIO[chart.kind]
-  const padding = Math.max(span * kindPadding * Math.max(zoomY, 0.1), span * 0.02)
+  const padding = Math.max(span * kindPadding / Math.max(zoomY, 0.1), span * 0.02)
   const center = (min + max) / 2
   return {
     min: center - (span / 2) - padding,

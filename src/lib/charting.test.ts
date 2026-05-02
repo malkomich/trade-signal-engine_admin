@@ -148,8 +148,8 @@ describe('charting', () => {
       : null
     expect(typeof dataZoom?.startValue).toBe('number')
     expect(typeof dataZoom?.endValue).toBe('number')
-    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeGreaterThanOrEqual(9 * 60 * 1000)
-    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeLessThanOrEqual(12 * 60 * 1000)
+    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeGreaterThanOrEqual(13 * 60 * 1000)
+    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeLessThanOrEqual(17 * 60 * 1000)
     expect(dataZoom?.startValue ?? 0).toBeLessThan(Date.parse('2026-04-24T13:30:00.000Z'))
     expect(dataZoom?.endValue ?? 0).toBeGreaterThan(Date.parse('2026-04-24T13:34:00.000Z'))
   })
@@ -221,10 +221,10 @@ describe('charting', () => {
     const defaultYAxis = defaultOption.yAxis as { min?: number; max?: number } | undefined
     const zoomedYAxis = zoomedOption.yAxis as { min?: number; max?: number } | undefined
 
-    expect((zoomedRange?.endValue ?? 0) - (zoomedRange?.startValue ?? 0)).toBeLessThan(
+    expect((zoomedRange?.endValue ?? 0) - (zoomedRange?.startValue ?? 0)).toBeGreaterThan(
       (defaultRange?.endValue ?? 0) - (defaultRange?.startValue ?? 0),
     )
-    expect((zoomedYAxis?.max ?? 0) - (zoomedYAxis?.min ?? 0)).toBeLessThan(
+    expect((zoomedYAxis?.max ?? 0) - (zoomedYAxis?.min ?? 0)).toBeGreaterThan(
       (defaultYAxis?.max ?? 0) - (defaultYAxis?.min ?? 0),
     )
   })
@@ -267,7 +267,7 @@ describe('charting', () => {
       ],
       1,
       'window-1',
-      { x: 1, y: 0.7 },
+      { x: 1, y: 1.4 },
     )
 
     const defaultYAxis = defaultOption.yAxis as { min?: number; max?: number } | undefined
