@@ -245,11 +245,42 @@ const selectedChartSnapshots = computed(() => {
     return [];
   }
   const timeframeKey = `${chartIntervalMinutes.value}m`;
-  return filterAndSortSnapshots(
+  const snapshots = filterAndSortSnapshots(
     selectedDaySnapshots.value,
     review.symbol,
     timeframeKey,
   );
+  const augmentedSnapshots = snapshots.slice();
+  const attachWindowSignal = (
+    snapshot: MarketSnapshotRecord | null | undefined,
+    signalAction: "BUY_ALERT" | "SELL_ALERT",
+  ) => {
+    if (!snapshot) {
+      return;
+    }
+    const normalizedAction = (snapshot.signalAction ?? "").trim().toUpperCase();
+    if (normalizedAction === signalAction || normalizedAction === signalAction.replace("_ALERT", "")) {
+      return;
+    }
+    augmentedSnapshots.push({
+      ...snapshot,
+      signalAction,
+      signalState:
+        snapshot.signalState ||
+        (signalAction === "BUY_ALERT" ? "ENTRY_SIGNALLED" : "EXIT_SIGNALLED"),
+      id: `${snapshot.id}:${signalAction}`,
+    });
+  };
+  attachWindowSignal(review.buySnapshot, "BUY_ALERT");
+  attachWindowSignal(review.sellSnapshot, "SELL_ALERT");
+  return augmentedSnapshots.sort((left, right) => {
+    const leftTimestamp = Date.parse(left.timestamp);
+    const rightTimestamp = Date.parse(right.timestamp);
+    if (leftTimestamp !== rightTimestamp) {
+      return leftTimestamp - rightTimestamp;
+    }
+    return left.id.localeCompare(right.id);
+  });
 });
 const selectedWindowFocusRange = computed(() => {
   const review = selectedWindowReview.value;
@@ -257,14 +288,11 @@ const selectedWindowFocusRange = computed(() => {
     return null;
   }
   const start =
-    review.buySnapshot?.timestamp ??
     review.openedAt ??
+    review.buySnapshot?.timestamp ??
     review.lastSignalAt ??
     null;
-  const end =
-    review.sellSnapshot?.timestamp ??
-    review.closedAt ??
-    new Date(dashboardClock.value).toISOString();
+  const end = review.closedAt ?? new Date(dashboardClock.value).toISOString();
   if (!start) {
     return null;
   }
@@ -708,6 +736,11 @@ function humanizeReason(reason: string) {
     return `${timeframeMatch[1]} timeframe · ${timeframeMatch[2].replace(/-/g, " ").trim()}`;
   }
   return trimmed.replace(/-/g, " ");
+}
+
+function openNativeDatePicker(event: MouseEvent) {
+  const input = event.currentTarget as HTMLInputElement | null;
+  input?.showPicker?.();
 }
 
 function syncSelectedDecisionSymbol(symbols: string[]) {
@@ -2463,6 +2496,7 @@ onUnmounted(() => {
                 :max="currentMarketDayKey()"
                 :aria-label="`Decision day ${formatMarketDayLabel(selectedMarketDay)}`"
                 :title="`Select decision day · ${formatMarketDayLabel(selectedMarketDay)}`"
+                @click="openNativeDatePicker"
               />
               <button
                 type="button"
@@ -2693,6 +2727,7 @@ onUnmounted(() => {
               :max="currentMarketDayKey()"
               :aria-label="`Trade window day ${formatMarketDayLabel(selectedMarketDay)}`"
               :title="`Select trade window day · ${formatMarketDayLabel(selectedMarketDay)}`"
+              @click="openNativeDatePicker"
             />
             <button
               type="button"
