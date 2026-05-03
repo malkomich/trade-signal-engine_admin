@@ -35,7 +35,7 @@ const CHART_AXIS_FOCUS_MULTIPLIERS = [
   { maxDurationMs: 5 * 60 * 1000, visibleSpanMs: 15 * 60 * 1000 },
   { maxDurationMs: 15 * 60 * 1000, visibleSpanMs: 30 * 60 * 1000 },
   { maxDurationMs: 30 * 60 * 1000, visibleSpanMs: 60 * 60 * 1000 },
-  { maxDurationMs: 60 * 60 * 1000, visibleSpanMs: 120 * 60 * 1000 },
+  { maxDurationMs: 60 * 60 * 1000, visibleSpanMs: 90 * 60 * 1000 },
 ] as const
 const CHART_Y_PADDING_RATIO = {
   price: 0.035,
@@ -255,7 +255,7 @@ function axisRange(points: AggregatedSnapshot[], intervalMinutes: number, zoomX 
 
 function visibleSpanForDuration(durationMs: number, zoomX = 1) {
   const preset = CHART_AXIS_FOCUS_MULTIPLIERS.find((item) => durationMs <= item.maxDurationMs)
-  const baseVisibleSpan = preset ? preset.visibleSpanMs : Math.max(durationMs * 1.5, 75 * 60 * 1000)
+  const baseVisibleSpan = preset ? preset.visibleSpanMs : Math.max(durationMs * 1.2, 90 * 60 * 1000)
   return Math.max(baseVisibleSpan / Math.max(zoomX, 0.1), durationMs, CHART_AXIS_MIN_DURATION_MS)
 }
 

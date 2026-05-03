@@ -292,7 +292,12 @@ const selectedWindowFocusRange = computed(() => {
     review.buySnapshot?.timestamp ??
     review.lastSignalAt ??
     null;
-  const end = review.closedAt ?? new Date(dashboardClock.value).toISOString();
+  const end =
+    review.closedAt ??
+    selectedChartSnapshots.value.at(-1)?.timestamp ??
+    review.sellSnapshot?.timestamp ??
+    review.lastSignalAt ??
+    new Date(dashboardClock.value).toISOString();
   if (!start) {
     return null;
   }
