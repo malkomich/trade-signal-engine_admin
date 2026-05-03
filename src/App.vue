@@ -245,10 +245,11 @@ const selectedChartSnapshots = computed(() => {
     return [];
   }
   const timeframeKey = `${chartIntervalMinutes.value}m`;
-  const snapshots = filterAndSortSnapshots(
+  const snapshots = selectChartSnapshotsForInterval(
     selectedDaySnapshots.value,
     review.symbol,
     timeframeKey,
+    chartIntervalMinutes.value,
   );
   const augmentedSnapshots = snapshots.slice();
   const attachWindowSignal = (
@@ -302,6 +303,79 @@ const selectedWindowFocusRange = computed(() => {
   }
   return { start, end };
 });
+
+function parseTimeframeMinutes(value: string | null | undefined) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+  const exactMatch = /^(\d+)\s*(m|min|minutes?)$/.exec(raw);
+  if (exactMatch) {
+    return Number(exactMatch[1]);
+  }
+  const hourMatch = /^(\d+)\s*(h|hr|hour|hours?)$/.exec(raw);
+  if (hourMatch) {
+    return Number(hourMatch[1]) * 60;
+  }
+  return null;
+}
+
+function selectChartSnapshotsForInterval(
+  snapshots: MarketSnapshotRecord[],
+  symbol: string,
+  timeframeKey: string,
+  intervalMinutes: number,
+) {
+  const available = new Map<number, MarketSnapshotRecord[]>();
+  for (const snapshot of snapshots) {
+    if (snapshot.symbol !== symbol) {
+      continue;
+    }
+    const timeframeMinutes = parseTimeframeMinutes(snapshot.timeframe);
+    if (timeframeMinutes === null) {
+      continue;
+    }
+    const bucket = available.get(timeframeMinutes) ?? [];
+    bucket.push(snapshot);
+    available.set(timeframeMinutes, bucket);
+  }
+
+  if (available.size === 0) {
+    return filterAndSortSnapshots(snapshots, symbol, timeframeKey);
+  }
+
+  const exactMatch = available.get(intervalMinutes);
+  if (exactMatch && exactMatch.length > 0) {
+    return exactMatch
+      .slice()
+      .sort((left, right) => {
+        const leftTimestamp = Date.parse(left.timestamp);
+        const rightTimestamp = Date.parse(right.timestamp);
+        if (leftTimestamp !== rightTimestamp) {
+          return leftTimestamp - rightTimestamp;
+        }
+        return left.id.localeCompare(right.id);
+      });
+  }
+
+  const lowerCandidates = [...available.keys()]
+    .filter((value) => value <= intervalMinutes)
+    .sort((left, right) => right - left);
+  const fallbackTimeframe =
+    lowerCandidates[0] ?? [...available.keys()].sort((left, right) => left - right)[0];
+  const fallbackSnapshots =
+    fallbackTimeframe === undefined ? [] : available.get(fallbackTimeframe) ?? [];
+  return fallbackSnapshots
+    .slice()
+    .sort((left, right) => {
+      const leftTimestamp = Date.parse(left.timestamp);
+      const rightTimestamp = Date.parse(right.timestamp);
+      if (leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp;
+      }
+      return left.id.localeCompare(right.id);
+    });
+}
 
 function filterAndSortSnapshots(
   snapshots: MarketSnapshotRecord[],

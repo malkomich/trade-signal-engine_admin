@@ -43,7 +43,7 @@ const CHART_Y_PADDING_RATIO = {
   histogram: 0.08,
 } as const
 const CHART_PRICE_WICK_PADDING_RATIO = 0.25
-const CHART_PRICE_RANGE_TRIM_RATIO = 0.12
+const CHART_PRICE_RANGE_TRIM_RATIO = 0.2
 const OSCILLATOR_Y_PADDING = 2.5
 
 function parseTimestamp(value: string) {
@@ -487,7 +487,7 @@ function collectChartValues(chart: ChartDefinition, points: AggregatedSnapshot[]
   const values: number[] = []
   for (const point of points) {
     if (chart.kind === 'price') {
-      values.push(point.open, point.close)
+      values.push(point.close)
     }
     for (const series of chart.series) {
       const value = point.values[series.key]
