@@ -42,6 +42,8 @@ const CHART_Y_PADDING_RATIO = {
   line: 0.055,
   histogram: 0.08,
 } as const
+const CHART_PRICE_WICK_PADDING_RATIO = 0.25
+const CHART_PRICE_RANGE_TRIM_RATIO = 0.12
 const OSCILLATOR_Y_PADDING = 2.5
 
 function parseTimestamp(value: string) {
@@ -432,7 +434,8 @@ function windowFocusRange(
       const end = focusRange.end ? parseTimestamp(focusRange.end) : start
       const focusEnd = end !== null ? Math.max(end, start) : start
       const duration = Math.max(focusEnd - start, intervalMinutes * 60 * 1000)
-      const visibleSpan = visibleSpanForDuration(duration, zoomX)
+      const paddedDuration = duration + Math.max(duration * 0.1, 30 * 1000)
+      const visibleSpan = visibleSpanForDuration(paddedDuration, zoomX)
       const center = start + (duration / 2)
       return {
         min: center - (visibleSpan / 2),
@@ -462,7 +465,8 @@ function windowFocusRange(
     }
   }
   const duration = Math.max(max - min, intervalMinutes * 60 * 1000)
-  const visibleSpan = visibleSpanForDuration(duration, zoomX)
+  const paddedDuration = duration + Math.max(duration * 0.1, 30 * 1000)
+  const visibleSpan = visibleSpanForDuration(paddedDuration, zoomX)
   const center = min + (duration / 2)
   return {
     min: center - (visibleSpan / 2),
@@ -470,11 +474,20 @@ function windowFocusRange(
   }
 }
 
+function filterPointsInRange(points: AggregatedSnapshot[], min: number | undefined, max: number | undefined) {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return points
+  }
+  const rangeMin = min as number
+  const rangeMax = max as number
+  return points.filter((point) => point.timestamp >= rangeMin && point.timestamp <= rangeMax)
+}
+
 function collectChartValues(chart: ChartDefinition, points: AggregatedSnapshot[]) {
   const values: number[] = []
   for (const point of points) {
     if (chart.kind === 'price') {
-      values.push(point.open, point.high, point.low, point.close)
+      values.push(point.open, point.close)
     }
     for (const series of chart.series) {
       const value = point.values[series.key]
@@ -486,10 +499,80 @@ function collectChartValues(chart: ChartDefinition, points: AggregatedSnapshot[]
   return values
 }
 
+function collectPriceWicks(points: AggregatedSnapshot[]) {
+  const values: number[] = []
+  for (const point of points) {
+    values.push(point.high, point.low)
+  }
+  return values.filter((value) => Number.isFinite(value))
+}
+
+function buildRobustRange(values: number[]) {
+  if (values.length === 0) {
+    return null
+  }
+  if (values.length < 6) {
+    let min = values[0]
+    let max = values[0]
+    for (let index = 1; index < values.length; index += 1) {
+      const value = values[index]
+      if (value < min) {
+        min = value
+      }
+      if (value > max) {
+        max = value
+      }
+    }
+    return { min, max }
+  }
+
+  const sorted = [...values].sort((left, right) => left - right)
+  const lowerIndex = Math.floor((sorted.length - 1) * CHART_PRICE_RANGE_TRIM_RATIO)
+  const upperIndex = Math.ceil((sorted.length - 1) * (1 - CHART_PRICE_RANGE_TRIM_RATIO))
+  const lower = sorted[Math.max(0, Math.min(lowerIndex, sorted.length - 1))]
+  const upper = sorted[Math.max(0, Math.min(upperIndex, sorted.length - 1))]
+  const span = Math.max(upper - lower, 1)
+  const padding = Math.max(span * CHART_PRICE_WICK_PADDING_RATIO, 0.25)
+  return {
+    min: lower - padding,
+    max: upper + padding,
+  }
+}
+
 function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY = 1) {
   const values = collectChartValues(chart, points)
   if (values.length === 0) {
     return null
+  }
+
+  if (chart.kind === 'price') {
+    const priceRange = buildRobustRange(values)
+    if (!priceRange) {
+      return null
+    }
+    const wickValues = collectPriceWicks(points)
+    const center = (priceRange.min + priceRange.max) / 2
+    const baseSpan = Math.max(priceRange.max - priceRange.min, 1)
+    const scaledSpan = Math.max(baseSpan / Math.max(zoomY, 0.1), 1)
+    let min = center - (scaledSpan / 2)
+    let max = center + (scaledSpan / 2)
+    const wickGuard = scaledSpan * 1.25
+    for (const wick of wickValues) {
+      if (wick >= min - wickGuard && wick <= max + wickGuard) {
+        if (wick < min) {
+          min = wick
+        }
+        if (wick > max) {
+          max = wick
+        }
+      }
+    }
+    const adjustedSpan = Math.max(max - min, 1)
+    const padding = Math.max((adjustedSpan * CHART_Y_PADDING_RATIO.price) / Math.max(zoomY, 0.1), 0.25)
+    return {
+      min: center - (adjustedSpan / 2) - padding,
+      max: center + (adjustedSpan / 2) + padding,
+    }
   }
 
   let min = values[0]
@@ -532,7 +615,8 @@ export function buildChartOption(
 ): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
   const range = windowFocusRange(snapshots, windowId, intervalMinutes, focusRange, zoom.x) ?? axisRange(points, intervalMinutes, zoom.x)
-  const valueRange = yAxisRange(chart, points, zoom.y)
+  const visiblePoints = filterPointsInRange(points, range?.min, range?.max)
+  const valueRange = yAxisRange(chart, visiblePoints.length > 0 ? visiblePoints : points, zoom.y)
   const axisLabelFormatter = (value: number) =>
     new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
@@ -605,7 +689,7 @@ export function buildChartOption(
       {
         type: 'inside',
         xAxisIndex: 0,
-        filterMode: 'none',
+        filterMode: 'filter',
       startValue: range?.min,
       endValue: range?.max,
       },
@@ -617,6 +701,7 @@ export function buildChartOption(
         borderColor: '#334155',
         fillerColor: 'rgba(56, 189, 248, 0.2)',
         textStyle: { color: '#cbd5e1' },
+        filterMode: 'filter',
         startValue: range?.min,
         endValue: range?.max,
       },

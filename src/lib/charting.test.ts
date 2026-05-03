@@ -219,6 +219,26 @@ describe('charting', () => {
     expect(center).toBeLessThan(0.2)
   })
 
+  it('keeps price charts focused on the trading range instead of isolated wick outliers', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-sma')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', open: 394.2, high: 394.8, low: 393.9, close: 394.5, smaFast: 394.3, smaSlow: 394.1 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:31:00.000Z', open: 394.4, high: 394.9, low: 379.37, close: 394.7, smaFast: 394.5, smaSlow: 394.2 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:32:00.000Z', open: 394.6, high: 395.2, low: 394.1, close: 394.9, smaFast: 394.7, smaSlow: 394.4 }),
+      ],
+      1,
+      'window-1',
+    )
+
+    const yAxis = option.yAxis as { min?: number; max?: number } | undefined
+    expect(typeof yAxis?.min).toBe('number')
+    expect(typeof yAxis?.max).toBe('number')
+    expect(yAxis?.min ?? 0).toBeGreaterThan(392)
+    expect(yAxis?.max ?? 0).toBeLessThan(397)
+  })
+
   it('respects explicit zoom overrides for the expanded chart modal', () => {
     const chart = marketCharts.find((item) => item.id === 'price-ema')!
     const defaultOption = buildChartOption(
