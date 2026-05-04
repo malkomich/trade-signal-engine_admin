@@ -2561,9 +2561,6 @@ onUnmounted(() => {
           Monitor live windows, tune strategy settings, and inspect signal state
           without coupling the admin UI to market-data logic.
         </p>
-      </div>
-
-      <div class="hero-status-row">
         <label class="timezone-switch">
           <span>Display timezone</span>
           <select v-model="displayTimezone" aria-label="Display timezone">
@@ -2571,6 +2568,9 @@ onUnmounted(() => {
             <option value="local">Local</option>
           </select>
         </label>
+      </div>
+
+      <div class="hero-status-row">
         <div class="hero-status">
           <div class="status-dot"></div>
           <div>
@@ -2656,7 +2656,7 @@ onUnmounted(() => {
                   @click="openNativeDatePicker(decisionDayPickerRef)"
                 >
                   <span>{{ formatMarketDayLabel(selectedMarketDay) }}</span>
-                  <i>📅</i>
+                  <i> 📅</i>
                 </button>
               </div>
               <button
@@ -2912,7 +2912,7 @@ onUnmounted(() => {
                 @click="openNativeDatePicker(windowDayPickerRef)"
               >
                 <span>{{ formatMarketDayLabel(selectedMarketDay) }}</span>
-                <i>📅</i>
+                <i> 📅</i>
               </button>
             </div>
             <button
