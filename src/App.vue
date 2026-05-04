@@ -2637,7 +2637,7 @@ onUnmounted(() => {
         <article class="panel decision-queue-panel">
           <div class="panel-header">
             <h2>Decision queue</h2>
-          <div class="panel-header-actions">
+            <div class="panel-header-actions">
               <div class="day-picker-control">
                 <input
                   ref="decisionDayPickerRef"
@@ -2892,7 +2892,7 @@ onUnmounted(() => {
       <section class="panel two-column">
         <div class="panel-header">
           <h2>Trade windows</h2>
-            <div class="panel-header-actions">
+          <div class="panel-header-actions">
             <span>{{ allWindowReviews.length }} windows</span>
             <div class="day-picker-control">
               <input
