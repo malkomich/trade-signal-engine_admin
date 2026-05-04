@@ -115,6 +115,35 @@ describe('charting', () => {
     expect(markerSeries[0]?.name).toBe('Buy')
   })
 
+  it('recognizes buy and sell aliases in signal markers', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-ema')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({
+          id: 'snapshot-a',
+          windowId: 'window-1',
+          timestamp: '2026-04-24T13:30:00.000Z',
+          signalAction: 'BUY',
+        }),
+        makeSnapshot({
+          id: 'snapshot-b',
+          windowId: 'window-1',
+          timestamp: '2026-04-24T13:35:00.000Z',
+          signalAction: 'SELL',
+        }),
+      ],
+      1,
+      'window-1',
+    )
+
+    const series = option.series as Array<{ type?: string; name?: string }>
+    const markerSeries = series.filter((item) => item.type === 'scatter')
+    expect(markerSeries).toHaveLength(2)
+    expect(markerSeries.map((item) => item.name)).toContain('Buy')
+    expect(markerSeries.map((item) => item.name)).toContain('Sell')
+  })
+
   it('centers the visible range around the selected window duration', () => {
     const chart = marketCharts.find((item) => item.id === 'price-vwap')!
     const option = buildChartOption(
@@ -148,10 +177,33 @@ describe('charting', () => {
       : null
     expect(typeof dataZoom?.startValue).toBe('number')
     expect(typeof dataZoom?.endValue).toBe('number')
-    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeGreaterThanOrEqual(9 * 60 * 1000)
-    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeLessThanOrEqual(12 * 60 * 1000)
+    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeGreaterThanOrEqual(13 * 60 * 1000)
+    expect((dataZoom?.endValue ?? 0) - (dataZoom?.startValue ?? 0)).toBeLessThanOrEqual(17 * 60 * 1000)
     expect(dataZoom?.startValue ?? 0).toBeLessThan(Date.parse('2026-04-24T13:30:00.000Z'))
     expect(dataZoom?.endValue ?? 0).toBeGreaterThan(Date.parse('2026-04-24T13:34:00.000Z'))
+  })
+
+  it('snaps the explicit focus range to the aggregation interval', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-vwap')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({ timestamp: '2026-04-24T13:29:30.000Z', close: 100.1, vwap: 99.9 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:31:30.000Z', close: 100.4, vwap: 100.0 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:33:30.000Z', close: 100.8, vwap: 100.2 }),
+      ],
+      5,
+      'window-1',
+      { start: '2026-04-24T13:29:40.000Z', end: '2026-04-24T13:33:10.000Z' },
+    )
+
+    const dataZoom = Array.isArray(option.dataZoom)
+      ? (option.dataZoom[0] as { startValue?: number; endValue?: number } | undefined)
+      : null
+    expect(typeof dataZoom?.startValue).toBe('number')
+    expect(typeof dataZoom?.endValue).toBe('number')
+    expect((dataZoom?.startValue ?? 0) % (5 * 60 * 1000)).toBe(0)
+    expect((dataZoom?.endValue ?? 0) % (5 * 60 * 1000)).toBe(0)
   })
 
   it('keeps price charts tightly fitted around their actual values', () => {
@@ -190,13 +242,35 @@ describe('charting', () => {
     expect(center).toBeLessThan(0.2)
   })
 
+  it('keeps price charts focused on the trading range instead of isolated wick outliers', () => {
+    const chart = marketCharts.find((item) => item.id === 'price-sma')!
+    const option = buildChartOption(
+      chart,
+      [
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', open: 394.2, high: 394.8, low: 393.9, close: 394.5, smaFast: 394.3, smaSlow: 394.1 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:31:00.000Z', open: 394.4, high: 394.9, low: 379.37, close: 394.7, smaFast: 394.5, smaSlow: 394.2 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:32:00.000Z', open: 394.6, high: 395.2, low: 394.1, close: 394.9, smaFast: 394.7, smaSlow: 394.4 }),
+      ],
+      1,
+      'window-1',
+    )
+
+    const yAxis = option.yAxis as { min?: number; max?: number } | undefined
+    expect(typeof yAxis?.min).toBe('number')
+    expect(typeof yAxis?.max).toBe('number')
+    expect(yAxis?.min ?? 0).toBeGreaterThan(392)
+    expect(yAxis?.max ?? 0).toBeLessThan(397)
+  })
+
   it('respects explicit zoom overrides for the expanded chart modal', () => {
     const chart = marketCharts.find((item) => item.id === 'price-ema')!
     const defaultOption = buildChartOption(
       chart,
       [
-        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', low: 99.8, high: 101.1, close: 100.7 }),
-        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', low: 100.0, high: 101.4, close: 101.0 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', low: 99.8, high: 103.1, close: 100.7 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', low: 100.0, high: 103.4, close: 101.0 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:36:00.000Z', low: 100.5, high: 103.8, close: 102.2 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:38:00.000Z', low: 100.7, high: 104.2, close: 102.7 }),
       ],
       1,
       'window-1',
@@ -204,12 +278,15 @@ describe('charting', () => {
     const zoomedOption = buildChartOption(
       chart,
       [
-        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', low: 99.8, high: 101.1, close: 100.7 }),
-        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', low: 100.0, high: 101.4, close: 101.0 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', low: 99.8, high: 103.1, close: 100.7 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', low: 100.0, high: 103.4, close: 101.0 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:36:00.000Z', low: 100.5, high: 103.8, close: 102.2 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:38:00.000Z', low: 100.7, high: 104.2, close: 102.7 }),
       ],
       1,
       'window-1',
-      { x: 0.7, y: 0.7 },
+      null,
+      { x: 1.4, y: 2.5 },
     )
 
     const defaultRange = Array.isArray(defaultOption.dataZoom)
@@ -231,7 +308,7 @@ describe('charting', () => {
 
   it('applies zoom overrides to histogram charts as well', () => {
     const chart = marketCharts.find((item) => item.id === 'macd')!
-    const option = buildChartOption(
+    const defaultOption = buildChartOption(
       chart,
       [
         makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', macd: 120, macdSignal: 100, macdHistogram: 20 }),
@@ -239,13 +316,28 @@ describe('charting', () => {
       ],
       1,
       'window-1',
-      { x: 1, y: 0.7 },
+    )
+    const zoomedOption = buildChartOption(
+      chart,
+      [
+        makeSnapshot({ timestamp: '2026-04-24T13:30:00.000Z', macd: 120, macdSignal: 100, macdHistogram: 20 }),
+        makeSnapshot({ timestamp: '2026-04-24T13:34:00.000Z', macd: 118, macdSignal: 99, macdHistogram: 19 }),
+      ],
+      1,
+      'window-1',
+      null,
+      { x: 1, y: 1.4 },
     )
 
-    const yAxis = option.yAxis as { min?: number; max?: number } | undefined
-    expect(typeof yAxis?.min).toBe('number')
-    expect(typeof yAxis?.max).toBe('number')
-    expect((yAxis?.max ?? 0)).toBeGreaterThan(100)
+    const defaultYAxis = defaultOption.yAxis as { min?: number; max?: number } | undefined
+    const zoomedYAxis = zoomedOption.yAxis as { min?: number; max?: number } | undefined
+    expect(typeof defaultYAxis?.min).toBe('number')
+    expect(typeof defaultYAxis?.max).toBe('number')
+    expect(typeof zoomedYAxis?.min).toBe('number')
+    expect(typeof zoomedYAxis?.max).toBe('number')
+    expect((zoomedYAxis?.max ?? 0) - (zoomedYAxis?.min ?? 0)).toBeLessThan(
+      (defaultYAxis?.max ?? 0) - (defaultYAxis?.min ?? 0),
+    )
   })
 
   it('applies zoom overrides to oscillator charts as well', () => {
@@ -267,7 +359,8 @@ describe('charting', () => {
       ],
       1,
       'window-1',
-      { x: 1, y: 0.7 },
+      null,
+      { x: 1, y: 1.4 },
     )
 
     const defaultYAxis = defaultOption.yAxis as { min?: number; max?: number } | undefined

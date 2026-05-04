@@ -4,13 +4,15 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { EChartsOption } from 'echarts'
 import type { MarketSnapshotRecord } from '../lib/dashboard'
 import type { ChartDefinition } from '../lib/chart-definitions'
-import { buildChartOption } from '../lib/charting'
+import { buildChartOption, type ChartFocusRange } from '../lib/charting'
 
 const props = defineProps<{
   chart: ChartDefinition
   snapshots: MarketSnapshotRecord[]
   intervalMinutes: 1 | 5 | 10 | 30 | 60
   windowId?: string | null
+  focusRange?: ChartFocusRange | null
+  timeZone?: string | null
   height?: number
   zoom?: {
     x: number
@@ -31,7 +33,9 @@ function renderChart() {
     props.snapshots,
     props.intervalMinutes,
     props.windowId,
+    props.focusRange ?? null,
     props.zoom ?? { x: 1, y: 1 },
+    props.timeZone ?? null,
   )
   chartInstance.setOption(option, true)
 }
@@ -51,7 +55,7 @@ onMounted(() => {
 })
 
 watch(
-  () => [props.chart.id, props.intervalMinutes, props.windowId, props.snapshots, props.zoom?.x, props.zoom?.y],
+  () => [props.chart.id, props.intervalMinutes, props.windowId, props.focusRange?.start, props.focusRange?.end, props.snapshots, props.zoom?.x, props.zoom?.y, props.timeZone],
   () => {
     renderChart()
   },

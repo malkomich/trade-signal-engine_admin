@@ -60,6 +60,7 @@ import {
   type ConfigField,
   type ConfigFieldValue,
   classifySignalTier,
+  operationalSymbols,
   signalTierLegend,
 } from "./lib/engine";
 
@@ -67,6 +68,7 @@ const snapshot = ref<DashboardSnapshot | null>(null);
 const selectedSignal = ref<DashboardSnapshot["selectedSignal"] | null>(null);
 const selectedDecisionSymbol = ref<string>("");
 const selectedMarketDay = ref<string>(currentMarketDayKey());
+const displayTimezone = ref<"local" | "new_york">("new_york");
 const chartIntervalMinutes = ref<1 | 5 | 10 | 30 | 60>(1);
 const marketWindowPage = ref(0);
 const selectedMarketWindowReviewId = ref<string>("");
@@ -90,6 +92,8 @@ const liveSignalPage = ref(0);
 const expandedChartId = ref<string | null>(null);
 const expandedChartZoomX = ref(1);
 const expandedChartZoomY = ref(1);
+const decisionDayPickerRef = ref<HTMLInputElement | null>(null);
+const windowDayPickerRef = ref<HTMLInputElement | null>(null);
 const chartModalCardRef = ref<HTMLElement | null>(null);
 const chartModalCloseButton = ref<HTMLButtonElement | null>(null);
 let selectedSignalCopyTimer: number | null = null;
@@ -122,6 +126,7 @@ const getMarketDayKey = (value: string | Date) =>
 const sessionOverview = computed(
   () => snapshot.value?.sessionOverview ?? emptySessionOverview(),
 );
+const operationalSymbolSet = new Set<string>(operationalSymbols);
 const marketSnapshots = computed(() => snapshot.value?.marketSnapshots ?? []);
 const tradeWindows = computed(() => snapshot.value?.windows ?? []);
 const selectedDaySnapshots = computed(() => {
@@ -157,7 +162,9 @@ const marketSymbols = computed(() => {
     for (const symbol of monitoredSymbols) {
       const normalized = String(symbol).trim().toUpperCase();
       if (normalized) {
-        symbols.add(normalized);
+        if (operationalSymbolSet.has(normalized)) {
+          symbols.add(normalized);
+        }
       }
     }
   }
@@ -170,12 +177,16 @@ const marketSymbols = computed(() => {
     .toUpperCase();
   for (const signal of selectedDaySignals.value) {
     if (signal.symbol && signal.symbol !== benchmarkSymbol) {
-      symbols.add(signal.symbol);
+      if (operationalSymbolSet.has(signal.symbol)) {
+        symbols.add(signal.symbol);
+      }
     }
   }
   for (const snapshotRecord of selectedDaySnapshots.value) {
     if (snapshotRecord.symbol && snapshotRecord.symbol !== benchmarkSymbol) {
-      symbols.add(snapshotRecord.symbol);
+      if (operationalSymbolSet.has(snapshotRecord.symbol)) {
+        symbols.add(snapshotRecord.symbol);
+      }
     }
   }
   for (const window of tradeWindows.value) {
@@ -184,8 +195,8 @@ const marketSymbols = computed(() => {
       (window.closedAt
         ? getMarketDayKey(window.closedAt) === selectedMarketDay.value
         : false)
-    ) {
-      if (window.symbol && window.symbol !== benchmarkSymbol) {
+      ) {
+      if (window.symbol && window.symbol !== benchmarkSymbol && operationalSymbolSet.has(window.symbol)) {
         symbols.add(window.symbol);
       }
     }
@@ -199,7 +210,9 @@ const decisionSymbols = computed(() => {
       continue;
     }
     if (signal.symbol) {
-      symbols.add(signal.symbol);
+      if (operationalSymbolSet.has(signal.symbol)) {
+        symbols.add(signal.symbol);
+      }
     }
   }
   return Array.from(symbols).sort();
@@ -244,13 +257,112 @@ const selectedChartSnapshots = computed(() => {
   if (!review) {
     return [];
   }
-  const timeframeKey = `${chartIntervalMinutes.value}m`;
-  return filterAndSortSnapshots(
-    selectedDaySnapshots.value,
+  const snapshots = selectChartSnapshotsForDisplay(
+    selectedDaySnapshots.value.length > 0
+      ? selectedDaySnapshots.value
+      : findWindowSnapshots(review),
     review.symbol,
-    timeframeKey,
   );
+  const augmentedSnapshots = snapshots.slice();
+  const attachWindowSignal = (
+    snapshot: MarketSnapshotRecord | null | undefined,
+    signalAction: "BUY_ALERT" | "SELL_ALERT",
+  ) => {
+    if (!snapshot) {
+      return;
+    }
+    const normalizedAction = (snapshot.signalAction ?? "").trim().toUpperCase();
+    const actionAliases =
+      signalAction === "BUY_ALERT"
+        ? new Set(["BUY_ALERT", "BUY", "ACCEPT", "ENTRY_SIGNALLED"])
+        : new Set(["SELL_ALERT", "SELL", "EXIT", "EXIT_SIGNALLED"]);
+    if (actionAliases.has(normalizedAction)) {
+      return;
+    }
+    augmentedSnapshots.push({
+      ...snapshot,
+      signalAction,
+      signalState:
+        snapshot.signalState ||
+        (signalAction === "BUY_ALERT" ? "ENTRY_SIGNALLED" : "EXIT_SIGNALLED"),
+      id: `${snapshot.id}:${signalAction}`,
+      windowId: snapshot.windowId || review.id,
+    });
+  };
+  attachWindowSignal(review.buySnapshot, "BUY_ALERT");
+  attachWindowSignal(review.sellSnapshot, "SELL_ALERT");
+  return augmentedSnapshots.sort((left, right) => {
+    return compareSnapshotsByTimestampAndId(left, right);
+  });
 });
+const selectedWindowFocusRange = computed(() => {
+  const review = selectedWindowReview.value;
+  if (!review) {
+    return null;
+  }
+  const start =
+    review.openedAt ??
+    review.buySnapshot?.timestamp ??
+    review.lastSignalAt ??
+    null;
+  const end =
+    review.closedAt ??
+    review.sellSnapshot?.timestamp ??
+    review.lastSignalAt ??
+    new Date(dashboardClock.value).toISOString();
+  if (!start) {
+    return null;
+  }
+  return { start, end };
+});
+
+function parseTimeframeMinutes(value: string | null | undefined) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+  const exactMatch = /^(\d+)\s*(m|min|minutes?)$/.exec(raw);
+  if (exactMatch) {
+    return Number(exactMatch[1]);
+  }
+  const hourMatch = /^(\d+)\s*(h|hr|hour|hours?)$/.exec(raw);
+  if (hourMatch) {
+    return Number(hourMatch[1]) * 60;
+  }
+  return null;
+}
+
+function selectChartSnapshotsForDisplay(
+  snapshots: MarketSnapshotRecord[],
+  symbol: string,
+) {
+  const available = new Map<number, MarketSnapshotRecord[]>();
+  for (const snapshot of snapshots) {
+    if (snapshot.symbol !== symbol) {
+      continue;
+    }
+    const timeframeMinutes = parseTimeframeMinutes(snapshot.timeframe ?? "1m");
+    if (timeframeMinutes === null) {
+      continue;
+    }
+    const bucket = available.get(timeframeMinutes) ?? [];
+    bucket.push(snapshot);
+    available.set(timeframeMinutes, bucket);
+  }
+
+  if (available.size === 0) {
+    return filterAndSortSnapshots(snapshots, symbol, "1m");
+  }
+
+  const preferredTimeframe =
+    [1, 5, 10, 15, 30, 60].find((timeframe) => available.has(timeframe)) ??
+    [...available.keys()].sort((left, right) => left - right)[0];
+  const preferredSnapshots =
+    preferredTimeframe === undefined ? [] : available.get(preferredTimeframe) ?? [];
+  return preferredSnapshots
+    .slice()
+    .sort(compareSnapshotsByTimestampAndId);
+}
 
 function filterAndSortSnapshots(
   snapshots: MarketSnapshotRecord[],
@@ -261,14 +373,19 @@ function filterAndSortSnapshots(
     .filter((snapshot) => snapshot.symbol === symbol)
     .filter((snapshot) => (snapshot.timeframe || '1m').trim().toLowerCase() === timeframe)
     .slice()
-    .sort((left, right) => {
-      const leftTimestamp = Date.parse(left.timestamp);
-      const rightTimestamp = Date.parse(right.timestamp);
-      if (leftTimestamp !== rightTimestamp) {
-        return leftTimestamp - rightTimestamp;
-      }
-      return left.id.localeCompare(right.id);
-    });
+    .sort(compareSnapshotsByTimestampAndId);
+}
+
+function compareSnapshotsByTimestampAndId(
+  left: MarketSnapshotRecord,
+  right: MarketSnapshotRecord,
+) {
+  const leftTimestamp = Date.parse(left.timestamp);
+  const rightTimestamp = Date.parse(right.timestamp);
+  if (leftTimestamp !== rightTimestamp) {
+    return leftTimestamp - rightTimestamp;
+  }
+  return left.id.localeCompare(right.id);
 }
 const chartGroups = marketChartGroups;
 const marketLedgerPageSize = 12;
@@ -426,6 +543,48 @@ const canCopySelectedSignalId = computed(() => {
 const selectedSignalTierMeta = computed(() =>
   signalMetaForSignal(selectedSignal.value),
 );
+const selectedSignalSide = computed(() =>
+  selectedSignal.value ? classifySignal(selectedSignal.value) : "hold",
+);
+const selectedSignalPrice = computed(() => {
+  const signalSide = selectedSignalSide.value;
+  const review = selectedSignalWindowReview.value;
+  if (!review) {
+    return null;
+  }
+  if (signalSide === "sell") {
+    return review.exitPrice ?? review.sellSnapshot?.close ?? review.entryPrice;
+  }
+  if (signalSide === "buy") {
+    return review.entryPrice ?? review.buySnapshot?.close ?? review.exitPrice;
+  }
+  return review.entryPrice ?? review.exitPrice ?? null;
+});
+const selectedSignalBadge = computed(() => {
+  const signalSide = selectedSignalSide.value;
+  if (signalSide === "buy") {
+    return {
+      label: "Buy",
+      emoji: "🟢",
+      tone: "buy",
+    };
+  }
+  if (signalSide === "sell") {
+    return {
+      label: "Sell",
+      emoji: "🔴",
+      tone: "sell",
+    };
+  }
+  return {
+    label: "Signal",
+    emoji: "⚪",
+    tone: "neutral",
+  };
+});
+const selectedDisplayTimeZoneValue = computed(() =>
+  displayTimezone.value === "new_york" ? "America/New_York" : undefined,
+);
 const selectedWindowReviews = computed(() => {
   const start = windowReviewPage.value * windowReviewPageSize;
   const end = start + windowReviewPageSize;
@@ -549,7 +708,7 @@ function formatSignalStateLabel(state: string) {
     case "ENTRY_SIGNALLED":
       return "Buy";
     case "ACCEPTED_OPEN":
-      return "Buy window open";
+      return "Buy";
     case "EXIT_SIGNALLED":
       return "Sell";
     case "CLOSED":
@@ -658,14 +817,26 @@ function humanizeReason(reason: string) {
   if (trimmed === "live market session") {
     return "Live market context";
   }
-  if (trimmed === "market context aligned") {
-    return "Benchmark confirms the move";
-  }
-  if (trimmed === "market context under pressure") {
-    return "Benchmark is under pressure";
-  }
-  if (trimmed === "mixed market context") {
-    return "Benchmark context is mixed";
+  const reasonMap: Record<string, string> = {
+    "trend:vwap-aligned": "Price is aligned with VWAP",
+    "trend:ema-aligned": "EMA trend is aligned",
+    "trend:sma-aligned": "SMA trend is aligned",
+    "flow:relative-volume-confirmed": "Relative volume confirms participation",
+    "flow:obv-positive": "OBV supports the move",
+    "flow:volume-profile-supportive": "Volume profile supports the move",
+    "momentum:rsi-healthy": "RSI sits in a healthier buy zone",
+    "momentum:macd-positive": "MACD momentum is supportive",
+    "momentum:stochastic-rising": "Stochastic is turning in the right direction",
+    "volatility:range-expanding": "Volatility is expanding",
+    "volatility:above-bollinger-mid": "Price is above the Bollinger midline",
+    "strength:adx-supportive": "ADX confirms trend strength",
+    "strength:directional-pressure": "Directional pressure is positive",
+    "market context aligned": "Benchmark confirms the move",
+    "market context under pressure": "Benchmark is under pressure",
+    "mixed market context": "Benchmark context is mixed",
+  };
+  if (trimmed in reasonMap) {
+    return reasonMap[trimmed];
   }
   const benchmarkMatch =
     /^([A-Z]{1,6})\s+(market context aligned|market context under pressure|mixed market context)$/.exec(
@@ -681,6 +852,9 @@ function humanizeReason(reason: string) {
     }
     return "Benchmark context is mixed";
   }
+  if (trimmed.startsWith("buy-tier:")) {
+    return `Signal tier: ${trimmed.replace("buy-tier:", "").replace(/_/g, " ")}`;
+  }
   if (trimmed.includes("market context")) {
     return trimmed.replace(/-/g, " ");
   }
@@ -689,6 +863,21 @@ function humanizeReason(reason: string) {
     return `${timeframeMatch[1]} timeframe · ${timeframeMatch[2].replace(/-/g, " ").trim()}`;
   }
   return trimmed.replace(/-/g, " ");
+}
+
+function openNativeDatePicker(input: HTMLInputElement | null) {
+  if (!input) {
+    return;
+  }
+  if (typeof input.showPicker === "function") {
+    try {
+      input.showPicker();
+      return;
+    } catch {
+      // Fallback to the native click path below when the browser blocks showPicker().
+    }
+  }
+  input.click();
 }
 
 function syncSelectedDecisionSymbol(symbols: string[]) {
@@ -1021,6 +1210,7 @@ function formatLocaleTimestamp(value: string | null | undefined) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "medium",
+    timeZone: selectedDisplayTimeZoneValue.value ?? undefined,
   }).format(parsed);
 }
 
@@ -1236,11 +1426,11 @@ function buildSignalDrivers(
     const aboveVwap = snapshot.close >= snapshot.vwap;
     const vwapValue = isBuy
       ? aboveVwap
-        ? "Price above VWAP"
-        : "Price below VWAP"
+        ? "Price reclaimed and holds above VWAP"
+        : "Price is still below VWAP"
       : aboveVwap
-        ? "Price extended above VWAP"
-        : "VWAP lost";
+        ? "Price is stretched above VWAP"
+        : "VWAP has been lost";
     drivers.push({
       label: "VWAP context",
       value: vwapValue,
@@ -1252,14 +1442,14 @@ function buildSignalDrivers(
     const aligned = snapshot.emaFast >= snapshot.emaSlow;
     drivers.push({
       label: "EMA stack",
-      value: aligned ? "Fast EMA above slow EMA" : "Fast EMA below slow EMA",
+      value: aligned ? "Fast EMA leads the slow EMA" : "Fast EMA is below the slow EMA",
       tone: aligned ? "bullish" : "bearish",
     });
   }
 
   if (snapshot.rsi !== null) {
-    const healthyBuy = snapshot.rsi >= 50 && snapshot.rsi <= 68;
-    const stretchedSell = snapshot.rsi >= 68 || snapshot.rsi <= 35;
+    const healthyBuy = snapshot.rsi <= 35;
+    const stretchedSell = snapshot.rsi >= 70;
     drivers.push({
       label: "RSI momentum",
       value: `RSI ${snapshot.rsi.toFixed(1)}`,
@@ -1271,7 +1461,9 @@ function buildSignalDrivers(
     const bullishMacd = snapshot.macd >= snapshot.macdSignal && snapshot.macdHistogram >= 0;
     drivers.push({
       label: "MACD impulse",
-      value: bullishMacd ? "Momentum expanding" : "Momentum fading",
+      value: bullishMacd
+        ? "MACD is above signal and momentum is expanding"
+        : "MACD is below signal and momentum is fading",
       tone: bullishMacd ? "bullish" : "bearish",
     });
   }
@@ -1287,8 +1479,8 @@ function buildSignalDrivers(
       value: snapshot.obv === null
         ? "OBV unavailable"
         : volumeConfirmed
-          ? "Participation supports move"
-          : "Participation weak",
+          ? "Participation confirms the move"
+          : "Participation is still weak",
       tone: snapshot.obv === null ? "neutral" : volumeConfirmed ? "bullish" : "bearish",
     });
   }
@@ -1297,7 +1489,7 @@ function buildSignalDrivers(
     const bullishTrend = snapshot.plusDi >= snapshot.minusDi && snapshot.adx >= 20;
     drivers.push({
       label: "Trend strength",
-      value: bullishTrend ? "Trend structure intact" : "Trend structure weak",
+      value: bullishTrend ? "Directional trend remains intact" : "Directional trend is weak",
       tone: bullishTrend ? "bullish" : "bearish",
     });
   }
@@ -1306,7 +1498,7 @@ function buildSignalDrivers(
     const bullishBollinger = snapshot.close >= snapshot.bollingerMiddle;
     drivers.push({
       label: "Bollinger context",
-      value: bullishBollinger ? "Above middle band" : "Below middle band",
+      value: bullishBollinger ? "Price is above the Bollinger midline" : "Price is below the Bollinger midline",
       tone: bullishBollinger ? "bullish" : "bearish",
     });
   }
@@ -2369,11 +2561,19 @@ onUnmounted(() => {
           Monitor live windows, tune strategy settings, and inspect signal state
           without coupling the admin UI to market-data logic.
         </p>
+        <label class="timezone-switch">
+          <span>Display timezone</span>
+          <select v-model="displayTimezone" aria-label="Display timezone">
+            <option value="new_york">New York</option>
+            <option value="local">Local</option>
+          </select>
+        </label>
       </div>
 
-      <div class="hero-status">
-        <span class="status-dot"></span>
-        <div>
+      <div class="hero-status-row">
+        <div class="hero-status">
+          <div class="status-dot"></div>
+          <div>
           <strong>{{ sourceDisplay.title }}</strong>
           <p>{{ sourceDisplay.description }}</p>
           <p>
@@ -2414,6 +2614,7 @@ onUnmounted(() => {
                 : "Enable live notifications"
             }}
           </button>
+          </div>
         </div>
       </div>
     </section>
@@ -2437,14 +2638,27 @@ onUnmounted(() => {
           <div class="panel-header">
             <h2>Decision queue</h2>
             <div class="panel-header-actions">
-              <input
-                v-model="selectedMarketDay"
-                type="date"
-                class="day-picker"
-                :max="currentMarketDayKey()"
-                :aria-label="`Decision day ${formatMarketDayLabel(selectedMarketDay)}`"
-                :title="`Select decision day · ${formatMarketDayLabel(selectedMarketDay)}`"
-              />
+              <div class="day-picker-control">
+                <input
+                  ref="decisionDayPickerRef"
+                  v-model="selectedMarketDay"
+                  type="date"
+                  class="day-picker-native"
+                  :max="currentMarketDayKey()"
+                  aria-hidden="true"
+                  tabindex="-1"
+                />
+                <button
+                  type="button"
+                  class="day-picker day-picker-button"
+                  :aria-label="`Decision day ${formatMarketDayLabel(selectedMarketDay)}`"
+                  :title="`Select decision day · ${formatMarketDayLabel(selectedMarketDay)}`"
+                  @click="openNativeDatePicker(decisionDayPickerRef)"
+                >
+                  <span>{{ formatMarketDayLabel(selectedMarketDay) }}</span>
+                  <i> 📅</i>
+                </button>
+              </div>
               <button
                 type="button"
                 class="action-button ghost compact"
@@ -2549,7 +2763,11 @@ onUnmounted(() => {
               v-for="row in triagePageSignalRows"
               :key="signalKey(row.signal)"
               class="signal-row"
-              :class="[classifySignal(row.signal), row.meta?.tier ?? '']"
+              :class="[
+                classifySignal(row.signal),
+                row.meta?.tier ?? '',
+                { active: selectedSignal?.id === row.signal.id },
+              ]"
               @click="setSelectedSignal(row.signal)"
             >
               <div>
@@ -2609,9 +2827,18 @@ onUnmounted(() => {
           </div>
           <div class="detail-card" v-if="selectedSignal">
             <div class="detail-title">
-              <strong>{{
-                formatSignalStateLabel(selectedSignal.state)
-              }}</strong>
+              <div class="selected-signal-headline">
+                <span
+                  class="signal-action-pill"
+                  :class="selectedSignalBadge.tone"
+                >
+                  <i>{{ selectedSignalBadge.emoji }}</i>
+                  {{ selectedSignalBadge.label }}
+                </span>
+                <span v-if="selectedSignalPrice !== null" class="signal-price-pill">
+                  Price {{ selectedSignalPrice.toFixed(2) }}
+                </span>
+              </div>
               <span
                 >Updated
                 {{ formatLocaleTimestamp(selectedSignal.updatedAt) }}</span
@@ -2667,14 +2894,27 @@ onUnmounted(() => {
           <h2>Trade windows</h2>
           <div class="panel-header-actions">
             <span>{{ allWindowReviews.length }} windows</span>
-            <input
-              v-model="selectedMarketDay"
-              type="date"
-              class="day-picker"
-              :max="currentMarketDayKey()"
-              :aria-label="`Trade window day ${formatMarketDayLabel(selectedMarketDay)}`"
-              :title="`Select trade window day · ${formatMarketDayLabel(selectedMarketDay)}`"
-            />
+            <div class="day-picker-control">
+              <input
+                ref="windowDayPickerRef"
+                v-model="selectedMarketDay"
+                type="date"
+                class="day-picker-native"
+                :max="currentMarketDayKey()"
+                aria-hidden="true"
+                tabindex="-1"
+              />
+              <button
+                type="button"
+                class="day-picker day-picker-button"
+                :aria-label="`Trade window day ${formatMarketDayLabel(selectedMarketDay)}`"
+                :title="`Select trade window day · ${formatMarketDayLabel(selectedMarketDay)}`"
+                @click="openNativeDatePicker(windowDayPickerRef)"
+              >
+                <span>{{ formatMarketDayLabel(selectedMarketDay) }}</span>
+                <i> 📅</i>
+              </button>
+            </div>
             <button
               type="button"
               class="action-button ghost compact"
@@ -2887,9 +3127,9 @@ onUnmounted(() => {
       </section>
 
       <section class="panel">
-        <div class="panel-header">
-          <div>
-            <h2>Live market charts</h2>
+          <div class="panel-header">
+            <div>
+              <h2>Live market charts</h2>
             <p>
               {{
                 selectedWindowReview
@@ -2897,9 +3137,9 @@ onUnmounted(() => {
                   : "Select a trade window to inspect its charts."
               }}
             </p>
-          </div>
-          <div class="panel-header-actions">
-            <div class="chart-global-legend" aria-label="Signal legend">
+            </div>
+            <div class="panel-header-actions">
+              <div class="chart-global-legend" aria-label="Signal legend">
               <span class="legend-chip" title="Buy signals are highlighted in green."><i class="buy"></i>Buy</span>
               <span class="legend-chip" title="Sell signals are highlighted in red."><i class="sell"></i>Sell</span>
             </div>
@@ -2977,12 +3217,14 @@ onUnmounted(() => {
                     </div>
                   </div>
                   <MarketChart
-                    :chart="chart"
-                    :snapshots="selectedChartSnapshots"
-                    :interval-minutes="chartIntervalMinutes"
-                    :window-id="selectedWindowReview?.id ?? null"
-                    :height="320"
-                  />
+                  :chart="chart"
+                  :snapshots="selectedChartSnapshots"
+                  :interval-minutes="chartIntervalMinutes"
+                  :window-id="selectedWindowReview?.id ?? null"
+                  :focus-range="selectedWindowFocusRange"
+                  :time-zone="selectedDisplayTimeZoneValue"
+                  :height="320"
+                />
                 </article>
               </div>
             </Transition>
@@ -3228,8 +3470,8 @@ onUnmounted(() => {
               <input
                 v-model.number="expandedChartZoomX"
                 type="range"
-                min="0.55"
-                max="1.75"
+                min="0.4"
+                max="2.5"
                 step="0.05"
               />
               <strong>{{ Math.round(expandedChartZoomX * 100) }}%</strong>
@@ -3239,8 +3481,8 @@ onUnmounted(() => {
               <input
                 v-model.number="expandedChartZoomY"
                 type="range"
-                min="0.55"
-                max="1.75"
+                min="0.4"
+                max="2.5"
                 step="0.05"
               />
               <strong>{{ Math.round(expandedChartZoomY * 100) }}%</strong>
@@ -3251,6 +3493,8 @@ onUnmounted(() => {
             :snapshots="selectedChartSnapshots"
             :interval-minutes="chartIntervalMinutes"
             :window-id="selectedWindowReview?.id ?? null"
+            :focus-range="selectedWindowFocusRange"
+            :time-zone="selectedDisplayTimeZoneValue"
             :zoom="{ x: expandedChartZoomX, y: expandedChartZoomY }"
             :height="640"
           />

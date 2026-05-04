@@ -23,20 +23,27 @@ export type ChartZoom = {
   y: number
 }
 
+export type ChartFocusRange = {
+  start: string
+  end?: string | null
+}
+
 const CHART_AXIS_MIN_PADDING_RATIO = 0.06
 const CHART_AXIS_MIN_PADDING_INTERVAL_MULTIPLIER = 1.5
 const CHART_AXIS_MIN_DURATION_MS = 5 * 60 * 1000
 const CHART_AXIS_FOCUS_MULTIPLIERS = [
-  { maxDurationMs: 5 * 60 * 1000, visibleSpanMs: 10 * 60 * 1000 },
-  { maxDurationMs: 15 * 60 * 1000, visibleSpanMs: 18 * 60 * 1000 },
-  { maxDurationMs: 30 * 60 * 1000, visibleSpanMs: 30 * 60 * 1000 },
-  { maxDurationMs: 60 * 60 * 1000, visibleSpanMs: 60 * 60 * 1000 },
+  { maxDurationMs: 5 * 60 * 1000, visibleSpanMs: 15 * 60 * 1000 },
+  { maxDurationMs: 15 * 60 * 1000, visibleSpanMs: 30 * 60 * 1000 },
+  { maxDurationMs: 30 * 60 * 1000, visibleSpanMs: 60 * 60 * 1000 },
+  { maxDurationMs: 60 * 60 * 1000, visibleSpanMs: 90 * 60 * 1000 },
 ] as const
 const CHART_Y_PADDING_RATIO = {
   price: 0.035,
   line: 0.055,
   histogram: 0.08,
 } as const
+const CHART_PRICE_WICK_PADDING_RATIO = 0.25
+const CHART_PRICE_RANGE_TRIM_RATIO = 0.2
 const OSCILLATOR_Y_PADDING = 2.5
 
 function parseTimestamp(value: string) {
@@ -54,6 +61,29 @@ function formatTooltipValue(value: number | null, decimals = 2) {
     return '--'
   }
   return value.toFixed(decimals)
+}
+
+function formatTimestamp(value: number, timeZone?: string | null) {
+  const formatOptions: Intl.DateTimeFormatOptions = {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }
+  if (timeZone) {
+    formatOptions.timeZone = timeZone
+  }
+  return new Intl.DateTimeFormat(undefined, formatOptions).format(new Date(value))
+}
+
+function formatAxisTimestamp(value: number, timeZone?: string | null) {
+  const formatOptions: Intl.DateTimeFormatOptions = {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }
+  if (timeZone) {
+    formatOptions.timeZone = timeZone
+  }
+  return new Intl.DateTimeFormat(undefined, formatOptions).format(new Date(value))
 }
 
 function escapeHtml(value: string) {
@@ -239,7 +269,8 @@ function axisRange(points: AggregatedSnapshot[], intervalMinutes: number, zoomX 
     span * CHART_AXIS_MIN_PADDING_RATIO,
     intervalMinutes * 60 * 1000 * CHART_AXIS_MIN_PADDING_INTERVAL_MULTIPLIER,
   )
-  const visibleSpan = Math.max(span + (padding * 2), intervalMinutes * 60 * 1000 * 4) * Math.max(zoomX, 0.1)
+  const zoomScale = Math.max(zoomX, 0.1)
+  const visibleSpan = Math.max(span + (padding * 2), intervalMinutes * 60 * 1000 * 4) / zoomScale
   const center = min + (span / 2)
   return {
     min: center - (visibleSpan / 2),
@@ -249,8 +280,34 @@ function axisRange(points: AggregatedSnapshot[], intervalMinutes: number, zoomX 
 
 function visibleSpanForDuration(durationMs: number, zoomX = 1) {
   const preset = CHART_AXIS_FOCUS_MULTIPLIERS.find((item) => durationMs <= item.maxDurationMs)
-  const baseVisibleSpan = preset ? preset.visibleSpanMs : Math.max(durationMs * 1.5, 75 * 60 * 1000)
-  return Math.max(baseVisibleSpan * Math.max(zoomX, 0.1), CHART_AXIS_MIN_DURATION_MS)
+  const baseVisibleSpan = preset ? preset.visibleSpanMs : Math.max(durationMs * 1.2, 90 * 60 * 1000)
+  return Math.max(baseVisibleSpan / Math.max(zoomX, 0.1), durationMs, CHART_AXIS_MIN_DURATION_MS)
+}
+
+function snapRangeToInterval(min: number, max: number, intervalMinutes: number) {
+  const intervalMs = Math.max(intervalMinutes, 1) * 60 * 1000
+  const snappedMin = Math.floor(min / intervalMs) * intervalMs
+  const snappedMax = Math.ceil(max / intervalMs) * intervalMs
+  if (snappedMax <= snappedMin) {
+    return {
+      min: snappedMin,
+      max: snappedMin + intervalMs,
+    }
+  }
+  return {
+    min: snappedMin,
+    max: snappedMax,
+  }
+}
+
+function isBuySignalAction(action: string | null | undefined) {
+  const normalized = action?.trim().toUpperCase()
+  return normalized === 'BUY_ALERT' || normalized === 'BUY' || normalized === 'ACCEPT'
+}
+
+function isSellSignalAction(action: string | null | undefined) {
+  const normalized = action?.trim().toUpperCase()
+  return normalized === 'SELL_ALERT' || normalized === 'SELL' || normalized === 'EXIT'
 }
 
 function signalMarkerSeries(
@@ -263,10 +320,10 @@ function signalMarkerSeries(
       if (windowId && snapshot.windowId !== windowId) {
         return false
       }
-      return snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' || snapshot.signalAction?.toUpperCase() === 'SELL_ALERT'
+      return isBuySignalAction(snapshot.signalAction) || isSellSignalAction(snapshot.signalAction)
     })
     .map((snapshot) => ({
-      kind: snapshot.signalAction?.toUpperCase() === 'BUY_ALERT' ? 'buy' : 'sell',
+      kind: isBuySignalAction(snapshot.signalAction) ? 'buy' : 'sell',
       snapshot,
     }))
 
@@ -350,7 +407,7 @@ function histogramSeries(series: ChartSeries, points: AggregatedSnapshot[]): Ser
   } satisfies SeriesOption
 }
 
-function buildTooltipFormatter(chart: ChartDefinition) {
+function buildTooltipFormatter(chart: ChartDefinition, timeZone?: string | null) {
   return (params: unknown) => {
     const items = Array.isArray(params) ? params : [params]
     const first = items[0] as { axisValue?: number; data?: unknown } | undefined
@@ -388,9 +445,7 @@ function buildTooltipFormatter(chart: ChartDefinition) {
     }
 
     const title = signalLabel ? `${signalLabel} signal` : chart.title
-    const timeLabel = timestamp
-      ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(timestamp))
-      : 'Current value'
+    const timeLabel = timestamp ? formatTimestamp(timestamp, timeZone) : 'Current value'
     return `
       <div class="chart-tooltip">
         <div class="chart-tooltip__title">${escapeHtml(title)}</div>
@@ -407,8 +462,29 @@ function windowFocusRange(
   records: MarketSnapshotRecord[],
   windowId: string | null | undefined,
   intervalMinutes: number,
+  focusRange: ChartFocusRange | null | undefined,
   zoomX = 1,
 ) {
+  if (focusRange?.start) {
+    const start = parseTimestamp(focusRange.start)
+    if (start !== null) {
+      const end = focusRange.end ? parseTimestamp(focusRange.end) : start
+      const focusEnd = end !== null ? Math.max(end, start) : start
+      const duration = Math.max(focusEnd - start, intervalMinutes * 60 * 1000)
+      if (duration > 15 * 60 * 1000) {
+        const padding = Math.max(duration * 0.12, intervalMinutes * 60 * 1000)
+        return snapRangeToInterval(start - padding, focusEnd + padding, intervalMinutes)
+      }
+      const paddedDuration = duration + Math.max(duration * 0.1, 30 * 1000)
+      const visibleSpan = visibleSpanForDuration(paddedDuration, zoomX)
+      const center = start + (duration / 2)
+      return snapRangeToInterval(
+        center - (visibleSpan / 2),
+        center + (visibleSpan / 2),
+        intervalMinutes,
+      )
+    }
+  }
   if (!windowId) {
     return null
   }
@@ -431,19 +507,30 @@ function windowFocusRange(
     }
   }
   const duration = Math.max(max - min, intervalMinutes * 60 * 1000)
-  const visibleSpan = visibleSpanForDuration(duration, zoomX)
+  const paddedDuration = duration + Math.max(duration * 0.1, 30 * 1000)
+  const visibleSpan = visibleSpanForDuration(paddedDuration, zoomX)
   const center = min + (duration / 2)
-  return {
-    min: center - (visibleSpan / 2),
-    max: center + (visibleSpan / 2),
+  return snapRangeToInterval(
+    center - (visibleSpan / 2),
+    center + (visibleSpan / 2),
+    intervalMinutes,
+  )
+}
+
+function filterPointsInRange(points: AggregatedSnapshot[], min: number | undefined, max: number | undefined) {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return points
   }
+  const rangeMin = min as number
+  const rangeMax = max as number
+  return points.filter((point) => point.timestamp >= rangeMin && point.timestamp <= rangeMax)
 }
 
 function collectChartValues(chart: ChartDefinition, points: AggregatedSnapshot[]) {
   const values: number[] = []
   for (const point of points) {
     if (chart.kind === 'price') {
-      values.push(point.open, point.high, point.low, point.close)
+      values.push(point.close)
     }
     for (const series of chart.series) {
       const value = point.values[series.key]
@@ -455,10 +542,80 @@ function collectChartValues(chart: ChartDefinition, points: AggregatedSnapshot[]
   return values
 }
 
+function collectPriceWicks(points: AggregatedSnapshot[]) {
+  const values: number[] = []
+  for (const point of points) {
+    values.push(point.high, point.low)
+  }
+  return values.filter((value) => Number.isFinite(value))
+}
+
+function buildRobustRange(values: number[]) {
+  if (values.length === 0) {
+    return null
+  }
+  if (values.length < 6) {
+    let min = values[0]
+    let max = values[0]
+    for (let index = 1; index < values.length; index += 1) {
+      const value = values[index]
+      if (value < min) {
+        min = value
+      }
+      if (value > max) {
+        max = value
+      }
+    }
+    return { min, max }
+  }
+
+  const sorted = [...values].sort((left, right) => left - right)
+  const lowerIndex = Math.floor((sorted.length - 1) * CHART_PRICE_RANGE_TRIM_RATIO)
+  const upperIndex = Math.ceil((sorted.length - 1) * (1 - CHART_PRICE_RANGE_TRIM_RATIO))
+  const lower = sorted[Math.max(0, Math.min(lowerIndex, sorted.length - 1))]
+  const upper = sorted[Math.max(0, Math.min(upperIndex, sorted.length - 1))]
+  const span = Math.max(upper - lower, 1)
+  const padding = Math.max(span * CHART_PRICE_WICK_PADDING_RATIO, 0.25)
+  return {
+    min: lower - padding,
+    max: upper + padding,
+  }
+}
+
 function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY = 1) {
   const values = collectChartValues(chart, points)
   if (values.length === 0) {
     return null
+  }
+
+  if (chart.kind === 'price') {
+    const priceRange = buildRobustRange(values)
+    if (!priceRange) {
+      return null
+    }
+    const wickValues = collectPriceWicks(points)
+    let min = priceRange.min
+    let max = priceRange.max
+    const baseSpan = Math.max(max - min, 1)
+    const wickGuard = baseSpan * 1.25
+    for (const wick of wickValues) {
+      if (wick >= min - wickGuard && wick <= max + wickGuard) {
+        if (wick < min) {
+          min = wick
+        }
+        if (wick > max) {
+          max = wick
+        }
+      }
+    }
+    const adjustedSpan = Math.max(max - min, 1)
+    const scaledSpan = Math.max(adjustedSpan / Math.max(zoomY, 0.1), 1)
+    const center = (min + max) / 2
+    const padding = Math.max((adjustedSpan * CHART_Y_PADDING_RATIO.price) / Math.max(zoomY, 0.1), 0.1)
+    return {
+      min: min - padding,
+      max: max + padding,
+    }
   }
 
   let min = values[0]
@@ -474,7 +631,7 @@ function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY 
   }
 
   if (chart.kind === 'oscillator') {
-    const padding = OSCILLATOR_Y_PADDING * Math.max(zoomY, 0.1)
+    const padding = OSCILLATOR_Y_PADDING / Math.max(zoomY, 0.1)
     const lower = Math.min(min, 0) - padding
     const upper = Math.max(max, 100) + padding
     return { min: lower, max: upper }
@@ -483,7 +640,7 @@ function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY 
   const actualSpan = max - min
   const span = Math.max(actualSpan, 1)
   const kindPadding = CHART_Y_PADDING_RATIO[chart.kind]
-  const padding = Math.max(span * kindPadding * Math.max(zoomY, 0.1), span * 0.02)
+  const padding = Math.max(span * kindPadding / Math.max(zoomY, 0.1), span * 0.02)
   const center = (min + max) / 2
   return {
     min: center - (span / 2) - padding,
@@ -496,17 +653,15 @@ export function buildChartOption(
   snapshots: MarketSnapshotRecord[],
   intervalMinutes: number,
   windowId?: string | null,
+  focusRange?: ChartFocusRange | null,
   zoom: ChartZoom = { x: 1, y: 1 },
+  timeZone?: string | null,
 ): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
-  const range = windowFocusRange(snapshots, windowId, intervalMinutes, zoom.x) ?? axisRange(points, intervalMinutes, zoom.x)
-  const valueRange = yAxisRange(chart, points, zoom.y)
-  const axisLabelFormatter = (value: number) =>
-    new Intl.DateTimeFormat(undefined, {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(new Date(value))
+  const range = windowFocusRange(snapshots, windowId, intervalMinutes, focusRange, zoom.x) ?? axisRange(points, intervalMinutes, zoom.x)
+  const visiblePoints = filterPointsInRange(points, range?.min, range?.max)
+  const valueRange = yAxisRange(chart, visiblePoints.length > 0 ? visiblePoints : points, zoom.y)
+  const axisLabelFormatter = (value: number) => formatAxisTimestamp(value, timeZone)
 
   if (points.length === 0) {
     return {
@@ -535,7 +690,7 @@ export function buildChartOption(
       textStyle: { color: '#e2e8f0' },
       confine: true,
       extraCssText: 'border-radius: 12px; padding: 0;',
-      formatter: buildTooltipFormatter(chart),
+      formatter: buildTooltipFormatter(chart, timeZone),
     },
     legend: { show: false },
     xAxis: {
@@ -573,7 +728,7 @@ export function buildChartOption(
       {
         type: 'inside',
         xAxisIndex: 0,
-        filterMode: 'none',
+        filterMode: 'filter',
       startValue: range?.min,
       endValue: range?.max,
       },
@@ -585,6 +740,7 @@ export function buildChartOption(
         borderColor: '#334155',
         fillerColor: 'rgba(56, 189, 248, 0.2)',
         textStyle: { color: '#cbd5e1' },
+        filterMode: 'filter',
         startValue: range?.min,
         endValue: range?.max,
       },
