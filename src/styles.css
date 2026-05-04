@@ -84,6 +84,32 @@ h1 {
   padding: 18px 20px;
 }
 
+.hero-status-topline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.timezone-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #cbd5e1;
+  font-size: 0.82rem;
+}
+
+.timezone-switch select {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.8);
+  color: #e2e8f0;
+  padding: 8px 12px;
+  font: inherit;
+}
+
 .hero-status button {
   margin-top: 12px;
 }
@@ -618,7 +644,10 @@ h1 {
 
 .ledger-row.active {
   border-color: rgba(125, 211, 252, 0.55);
-  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(125, 211, 252, 0.16),
+    0 12px 24px rgba(15, 23, 42, 0.28);
+  transform: translateY(-1px);
 }
 
 .ledger-list {
@@ -672,6 +701,26 @@ h1 {
   padding: 8px 10px;
   font-size: 0.88rem;
   cursor: pointer;
+}
+
+.day-picker-control {
+  position: relative;
+  min-width: 170px;
+}
+
+.day-picker-native {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+
+.day-picker-button {
+  width: 100%;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .day-picker::-webkit-calendar-picker-indicator {
@@ -752,6 +801,14 @@ h1 {
   color: inherit;
   padding: 14px 16px;
   cursor: pointer;
+}
+
+.signal-row.active {
+  border-color: rgba(125, 211, 252, 0.6);
+  box-shadow:
+    0 0 0 1px rgba(125, 211, 252, 0.16),
+    0 12px 24px rgba(15, 23, 42, 0.28);
+  transform: translateY(-1px);
 }
 
 .signal-row.entry {
@@ -895,6 +952,47 @@ h1 {
   align-items: center;
 }
 
+.selected-signal-headline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.signal-action-pill,
+.signal-price-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.72);
+  color: #dbeafe;
+  font-size: 0.82rem;
+}
+
+.signal-action-pill.buy {
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #bbf7d0;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.signal-action-pill.sell {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.signal-action-pill i {
+  font-style: normal;
+  line-height: 1;
+}
+
+.signal-price-pill {
+  color: #f8fafc;
+}
+
 .copy-feedback {
   color: #86efac;
   font-size: 0.82rem;
@@ -977,7 +1075,7 @@ h1 {
 }
 
 .signal-driver-grid {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
 .signal-summary-grid div {

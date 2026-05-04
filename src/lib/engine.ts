@@ -88,6 +88,8 @@ export type WindowOptimizationRecord = {
   updatedAt: string
 }
 
+export const operationalSymbols = ['TSLA', 'NVDA', 'META'] as const;
+
 export const sampleSignals: AdminSignal[] = [
   {
     id: 'sample-signal-1',
@@ -155,12 +157,12 @@ export const configFields: ConfigField[] = [
   {
     key: 'monitored_symbols',
     label: 'Tracked symbols',
-    value: ['AAPL', 'AMZN', 'GOOGL', 'META', 'MSFT', 'NVDA', 'PLTR', 'TSLA'],
+    value: [...operationalSymbols],
     description: 'Symbols scanned in real time by the edge worker.',
     group: 'Trading universe',
     inputType: 'symbols',
     placeholder: 'One symbol per line',
-    options: ['AAPL', 'AMZN', 'GOOGL', 'META', 'MSFT', 'NVDA', 'PLTR', 'TSLA'],
+    options: [...operationalSymbols],
   },
   {
     key: 'benchmark_symbol',
@@ -183,7 +185,7 @@ export const configFields: ConfigField[] = [
   {
     key: 'buy_score_threshold',
     label: 'Buy score threshold',
-    value: 0.7,
+    value: 0.62,
     description: 'Minimum aggregated score required to emit a buy cue. Raise it to make buys stricter; lower it to allow more buys.',
     group: 'Buy rules',
     inputType: 'number',

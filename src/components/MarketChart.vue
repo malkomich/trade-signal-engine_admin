@@ -12,6 +12,7 @@ const props = defineProps<{
   intervalMinutes: 1 | 5 | 10 | 30 | 60
   windowId?: string | null
   focusRange?: ChartFocusRange | null
+  timeZone?: string | null
   height?: number
   zoom?: {
     x: number
@@ -34,6 +35,7 @@ function renderChart() {
     props.windowId,
     props.focusRange ?? null,
     props.zoom ?? { x: 1, y: 1 },
+    props.timeZone ?? null,
   )
   chartInstance.setOption(option, true)
 }
@@ -53,7 +55,7 @@ onMounted(() => {
 })
 
 watch(
-  () => [props.chart.id, props.intervalMinutes, props.windowId, props.focusRange?.start, props.focusRange?.end, props.snapshots, props.zoom?.x, props.zoom?.y],
+  () => [props.chart.id, props.intervalMinutes, props.windowId, props.focusRange?.start, props.focusRange?.end, props.snapshots, props.zoom?.x, props.zoom?.y, props.timeZone],
   () => {
     renderChart()
   },

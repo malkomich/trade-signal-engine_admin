@@ -63,6 +63,29 @@ function formatTooltipValue(value: number | null, decimals = 2) {
   return value.toFixed(decimals)
 }
 
+function formatTimestamp(value: number, timeZone?: string | null) {
+  const formatOptions: Intl.DateTimeFormatOptions = {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }
+  if (timeZone) {
+    formatOptions.timeZone = timeZone
+  }
+  return new Intl.DateTimeFormat(undefined, formatOptions).format(new Date(value))
+}
+
+function formatAxisTimestamp(value: number, timeZone?: string | null) {
+  const formatOptions: Intl.DateTimeFormatOptions = {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }
+  if (timeZone) {
+    formatOptions.timeZone = timeZone
+  }
+  return new Intl.DateTimeFormat(undefined, formatOptions).format(new Date(value))
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -368,7 +391,7 @@ function histogramSeries(series: ChartSeries, points: AggregatedSnapshot[]): Ser
   } satisfies SeriesOption
 }
 
-function buildTooltipFormatter(chart: ChartDefinition) {
+function buildTooltipFormatter(chart: ChartDefinition, timeZone?: string | null) {
   return (params: unknown) => {
     const items = Array.isArray(params) ? params : [params]
     const first = items[0] as { axisValue?: number; data?: unknown } | undefined
@@ -406,9 +429,7 @@ function buildTooltipFormatter(chart: ChartDefinition) {
     }
 
     const title = signalLabel ? `${signalLabel} signal` : chart.title
-    const timeLabel = timestamp
-      ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' }).format(new Date(timestamp))
-      : 'Current value'
+    const timeLabel = timestamp ? formatTimestamp(timestamp, timeZone) : 'Current value'
     return `
       <div class="chart-tooltip">
         <div class="chart-tooltip__title">${escapeHtml(title)}</div>
@@ -434,6 +455,13 @@ function windowFocusRange(
       const end = focusRange.end ? parseTimestamp(focusRange.end) : start
       const focusEnd = end !== null ? Math.max(end, start) : start
       const duration = Math.max(focusEnd - start, intervalMinutes * 60 * 1000)
+      if (duration > 15 * 60 * 1000) {
+        const padding = Math.max(duration * 0.12, intervalMinutes * 60 * 1000)
+        return {
+          min: start - padding,
+          max: focusEnd + padding,
+        }
+      }
       const paddedDuration = duration + Math.max(duration * 0.1, 30 * 1000)
       const visibleSpan = visibleSpanForDuration(paddedDuration, zoomX)
       const center = start + (duration / 2)
@@ -612,17 +640,13 @@ export function buildChartOption(
   windowId?: string | null,
   focusRange?: ChartFocusRange | null,
   zoom: ChartZoom = { x: 1, y: 1 },
+  timeZone?: string | null,
 ): EChartsOption {
   const points = aggregateSnapshots(snapshots, intervalMinutes)
   const range = windowFocusRange(snapshots, windowId, intervalMinutes, focusRange, zoom.x) ?? axisRange(points, intervalMinutes, zoom.x)
   const visiblePoints = filterPointsInRange(points, range?.min, range?.max)
   const valueRange = yAxisRange(chart, visiblePoints.length > 0 ? visiblePoints : points, zoom.y)
-  const axisLabelFormatter = (value: number) =>
-    new Intl.DateTimeFormat(undefined, {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(new Date(value))
+  const axisLabelFormatter = (value: number) => formatAxisTimestamp(value, timeZone)
 
   if (points.length === 0) {
     return {
@@ -651,7 +675,7 @@ export function buildChartOption(
       textStyle: { color: '#e2e8f0' },
       confine: true,
       extraCssText: 'border-radius: 12px; padding: 0;',
-      formatter: buildTooltipFormatter(chart),
+      formatter: buildTooltipFormatter(chart, timeZone),
     },
     legend: { show: false },
     xAxis: {
