@@ -284,6 +284,22 @@ function visibleSpanForDuration(durationMs: number, zoomX = 1) {
   return Math.max(baseVisibleSpan / Math.max(zoomX, 0.1), durationMs, CHART_AXIS_MIN_DURATION_MS)
 }
 
+function snapRangeToInterval(min: number, max: number, intervalMinutes: number) {
+  const intervalMs = Math.max(intervalMinutes, 1) * 60 * 1000
+  const snappedMin = Math.floor(min / intervalMs) * intervalMs
+  const snappedMax = Math.ceil(max / intervalMs) * intervalMs
+  if (snappedMax <= snappedMin) {
+    return {
+      min: snappedMin,
+      max: snappedMin + intervalMs,
+    }
+  }
+  return {
+    min: snappedMin,
+    max: snappedMax,
+  }
+}
+
 function isBuySignalAction(action: string | null | undefined) {
   const normalized = action?.trim().toUpperCase()
   return normalized === 'BUY_ALERT' || normalized === 'BUY' || normalized === 'ACCEPT'
@@ -457,18 +473,16 @@ function windowFocusRange(
       const duration = Math.max(focusEnd - start, intervalMinutes * 60 * 1000)
       if (duration > 15 * 60 * 1000) {
         const padding = Math.max(duration * 0.12, intervalMinutes * 60 * 1000)
-        return {
-          min: start - padding,
-          max: focusEnd + padding,
-        }
+        return snapRangeToInterval(start - padding, focusEnd + padding, intervalMinutes)
       }
       const paddedDuration = duration + Math.max(duration * 0.1, 30 * 1000)
       const visibleSpan = visibleSpanForDuration(paddedDuration, zoomX)
       const center = start + (duration / 2)
-      return {
-        min: center - (visibleSpan / 2),
-        max: center + (visibleSpan / 2),
-      }
+      return snapRangeToInterval(
+        center - (visibleSpan / 2),
+        center + (visibleSpan / 2),
+        intervalMinutes,
+      )
     }
   }
   if (!windowId) {
@@ -496,10 +510,11 @@ function windowFocusRange(
   const paddedDuration = duration + Math.max(duration * 0.1, 30 * 1000)
   const visibleSpan = visibleSpanForDuration(paddedDuration, zoomX)
   const center = min + (duration / 2)
-  return {
-    min: center - (visibleSpan / 2),
-    max: center + (visibleSpan / 2),
-  }
+  return snapRangeToInterval(
+    center - (visibleSpan / 2),
+    center + (visibleSpan / 2),
+    intervalMinutes,
+  )
 }
 
 function filterPointsInRange(points: AggregatedSnapshot[], min: number | undefined, max: number | undefined) {
@@ -579,12 +594,10 @@ function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY 
       return null
     }
     const wickValues = collectPriceWicks(points)
-    const center = (priceRange.min + priceRange.max) / 2
-    const baseSpan = Math.max(priceRange.max - priceRange.min, 1)
-    const scaledSpan = Math.max(baseSpan / Math.max(zoomY, 0.1), 1)
-    let min = center - (scaledSpan / 2)
-    let max = center + (scaledSpan / 2)
-    const wickGuard = scaledSpan * 1.25
+    let min = priceRange.min
+    let max = priceRange.max
+    const baseSpan = Math.max(max - min, 1)
+    const wickGuard = baseSpan * 1.25
     for (const wick of wickValues) {
       if (wick >= min - wickGuard && wick <= max + wickGuard) {
         if (wick < min) {
@@ -596,10 +609,12 @@ function yAxisRange(chart: ChartDefinition, points: AggregatedSnapshot[], zoomY 
       }
     }
     const adjustedSpan = Math.max(max - min, 1)
-    const padding = Math.max((adjustedSpan * CHART_Y_PADDING_RATIO.price) / Math.max(zoomY, 0.1), 0.25)
+    const scaledSpan = Math.max(adjustedSpan / Math.max(zoomY, 0.1), 1)
+    const center = (min + max) / 2
+    const padding = Math.max((scaledSpan * CHART_Y_PADDING_RATIO.price) / Math.max(zoomY, 0.1), 0.25)
     return {
-      min: center - (adjustedSpan / 2) - padding,
-      max: center + (adjustedSpan / 2) + padding,
+      min: center - (scaledSpan / 2) - padding,
+      max: center + (scaledSpan / 2) + padding,
     }
   }
 

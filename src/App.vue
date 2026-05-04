@@ -257,9 +257,10 @@ const selectedChartSnapshots = computed(() => {
   if (!review) {
     return [];
   }
-  const windowSnapshots = findWindowSnapshots(review);
   const snapshots = selectChartSnapshotsForDisplay(
-    windowSnapshots.length > 0 ? windowSnapshots : selectedDaySnapshots.value,
+    selectedDaySnapshots.value.length > 0
+      ? selectedDaySnapshots.value
+      : findWindowSnapshots(review),
     review.symbol,
   );
   const augmentedSnapshots = snapshots.slice();
@@ -271,7 +272,11 @@ const selectedChartSnapshots = computed(() => {
       return;
     }
     const normalizedAction = (snapshot.signalAction ?? "").trim().toUpperCase();
-    if (normalizedAction === signalAction || normalizedAction === signalAction.replace("_ALERT", "")) {
+    const actionAliases =
+      signalAction === "BUY_ALERT"
+        ? new Set(["BUY_ALERT", "BUY", "ACCEPT", "ENTRY_SIGNALLED"])
+        : new Set(["SELL_ALERT", "SELL", "EXIT", "EXIT_SIGNALLED"]);
+    if (actionAliases.has(normalizedAction)) {
       return;
     }
     augmentedSnapshots.push({
@@ -287,12 +292,7 @@ const selectedChartSnapshots = computed(() => {
   attachWindowSignal(review.buySnapshot, "BUY_ALERT");
   attachWindowSignal(review.sellSnapshot, "SELL_ALERT");
   return augmentedSnapshots.sort((left, right) => {
-    const leftTimestamp = Date.parse(left.timestamp);
-    const rightTimestamp = Date.parse(right.timestamp);
-    if (leftTimestamp !== rightTimestamp) {
-      return leftTimestamp - rightTimestamp;
-    }
-    return left.id.localeCompare(right.id);
+    return compareSnapshotsByTimestampAndId(left, right);
   });
 });
 const selectedWindowFocusRange = computed(() => {
@@ -341,7 +341,7 @@ function selectChartSnapshotsForDisplay(
     if (snapshot.symbol !== symbol) {
       continue;
     }
-    const timeframeMinutes = parseTimeframeMinutes(snapshot.timeframe);
+    const timeframeMinutes = parseTimeframeMinutes(snapshot.timeframe ?? "1m");
     if (timeframeMinutes === null) {
       continue;
     }
@@ -361,14 +361,7 @@ function selectChartSnapshotsForDisplay(
     preferredTimeframe === undefined ? [] : available.get(preferredTimeframe) ?? [];
   return preferredSnapshots
     .slice()
-    .sort((left, right) => {
-      const leftTimestamp = Date.parse(left.timestamp);
-      const rightTimestamp = Date.parse(right.timestamp);
-      if (leftTimestamp !== rightTimestamp) {
-        return leftTimestamp - rightTimestamp;
-      }
-      return left.id.localeCompare(right.id);
-    });
+    .sort(compareSnapshotsByTimestampAndId);
 }
 
 function filterAndSortSnapshots(
@@ -380,14 +373,19 @@ function filterAndSortSnapshots(
     .filter((snapshot) => snapshot.symbol === symbol)
     .filter((snapshot) => (snapshot.timeframe || '1m').trim().toLowerCase() === timeframe)
     .slice()
-    .sort((left, right) => {
-      const leftTimestamp = Date.parse(left.timestamp);
-      const rightTimestamp = Date.parse(right.timestamp);
-      if (leftTimestamp !== rightTimestamp) {
-        return leftTimestamp - rightTimestamp;
-      }
-      return left.id.localeCompare(right.id);
-    });
+    .sort(compareSnapshotsByTimestampAndId);
+}
+
+function compareSnapshotsByTimestampAndId(
+  left: MarketSnapshotRecord,
+  right: MarketSnapshotRecord,
+) {
+  const leftTimestamp = Date.parse(left.timestamp);
+  const rightTimestamp = Date.parse(right.timestamp);
+  if (leftTimestamp !== rightTimestamp) {
+    return leftTimestamp - rightTimestamp;
+  }
+  return left.id.localeCompare(right.id);
 }
 const chartGroups = marketChartGroups;
 const marketLedgerPageSize = 12;
@@ -872,8 +870,12 @@ function openNativeDatePicker(input: HTMLInputElement | null) {
     return;
   }
   if (typeof input.showPicker === "function") {
-    input.showPicker();
-    return;
+    try {
+      input.showPicker();
+      return;
+    } catch {
+      // Fallback to the native click path below when the browser blocks showPicker().
+    }
   }
   input.click();
 }
@@ -1195,10 +1197,6 @@ function formatChartValue(value: number | null, decimals = 2) {
   return value.toFixed(decimals);
 }
 
-function selectedDisplayTimeZone() {
-  return displayTimezone.value === "new_york" ? "America/New_York" : undefined;
-}
-
 function formatLocaleTimestamp(value: string | null | undefined) {
   if (!value) {
     return "waiting for live data";
@@ -1212,7 +1210,7 @@ function formatLocaleTimestamp(value: string | null | undefined) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "medium",
-    timeZone: selectedDisplayTimeZone(),
+    timeZone: selectedDisplayTimeZoneValue.value ?? undefined,
   }).format(parsed);
 }
 
@@ -2565,18 +2563,17 @@ onUnmounted(() => {
         </p>
       </div>
 
-      <div class="hero-status">
-        <div class="hero-status-topline">
-          <label class="timezone-switch">
-            <span>Display timezone</span>
-            <select v-model="displayTimezone" aria-label="Display timezone">
-              <option value="new_york">New York</option>
-              <option value="local">Local</option>
-            </select>
-          </label>
+      <div class="hero-status-row">
+        <label class="timezone-switch">
+          <span>Display timezone</span>
+          <select v-model="displayTimezone" aria-label="Display timezone">
+            <option value="new_york">New York</option>
+            <option value="local">Local</option>
+          </select>
+        </label>
+        <div class="hero-status">
           <div class="status-dot"></div>
-        </div>
-        <div>
+          <div>
           <strong>{{ sourceDisplay.title }}</strong>
           <p>{{ sourceDisplay.description }}</p>
           <p>
@@ -2617,6 +2614,7 @@ onUnmounted(() => {
                 : "Enable live notifications"
             }}
           </button>
+          </div>
         </div>
       </div>
     </section>
@@ -2830,7 +2828,6 @@ onUnmounted(() => {
           <div class="detail-card" v-if="selectedSignal">
             <div class="detail-title">
               <div class="selected-signal-headline">
-                <strong>{{ formatSignalStateLabel(selectedSignal.state) }}</strong>
                 <span
                   class="signal-action-pill"
                   :class="selectedSignalBadge.tone"
