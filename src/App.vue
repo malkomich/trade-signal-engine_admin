@@ -36,6 +36,11 @@ import {
   marketDayKeyForTimestamp,
 } from "./lib/market-day";
 import {
+  loadPersistedChoice,
+  loadPersistedString,
+  persistChoice,
+} from "./lib/persistence";
+import {
   chartIntervals as chartIntervalOptions,
   marketChartGroups,
   marketCharts as marketChartDefs,
@@ -67,7 +72,7 @@ import {
 const snapshot = ref<DashboardSnapshot | null>(null);
 const selectedSignal = ref<DashboardSnapshot["selectedSignal"] | null>(null);
 const selectedSignalId = ref<string>(loadPersistedString("admin.selectedSignalId", ""));
-const selectedDecisionSymbol = ref<string>("");
+const selectedDecisionSymbol = ref<string>(loadPersistedString("admin.selectedDecisionSymbol", ""));
 const selectedMarketDay = ref<string>(currentMarketDayKey());
 const displayTimezone = ref<"local" | "new_york">(
   loadPersistedChoice("admin.displayTimezone", "new_york", ["local", "new_york"]),
@@ -75,8 +80,8 @@ const displayTimezone = ref<"local" | "new_york">(
 const chartIntervalMinutes = ref<1 | 5 | 10 | 30 | 60>(1);
 const marketWindowPage = ref(0);
 const selectedMarketWindowReviewId = ref<string>("");
-const selectedWindowSymbol = ref<string>("");
-const selectedOptimizationSymbol = ref<string>("");
+const selectedWindowSymbol = ref<string>(loadPersistedString("admin.selectedWindowSymbol", ""));
+const selectedOptimizationSymbol = ref<string>(loadPersistedString("admin.selectedOptimizationSymbol", ""));
 const dashboardClock = ref(Date.now());
 const loading = ref(true);
 const authState = ref<
@@ -706,51 +711,6 @@ function resolveSelectedSignal(
   return signals[0] ?? fallbackSignal ?? null;
 }
 
-function loadPersistedChoice<T extends string>(
-  key: string,
-  fallback: T,
-  allowedValues: readonly T[],
-): T {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-  try {
-    const stored = window.localStorage.getItem(key)?.trim() as T | null;
-    if (stored && allowedValues.includes(stored)) {
-      return stored;
-    }
-  } catch {
-    // Ignore storage failures and fall back to the default in-memory value.
-  }
-  return fallback;
-}
-
-function loadPersistedString(key: string, fallback: string) {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-  try {
-    const stored = window.localStorage.getItem(key)?.trim();
-    if (stored) {
-      return stored;
-    }
-  } catch {
-    // Ignore storage failures and fall back to the in-memory default.
-  }
-  return fallback;
-}
-
-function persistChoice(key: string, value: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Ignore storage failures; the UI should remain usable without persistence.
-  }
-}
-
 function windowKey(window: TradeWindowRecord | null) {
   if (!window) {
     return "";
@@ -952,6 +912,7 @@ function openNativeDatePicker(input: HTMLInputElement | null) {
 
 function syncSelectedDecisionSymbol(symbols: string[]) {
   if (symbols.length === 0) {
+    selectedDecisionSymbol.value = "";
     return;
   }
 
@@ -959,13 +920,14 @@ function syncSelectedDecisionSymbol(symbols: string[]) {
     return;
   }
 
-  if (symbols.includes(selectedDecisionSymbol.value)) {
-    return;
+  if (!symbols.includes(selectedDecisionSymbol.value)) {
+    selectedDecisionSymbol.value = "";
   }
 }
 
 function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
   if (symbols.length === 0) {
+    selection.value = "";
     return;
   }
 
@@ -973,8 +935,8 @@ function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
     return;
   }
 
-  if (symbols.includes(selection.value)) {
-    return;
+  if (!symbols.includes(selection.value)) {
+    selection.value = "";
   }
 }
 
@@ -1639,6 +1601,8 @@ watch(
   (signals) => {
     if (signals.length === 0) {
       triagePage.value = 0;
+      selectedSignal.value = null;
+      selectedSignalId.value = "";
       return;
     }
 
@@ -1651,16 +1615,13 @@ watch(
       }
     }
 
-    const activeSignal = selectedSignal.value;
-    if (!activeSignal) {
-      selectedSignal.value = signals[0] ?? null;
-    }
+    selectedSignal.value = signals[0] ?? null;
+    selectedSignalId.value = selectedSignal.value?.id ?? "";
     triagePage.value = Math.min(
       triagePage.value,
       Math.max(0, Math.ceil(signals.length / triagePageSize) - 1),
     );
   },
-  { immediate: true },
 );
 
 watch(selectedMarketDay, () => {
@@ -1703,37 +1664,31 @@ watch(selectedSignal, () => {
 watch(
   selectedSignal,
   (value) => persistChoice("admin.selectedSignalId", value?.id ?? ""),
-  { immediate: true },
 );
 
 watch(
   displayTimezone,
   (value) => persistChoice("admin.displayTimezone", value),
-  { immediate: true },
 );
 
 watch(
   triageFilter,
   (value) => persistChoice("admin.triageFilter", value),
-  { immediate: true },
 );
 
 watch(
   selectedDecisionSymbol,
   (value) => persistChoice("admin.selectedDecisionSymbol", value),
-  { immediate: true },
 );
 
 watch(
   selectedWindowSymbol,
   (value) => persistChoice("admin.selectedWindowSymbol", value),
-  { immediate: true },
 );
 
 watch(
   selectedOptimizationSymbol,
   (value) => persistChoice("admin.selectedOptimizationSymbol", value),
-  { immediate: true },
 );
 
 watch(
@@ -1764,7 +1719,6 @@ watch(
   ([symbols]) => {
     syncSelectedWindowSymbol(symbols);
   },
-  { immediate: true },
 );
 
 watch(
@@ -1772,7 +1726,6 @@ watch(
   ([symbols]) => {
     syncSelectedOptimizationSymbol(symbols);
   },
-  { immediate: true },
 );
 
 watch(selectedOptimizationSymbol, () => {
@@ -1784,7 +1737,6 @@ watch(
   ([symbols]) => {
     syncSelectedDecisionSymbol(symbols);
   },
-  { immediate: true },
 );
 
 watch(
