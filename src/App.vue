@@ -36,6 +36,11 @@ import {
   marketDayKeyForTimestamp,
 } from "./lib/market-day";
 import {
+  loadPersistedChoice,
+  loadPersistedString,
+  persistChoice,
+} from "./lib/persistence";
+import {
   chartIntervals as chartIntervalOptions,
   marketChartGroups,
   marketCharts as marketChartDefs,
@@ -66,14 +71,17 @@ import {
 
 const snapshot = ref<DashboardSnapshot | null>(null);
 const selectedSignal = ref<DashboardSnapshot["selectedSignal"] | null>(null);
-const selectedDecisionSymbol = ref<string>("");
+const selectedSignalId = ref<string>(loadPersistedString("admin.selectedSignalId", ""));
+const selectedDecisionSymbol = ref<string>(loadPersistedString("admin.selectedDecisionSymbol", ""));
 const selectedMarketDay = ref<string>(currentMarketDayKey());
-const displayTimezone = ref<"local" | "new_york">("new_york");
+const displayTimezone = ref<"local" | "new_york">(
+  loadPersistedChoice("admin.displayTimezone", "new_york", ["local", "new_york"]),
+);
 const chartIntervalMinutes = ref<1 | 5 | 10 | 30 | 60>(1);
 const marketWindowPage = ref(0);
 const selectedMarketWindowReviewId = ref<string>("");
-const selectedWindowSymbol = ref<string>("");
-const selectedOptimizationSymbol = ref<string>("");
+const selectedWindowSymbol = ref<string>(loadPersistedString("admin.selectedWindowSymbol", ""));
+const selectedOptimizationSymbol = ref<string>(loadPersistedString("admin.selectedOptimizationSymbol", ""));
 const dashboardClock = ref(Date.now());
 const loading = ref(true);
 const authState = ref<
@@ -108,7 +116,9 @@ let dashboardClockTimer: number | null = null;
 let dashboardVisibilityChangeHandler: (() => void) | null = null;
 let realtimeUnsubscribers: Unsubscribe[] = [];
 let realtimeListenerKey = "";
-const triageFilter = ref<"all" | "buy" | "sell">("all");
+const triageFilter = ref<"all" | "buy" | "sell">(
+  loadPersistedChoice("admin.triageFilter", "all", ["all", "buy", "sell"]),
+);
 const triageFilters = ["all", "buy", "sell"] as const;
 const selectedConfigVersionId = ref<string>("current");
 const configDraft = reactive<Record<string, string | number>>({});
@@ -681,6 +691,26 @@ function signalKey(signal: AdminSignal | null) {
   return signal.id || `${signal.symbol}:${signal.windowId || "no-window"}:${signal.updatedAt}`;
 }
 
+function resolveSelectedSignal(
+  signals: AdminSignal[],
+  preferredSignalId: string,
+  fallbackSignal: AdminSignal | null,
+) {
+  if (preferredSignalId) {
+    const preferredSignal = signals.find((signal) => signal.id === preferredSignalId);
+    if (preferredSignal) {
+      return preferredSignal;
+    }
+  }
+  if (fallbackSignal?.id) {
+    const fallbackMatch = signals.find((signal) => signal.id === fallbackSignal.id);
+    if (fallbackMatch) {
+      return fallbackMatch;
+    }
+  }
+  return signals[0] ?? fallbackSignal ?? null;
+}
+
 function windowKey(window: TradeWindowRecord | null) {
   if (!window) {
     return "";
@@ -890,11 +920,9 @@ function syncSelectedDecisionSymbol(symbols: string[]) {
     return;
   }
 
-  if (symbols.includes(selectedDecisionSymbol.value)) {
-    return;
+  if (!symbols.includes(selectedDecisionSymbol.value)) {
+    selectedDecisionSymbol.value = "";
   }
-
-  selectedDecisionSymbol.value = symbols[0] ?? "";
 }
 
 function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
@@ -907,11 +935,9 @@ function syncSelectedSymbol(selection: Ref<string>, symbols: string[]) {
     return;
   }
 
-  if (symbols.includes(selection.value)) {
-    return;
+  if (!symbols.includes(selection.value)) {
+    selection.value = "";
   }
-
-  selection.value = symbols[0];
 }
 
 function syncWindowSelectionSymbol(selection: Ref<string>, symbol: string) {
@@ -1574,24 +1600,28 @@ watch(
   triageSignals,
   (signals) => {
     if (signals.length === 0) {
-      selectedSignal.value = null;
       triagePage.value = 0;
+      selectedSignal.value = null;
+      selectedSignalId.value = "";
       return;
     }
 
-    const activeSignal = selectedSignal.value;
-    if (
-      !activeSignal ||
-      !signals.some((signal) => signalKey(signal) === signalKey(activeSignal))
-    ) {
-      selectedSignal.value = signals[0] ?? null;
+    const activeSignalId = selectedSignal.value?.id || selectedSignalId.value;
+    if (activeSignalId) {
+      const activeIndex = signals.findIndex((signal) => signal.id === activeSignalId);
+      if (activeIndex >= 0) {
+        triagePage.value = Math.floor(activeIndex / triagePageSize);
+        return;
+      }
     }
+
+    selectedSignal.value = signals[0] ?? null;
+    selectedSignalId.value = selectedSignal.value?.id ?? "";
     triagePage.value = Math.min(
       triagePage.value,
       Math.max(0, Math.ceil(signals.length / triagePageSize) - 1),
     );
   },
-  { immediate: true },
 );
 
 watch(selectedMarketDay, () => {
@@ -1632,6 +1662,36 @@ watch(selectedSignal, () => {
 });
 
 watch(
+  selectedSignal,
+  (value) => persistChoice("admin.selectedSignalId", value?.id ?? ""),
+);
+
+watch(
+  displayTimezone,
+  (value) => persistChoice("admin.displayTimezone", value),
+);
+
+watch(
+  triageFilter,
+  (value) => persistChoice("admin.triageFilter", value),
+);
+
+watch(
+  selectedDecisionSymbol,
+  (value) => persistChoice("admin.selectedDecisionSymbol", value),
+);
+
+watch(
+  selectedWindowSymbol,
+  (value) => persistChoice("admin.selectedWindowSymbol", value),
+);
+
+watch(
+  selectedOptimizationSymbol,
+  (value) => persistChoice("admin.selectedOptimizationSymbol", value),
+);
+
+watch(
   selectedConfigVersion,
   (version) => {
     if (!snapshot.value) {
@@ -1659,7 +1719,6 @@ watch(
   ([symbols]) => {
     syncSelectedWindowSymbol(symbols);
   },
-  { immediate: true },
 );
 
 watch(
@@ -1667,7 +1726,6 @@ watch(
   ([symbols]) => {
     syncSelectedOptimizationSymbol(symbols);
   },
-  { immediate: true },
 );
 
 watch(selectedOptimizationSymbol, () => {
@@ -1679,7 +1737,6 @@ watch(
   ([symbols]) => {
     syncSelectedDecisionSymbol(symbols);
   },
-  { immediate: true },
 );
 
 watch(
@@ -2265,13 +2322,18 @@ async function requestDashboardRefresh() {
 
   dashboardRefreshInFlight = true;
   const preserveSelectedConfig = selectedConfigVersionId.value;
+  const preserveSelectedSignalId = selectedSignal.value?.id ?? "";
   try {
     const result = await loadDashboardSnapshot({
       allowLiveData: true,
       marketDayKey: selectedMarketDay.value,
     });
     snapshot.value = result.snapshot;
-    selectedSignal.value = result.snapshot.selectedSignal;
+    selectedSignal.value = resolveSelectedSignal(
+      result.snapshot.signals,
+      preserveSelectedSignalId || selectedSignalId.value,
+      result.snapshot.selectedSignal,
+    );
     snapshotSource.value = result.source;
     snapshotWarning.value = result.warning;
     if (preserveSelectedConfig === "current") {
@@ -2451,7 +2513,11 @@ onMounted(async () => {
       marketDayKey: selectedMarketDay.value,
     });
     snapshot.value = result.snapshot;
-    selectedSignal.value = result.snapshot.selectedSignal;
+    selectedSignal.value = resolveSelectedSignal(
+      result.snapshot.signals,
+      selectedSignal.value?.id ?? selectedSignalId.value,
+      result.snapshot.selectedSignal,
+    );
     snapshotSource.value = result.source;
     snapshotWarning.value = result.warning;
     selectConfigVersion(
