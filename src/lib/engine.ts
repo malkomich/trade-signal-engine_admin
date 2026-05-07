@@ -129,27 +129,27 @@ export const sampleSignals: AdminSignal[] = [
 export const signalTierLegend: Record<SignalTier, SignalTierMeta> = {
   conviction_buy: {
     tier: 'conviction_buy',
-    label: 'Conviction buy',
+    label: 'High reward / low risk',
     icon: '▲',
-    description: 'High-confidence long setup with strong alignment and lower risk.',
+    description: 'Highest-confidence long setup with the best risk-to-reward profile.',
   },
   balanced_buy: {
     tier: 'balanced_buy',
-    label: 'Balanced buy',
+    label: 'Balanced reward / moderate risk',
     icon: '◆',
-    description: 'Solid long setup with healthy trend, momentum, and participation.',
+    description: 'Solid long setup with a balanced risk-to-reward profile.',
   },
   opportunistic_buy: {
     tier: 'opportunistic_buy',
-    label: 'Opportunistic buy',
+    label: 'Lower reward / higher risk',
     icon: '●',
-    description: 'Valid long setup with acceptable risk and still usable upside.',
+    description: 'Valid long setup with a more aggressive entry and higher risk.',
   },
   speculative_buy: {
     tier: 'speculative_buy',
-    label: 'Speculative buy',
+    label: 'Lowest reward / highest risk',
     icon: '◌',
-    description: 'Weaker long setup that still clears the minimum risk-adjusted floor.',
+    description: 'Weakest long setup that only clears the minimum risk-adjusted floor.',
   },
 }
 
