@@ -66,8 +66,16 @@ import {
   type ConfigFieldValue,
   classifySignalTier,
   operationalSymbols,
+  type SignalTier,
   signalTierLegend,
 } from "./lib/engine";
+import {
+  loadTradingSettings,
+  saveTradingSettings,
+  type TradingAccountSnapshot,
+  type TradingMode,
+  type TradingSettingsSnapshot,
+} from "./lib/api";
 
 const snapshot = ref<DashboardSnapshot | null>(null);
 const selectedSignal = ref<DashboardSnapshot["selectedSignal"] | null>(null);
@@ -96,6 +104,26 @@ const selectedSignalCopyState = ref<string | null>(null);
 const selectedLedgerSnapshotId = ref<string>("");
 const selectedWindowReviewId = ref<string>("");
 const selectedOptimizationReviewId = ref<string>("");
+const tradingMode = ref<TradingMode>("paper");
+const tradingTierKeys: SignalTier[] = [
+  "conviction_buy",
+  "balanced_buy",
+  "opportunistic_buy",
+  "speculative_buy",
+];
+const tradingAllocations = reactive<Record<SignalTier, number>>({
+  conviction_buy: 1000,
+  balanced_buy: 1000,
+  opportunistic_buy: 1000,
+  speculative_buy: 1000,
+});
+const tradingStopLossPercent = ref(0.1);
+const tradingAccount = ref<TradingAccountSnapshot | null>(null);
+const tradingSettingsLoading = ref(false);
+const tradingSettingsSaving = ref(false);
+const tradingSettingsError = ref<string | null>(null);
+const tradingSettingsMessage = ref<string | null>(null);
+const tradingSettingsSessionId = ref<string>("");
 const liveSignalPage = ref(0);
 const expandedChartId = ref<string | null>(null);
 const expandedChartZoomX = ref(1);
@@ -682,6 +710,102 @@ function emptySessionOverview(): DashboardSnapshot["sessionOverview"] {
     openWindows: 0,
     summary: "No live records are available for the selected day yet.",
   };
+}
+
+function defaultTradingAllocations(): Record<SignalTier, number> {
+  return {
+    conviction_buy: 1000,
+    balanced_buy: 1000,
+    opportunistic_buy: 1000,
+    speculative_buy: 1000,
+  };
+}
+
+function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
+  tradingMode.value = settings.tradingMode;
+  for (const tier of tradingTierKeys) {
+    tradingAllocations[tier] = settings.tradingAllocations[tier] ?? 1000;
+  }
+  tradingStopLossPercent.value = settings.tradingStopLossPercent;
+  tradingAccount.value = settings.tradingAccount;
+  tradingSettingsSessionId.value = settings.sessionId;
+}
+
+async function loadTradingSettingsForSession(sessionId: string) {
+  const normalizedSessionId = String(sessionId ?? "").trim();
+  if (!normalizedSessionId) {
+    tradingMode.value = "paper";
+    Object.assign(tradingAllocations, defaultTradingAllocations());
+    tradingStopLossPercent.value = 0.1;
+    tradingAccount.value = null;
+    tradingSettingsError.value = null;
+    tradingSettingsMessage.value = null;
+    tradingSettingsSessionId.value = "";
+    return;
+  }
+  tradingSettingsLoading.value = true;
+  tradingSettingsError.value = null;
+  try {
+    const settings = await loadTradingSettings(normalizedSessionId);
+    applyTradingSettingsSnapshot(settings);
+  } catch (error) {
+    tradingSettingsError.value =
+      error instanceof Error ? error.message : "Failed to load trading settings.";
+    tradingSettingsMessage.value = null;
+    tradingMode.value = "paper";
+    Object.assign(tradingAllocations, defaultTradingAllocations());
+    tradingStopLossPercent.value = 0.1;
+    tradingAccount.value = null;
+    tradingSettingsSessionId.value = normalizedSessionId;
+  } finally {
+    tradingSettingsLoading.value = false;
+  }
+}
+
+async function saveTradingSettingsFromPanel() {
+  const sessionId = String(sessionOverview.value.sessionId ?? "").trim();
+  if (!sessionId) {
+    tradingSettingsError.value = "No live session is available yet.";
+    return;
+  }
+  tradingSettingsSaving.value = true;
+  tradingSettingsError.value = null;
+  tradingSettingsMessage.value = null;
+  try {
+    const settings = await saveTradingSettings(sessionId, {
+      mode: tradingMode.value,
+      allocations: {
+        conviction_buy: Number(tradingAllocations.conviction_buy) || 0,
+        balanced_buy: Number(tradingAllocations.balanced_buy) || 0,
+        opportunistic_buy: Number(tradingAllocations.opportunistic_buy) || 0,
+        speculative_buy: Number(tradingAllocations.speculative_buy) || 0,
+      },
+      stop_loss_percent: Number(tradingStopLossPercent.value) || 0.1,
+    });
+    applyTradingSettingsSnapshot(settings);
+    tradingSettingsMessage.value = "Trading settings saved.";
+  } catch (error) {
+    tradingSettingsError.value =
+      error instanceof Error ? error.message : "Failed to save trading settings.";
+  } finally {
+    tradingSettingsSaving.value = false;
+  }
+}
+
+function refreshTradingSettings() {
+  return loadTradingSettingsForSession(sessionOverview.value.sessionId);
+}
+
+function formatMoney(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "--";
+  }
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function signalKey(signal: AdminSignal | null) {
@@ -2581,6 +2705,14 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => snapshot.value?.sessionOverview.sessionId ?? "",
+  (sessionId) => {
+    loadTradingSettingsForSession(sessionId);
+  },
+  { immediate: true },
+);
+
 watch(selectedMarketDay, (marketDayKey) => {
   if (snapshot.value?.sessionOverview.sessionId) {
     startRealtimeDashboardListeners(
@@ -2637,50 +2769,116 @@ onUnmounted(() => {
       </div>
 
       <div class="hero-status-row">
-        <div class="hero-status">
-          <div class="status-dot"></div>
-          <div>
-          <strong>{{ sourceDisplay.title }}</strong>
-          <p>{{ sourceDisplay.description }}</p>
-          <p>
-            Last update:
-            <strong>{{
-              formatLocaleTimestamp(sessionOverview.updatedAt)
-            }}</strong>
-          </p>
-          <p>
-            Access:
-            <strong>{{
-              authState === "authenticated"
-                ? "Authenticated"
-                : authState === "offline"
-                  ? "Offline fallback"
-                  : "Signing in"
-            }}</strong>
-          </p>
-          <p>
-            Browser alerts:
-            <strong>{{ notificationState }}</strong>
-          </p>
+        <div class="hero-status trading-panel">
+          <div class="trading-panel-header">
+            <div class="trading-panel-heading">
+              <div class="status-dot"></div>
+              <div>
+                <p class="eyebrow">Live session</p>
+                <strong>{{ sourceDisplay.title }}</strong>
+                <p>{{ sourceDisplay.description }}</p>
+              </div>
+            </div>
+            <div class="trading-panel-meta">
+              <span>Last update</span>
+              <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong>
+            </div>
+          </div>
           <p v-if="snapshotWarning" class="status-warning">
             {{ snapshotWarning }}
           </p>
-          <p v-if="notificationMessage" class="status-warning">
-            {{ notificationMessage }}
+          <p v-if="tradingSettingsError" class="status-warning">
+            {{ tradingSettingsError }}
           </p>
-          <button
-            type="button"
-            class="action-button ghost"
-            :disabled="notificationState === 'ready'"
-            @click="enableLiveNotifications"
-          >
-            {{
-              notificationState === "ready"
-                ? "Live notifications enabled"
-                : "Enable live notifications"
-            }}
-          </button>
+          <p v-if="tradingSettingsMessage" class="status-success">
+            {{ tradingSettingsMessage }}
+          </p>
+          <div class="trading-mode-switch" role="group" aria-label="Trading mode">
+            <button
+              type="button"
+              class="mode-toggle-button"
+              :class="{ active: tradingMode === 'paper' }"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving"
+              @click="tradingMode = 'paper'"
+            >
+              Paper Trading
+            </button>
+            <button
+              type="button"
+              class="mode-toggle-button"
+              :class="{ active: tradingMode === 'live' }"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving"
+              @click="tradingMode = 'live'"
+            >
+              Live Trading
+            </button>
           </div>
+          <div class="trading-panel-actions">
+            <button
+              type="button"
+              class="action-button ghost"
+              :disabled="tradingSettingsLoading"
+              @click="refreshTradingSettings"
+            >
+              {{ tradingSettingsLoading ? "Refreshing account..." : "Refresh account" }}
+            </button>
+            <button
+              type="button"
+              class="action-button"
+              :disabled="tradingSettingsSaving"
+              @click="saveTradingSettingsFromPanel"
+            >
+              {{ tradingSettingsSaving ? "Saving..." : "Save trading settings" }}
+            </button>
+          </div>
+          <div class="trading-panel-grid">
+            <label v-for="tier in tradingTierKeys" :key="tier" class="trading-field">
+              <span>
+                {{ signalTierLegend[tier].label }}
+              </span>
+              <input
+                v-model.number="tradingAllocations[tier]"
+                type="number"
+                min="0"
+                step="10"
+              />
+              <small>{{ signalTierLegend[tier].description }}</small>
+            </label>
+            <label class="trading-field trading-field-wide">
+              <span>Stop loss (%)</span>
+              <input
+                v-model.number="tradingStopLossPercent"
+                type="number"
+                min="0.01"
+                max="10"
+                step="0.01"
+              />
+              <small>Applied automatically to every BUY order.</small>
+            </label>
+          </div>
+          <div class="trading-account-grid">
+            <article class="trading-account-card">
+              <span>Account total</span>
+              <strong>{{ formatMoney(tradingAccount?.portfolioValue) }}</strong>
+            </article>
+            <article class="trading-account-card">
+              <span>Buying power</span>
+              <strong>{{ formatMoney(tradingAccount?.buyingPower) }}</strong>
+            </article>
+            <article class="trading-account-card">
+              <span>Cash</span>
+              <strong>{{ formatMoney(tradingAccount?.cash) }}</strong>
+            </article>
+            <article class="trading-account-card">
+              <span>Account status</span>
+              <strong>{{
+                tradingAccount?.status || (tradingSettingsLoading ? "Refreshing..." : "Unavailable")
+              }}</strong>
+            </article>
+          </div>
+          <p class="trading-panel-footer">
+            {{ tradingAccount ? `Account mode: ${tradingAccount.mode === 'live' ? 'Live Trading' : 'Paper Trading'}` : 'Trading account not loaded yet.' }}
+          </p>
         </div>
       </div>
     </section>
