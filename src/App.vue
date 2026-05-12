@@ -840,6 +840,15 @@ function syncTradingSettingsDirty() {
   );
 }
 
+function toggleTradingMode() {
+  tradingMode.value = tradingMode.value === "live" ? "paper" : "live";
+  syncTradingSettingsDirty();
+}
+
+function notifyTradingSettingsEdited() {
+  syncTradingSettingsDirty();
+}
+
 watch(
   tradingSettingsCurrentSignature,
   () => {
@@ -2855,7 +2864,7 @@ onUnmounted(() => {
               :aria-checked="tradingMode === 'live'"
               :class="tradingMode"
               :disabled="tradingSettingsLoading || tradingSettingsSaving"
-              @click="tradingMode = tradingMode === 'live' ? 'paper' : 'live'"
+              @click="toggleTradingMode"
             >
               <span class="mode-switch-track">
                 <span class="mode-switch-thumb"></span>
@@ -2900,6 +2909,7 @@ onUnmounted(() => {
                 <input
                   v-model.number="tradingAllocations[tier]"
                   type="number"
+                  @input="notifyTradingSettingsEdited"
                   min="0"
                   step="10"
                 />
@@ -2912,6 +2922,7 @@ onUnmounted(() => {
                 <input
                   v-model.number="tradingStopLossPercent"
                   type="number"
+                  @input="notifyTradingSettingsEdited"
                   min="0.01"
                   max="10"
                   step="0.01"
