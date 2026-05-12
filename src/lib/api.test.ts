@@ -35,7 +35,7 @@ describe('trading settings api', () => {
           opportunistic_buy: 1000,
           speculative_buy: 1000,
         },
-        stop_loss_percent: 0.1,
+        stop_loss_percent: 0.2,
       }, nowIso),
     ).rejects.toThrow('Unexpected empty response from server')
   })
@@ -75,7 +75,7 @@ describe('trading settings api', () => {
     expect(settings.tradingAllocations.balanced_buy).toBe(1000)
     expect(settings.tradingAllocations.opportunistic_buy).toBe(1500)
     expect(settings.tradingAllocations.speculative_buy).toBe(0)
-    expect(settings.tradingStopLossPercent).toBe(0.1)
+    expect(settings.tradingStopLossPercent).toBe(0.2)
     expect(settings.tradingAccount).toEqual({
       mode: 'live',
       status: 'active',

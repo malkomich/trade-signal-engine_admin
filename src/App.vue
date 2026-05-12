@@ -120,7 +120,7 @@ const tradingAllocations = reactive<Record<SignalTier, number>>({
   opportunistic_buy: 1000,
   speculative_buy: 1000,
 });
-const tradingStopLossPercent = ref(0.1);
+const tradingStopLossPercent = ref(DEFAULT_TRADING_STOP_LOSS_PERCENT);
 const tradingAccount = ref<TradingAccountSnapshot | null>(null);
 const tradingSettingsLoading = ref(false);
 const tradingSettingsSaving = ref(false);
@@ -773,8 +773,13 @@ async function loadTradingSettingsForSession(sessionId: string) {
     tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
     tradingAccount.value = null;
     tradingSettingsSessionId.value = normalizedSessionId;
-    tradingSettingsBaselineSignature.value = "";
+    tradingSettingsBaselineSignature.value = tradingSettingsSignature(
+      tradingMode.value,
+      tradingAllocations,
+      tradingStopLossPercent.value,
+    );
     tradingSettingsDirty.value = false;
+    tradingSettingsLoaded.value = true;
   } finally {
     tradingSettingsLoading.value = false;
   }
