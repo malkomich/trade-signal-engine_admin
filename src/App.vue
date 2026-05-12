@@ -79,6 +79,11 @@ import {
   type TradingMode,
   type TradingSettingsSnapshot,
 } from "./lib/api";
+import {
+  isTradingSettingsDirty,
+  tradingSettingsSignature,
+  tradingTierKeys,
+} from "./lib/trading-settings";
 
 const snapshot = ref<DashboardSnapshot | null>(null);
 const selectedSignal = ref<DashboardSnapshot["selectedSignal"] | null>(null);
@@ -108,12 +113,6 @@ const selectedLedgerSnapshotId = ref<string>("");
 const selectedWindowReviewId = ref<string>("");
 const selectedOptimizationReviewId = ref<string>("");
 const tradingMode = ref<TradingMode>("paper");
-const tradingTierKeys: SignalTier[] = [
-  "conviction_buy",
-  "balanced_buy",
-  "opportunistic_buy",
-  "speculative_buy",
-];
 const tradingAllocations = reactive<Record<SignalTier, number>>({
   conviction_buy: 1000,
   balanced_buy: 1000,
@@ -167,22 +166,6 @@ const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
 const LIVE_SIGNAL_PAGE_SIZE = 20;
 const getMarketDayKey = (value: string | Date) =>
   marketDayKeyForTimestamp(value) || currentMarketDayKey();
-function tradingSettingsSignature(
-  mode: TradingMode,
-  allocations: Record<SignalTier, number>,
-  stopLossPercent: number,
-) {
-  return JSON.stringify({
-    mode,
-    allocations: {
-      conviction_buy: Number(allocations.conviction_buy) || 0,
-      balanced_buy: Number(allocations.balanced_buy) || 0,
-      opportunistic_buy: Number(allocations.opportunistic_buy) || 0,
-      speculative_buy: Number(allocations.speculative_buy) || 0,
-    },
-    stopLossPercent: Number(stopLossPercent) || 0,
-  });
-}
 const sessionOverview = computed(
   () => snapshot.value?.sessionOverview ?? emptySessionOverview(),
 );
@@ -849,11 +832,18 @@ const tradingSettingsCurrentSignature = computed(() =>
   ),
 );
 
+function syncTradingSettingsDirty() {
+  tradingSettingsDirty.value = isTradingSettingsDirty(
+    tradingSettingsLoaded.value,
+    tradingSettingsBaselineSignature.value,
+    tradingSettingsCurrentSignature.value,
+  );
+}
+
 watch(
   tradingSettingsCurrentSignature,
-  (signature) => {
-    tradingSettingsDirty.value =
-      tradingSettingsLoaded.value && signature !== tradingSettingsBaselineSignature.value;
+  () => {
+    syncTradingSettingsDirty();
   },
   { immediate: true },
 );
@@ -2817,7 +2807,7 @@ onUnmounted(() => {
 
 <template>
   <main class="shell">
-    <section class="hero">
+    <section class="hero trading-panel-layout">
       <div>
         <p class="eyebrow">Trade Signal Engine</p>
         <h1>Live signal control room</h1>
@@ -2857,65 +2847,77 @@ onUnmounted(() => {
           <p v-if="tradingSettingsMessage" class="status-success">
             {{ tradingSettingsMessage }}
           </p>
-          <div class="trading-mode-switch" role="group" aria-label="Trading mode">
-            <button
-              type="button"
-              class="mode-toggle-button"
-              :class="{ active: tradingMode === 'paper' }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving"
-              @click="tradingMode = 'paper'"
-            >
-              Paper Trading
-            </button>
-            <button
-              type="button"
-              class="mode-toggle-button"
-              :class="{ active: tradingMode === 'live' }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving"
-              @click="tradingMode = 'live'"
-            >
-              Live Trading
-            </button>
-          </div>
           <div class="trading-panel-actions">
             <button
               type="button"
-              class="action-button ghost"
+              class="mode-switch"
+              role="switch"
+              :aria-checked="tradingMode === 'live'"
+              :class="tradingMode"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving"
+              @click="tradingMode = tradingMode === 'live' ? 'paper' : 'live'"
+            >
+              <span class="mode-switch-track">
+                <span class="mode-switch-thumb"></span>
+              </span>
+              <span class="mode-switch-label">
+                {{ tradingMode === 'live' ? 'Live Trading' : 'Paper Trading' }}
+              </span>
+            </button>
+            <button
+              type="button"
+              class="action-button icon-button"
               :disabled="tradingSettingsLoading"
               @click="refreshTradingSettings"
+              aria-label="Refresh account"
+              title="Refresh account"
             >
-              {{ tradingSettingsLoading ? "Refreshing account..." : "Refresh account" }}
+              ↻
             </button>
             <button
               type="button"
               class="action-button"
               :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled || !tradingSettingsDirty"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
               @click="saveTradingSettingsFromPanel"
             >
-              {{ tradingSettingsSaving ? "Saving..." : "Save trading settings" }}
+              {{ tradingSettingsSaving ? "Saving..." : "Save" }}
             </button>
           </div>
-          <div class="trading-panel-grid">
-            <label v-for="tier in tradingTierKeys" :key="tier" class="trading-field">
-              <span>{{ signalTierLegend[tier].label }}</span>
-              <input
-                v-model.number="tradingAllocations[tier]"
-                type="number"
-                min="0"
-                step="10"
-              />
-            </label>
-            <label class="trading-field trading-field-wide">
-              <span>Stop loss (%)</span>
-              <input
-                v-model.number="tradingStopLossPercent"
-                type="number"
-                min="0.01"
-                max="10"
-                step="0.01"
-              />
-            </label>
+          <div class="trading-settings-panel">
+            <div class="trading-settings-panel-header">
+              <div>
+                <p class="eyebrow">Signal sizing</p>
+                <strong>Buy allocation by tier</strong>
+              </div>
+            </div>
+            <div class="trading-settings-list">
+              <label v-for="tier in tradingTierKeys" :key="tier" class="trading-tier-row">
+                <span class="signal-tier-badge trading-tier-chip" :class="tier">
+                  <i>{{ signalTierLegend[tier].icon }}</i>
+                </span>
+                <span class="trading-tier-label">{{ signalTierLegend[tier].label }}</span>
+                <input
+                  v-model.number="tradingAllocations[tier]"
+                  type="number"
+                  min="0"
+                  step="10"
+                />
+              </label>
+              <label class="trading-tier-row trading-tier-row-wide">
+                <span class="signal-tier-badge trading-tier-chip stop-loss">
+                  <i>SL</i>
+                </span>
+                <span class="trading-tier-label">Stop loss (%)</span>
+                <input
+                  v-model.number="tradingStopLossPercent"
+                  type="number"
+                  min="0.01"
+                  max="10"
+                  step="0.01"
+                />
+              </label>
+            </div>
           </div>
           <div class="trading-account-grid">
             <article class="trading-account-card">
