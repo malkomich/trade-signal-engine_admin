@@ -28,12 +28,18 @@ export type TradingSettingsPayload = {
   stop_loss_percent: number
 }
 
-const DEFAULT_API_BASE_URL = 'https://tradesignalengine.backend.synapsesea.com/api'
 const DEFAULT_TRADING_STOP_LOSS_PERCENT = 0.1
 export const tradingWritesEnabled = import.meta.env.VITE_TRADING_WRITES_ENABLED?.trim() !== 'false'
 
 function resolveApiBaseUrl() {
-  return (import.meta.env.VITE_API_BASE_URL?.trim() || DEFAULT_API_BASE_URL).replace(/\/$/, '')
+  const baseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
+  if (baseUrl) {
+    return baseUrl.replace(/\/$/, '')
+  }
+  if (import.meta.env.DEV || import.meta.env.MODE === 'test') {
+    return 'http://127.0.0.1:8080/api'
+  }
+  throw new Error('VITE_API_BASE_URL is required')
 }
 
 function parseFiniteNumber(value: unknown, fallback: number) {
