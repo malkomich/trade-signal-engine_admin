@@ -34,7 +34,7 @@ input {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.8fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 24px;
   align-items: end;
   margin-bottom: 24px;
@@ -138,10 +138,6 @@ h1 {
   margin-bottom: 4px;
 }
 
-.trading-panel-heading p {
-  margin-bottom: 0;
-}
-
 .trading-panel-meta {
   text-align: right;
   padding: 10px 14px;
@@ -218,11 +214,6 @@ h1 {
 .trading-field span {
   color: #ecf3ff;
   font-weight: 600;
-}
-
-.trading-field small {
-  color: #9fb0ca;
-  line-height: 1.4;
 }
 
 .trading-field input {
@@ -1388,6 +1379,12 @@ h1 {
   color: #ecf3ff;
   padding: 10px 14px;
   cursor: pointer;
+}
+
+.action-button.active {
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.16), 0 10px 24px rgba(56, 189, 248, 0.18);
+  border-color: rgba(125, 211, 252, 0.72);
+  background: rgba(125, 211, 252, 0.18);
 }
 
 .action-button.ghost {

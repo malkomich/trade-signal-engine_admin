@@ -125,6 +125,8 @@ const tradingAccount = ref<TradingAccountSnapshot | null>(null);
 const tradingSettingsLoading = ref(false);
 const tradingSettingsSaving = ref(false);
 const tradingSettingsLoaded = ref(false);
+const tradingSettingsDirty = ref(false);
+const tradingSettingsBaselineSignature = ref("");
 const tradingSettingsError = ref<string | null>(null);
 const tradingSettingsMessage = ref<string | null>(null);
 const tradingSettingsSessionId = ref<string>("");
@@ -165,6 +167,22 @@ const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
 const LIVE_SIGNAL_PAGE_SIZE = 20;
 const getMarketDayKey = (value: string | Date) =>
   marketDayKeyForTimestamp(value) || currentMarketDayKey();
+function tradingSettingsSignature(
+  mode: TradingMode,
+  allocations: Record<SignalTier, number>,
+  stopLossPercent: number,
+) {
+  return JSON.stringify({
+    mode,
+    allocations: {
+      conviction_buy: Number(allocations.conviction_buy) || 0,
+      balanced_buy: Number(allocations.balanced_buy) || 0,
+      opportunistic_buy: Number(allocations.opportunistic_buy) || 0,
+      speculative_buy: Number(allocations.speculative_buy) || 0,
+    },
+    stopLossPercent: Number(stopLossPercent) || 0,
+  });
+}
 const sessionOverview = computed(
   () => snapshot.value?.sessionOverview ?? emptySessionOverview(),
 );
@@ -695,13 +713,11 @@ const sourceDisplay = computed(() => {
   if (snapshotSource.value === "live") {
     return {
       title: "Live session",
-      description: "Live trading data is available for the selected day.",
     };
   }
 
   return {
     title: "Waiting for live session",
-    description: "No live trading data has been written for the selected day yet.",
   };
 });
 
@@ -733,6 +749,12 @@ function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   tradingStopLossPercent.value = settings.tradingStopLossPercent;
   tradingAccount.value = settings.tradingAccount;
   tradingSettingsSessionId.value = settings.sessionId;
+  tradingSettingsBaselineSignature.value = tradingSettingsSignature(
+    settings.tradingMode,
+    settings.tradingAllocations,
+    settings.tradingStopLossPercent,
+  );
+  tradingSettingsDirty.value = false;
   tradingSettingsLoaded.value = true;
 }
 
@@ -748,6 +770,8 @@ async function loadTradingSettingsForSession(sessionId: string) {
     tradingSettingsError.value = null;
     tradingSettingsMessage.value = null;
     tradingSettingsSessionId.value = "";
+    tradingSettingsBaselineSignature.value = "";
+    tradingSettingsDirty.value = false;
     return;
   }
   tradingSettingsLoading.value = true;
@@ -764,6 +788,8 @@ async function loadTradingSettingsForSession(sessionId: string) {
     tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
     tradingAccount.value = null;
     tradingSettingsSessionId.value = normalizedSessionId;
+    tradingSettingsBaselineSignature.value = "";
+    tradingSettingsDirty.value = false;
   } finally {
     tradingSettingsLoading.value = false;
   }
@@ -781,6 +807,10 @@ async function saveTradingSettingsFromPanel() {
   }
   if (!tradingSettingsLoaded.value) {
     tradingSettingsError.value = "Trading settings must be loaded before saving.";
+    return;
+  }
+  if (!tradingSettingsDirty.value) {
+    tradingSettingsError.value = "No trading setting changes detected.";
     return;
   }
   tradingSettingsSaving.value = true;
@@ -810,6 +840,23 @@ async function saveTradingSettingsFromPanel() {
     tradingSettingsSaving.value = false;
   }
 }
+
+const tradingSettingsCurrentSignature = computed(() =>
+  tradingSettingsSignature(
+    tradingMode.value,
+    tradingAllocations,
+    tradingStopLossPercent.value,
+  ),
+);
+
+watch(
+  tradingSettingsCurrentSignature,
+  (signature) => {
+    tradingSettingsDirty.value =
+      tradingSettingsLoaded.value && signature !== tradingSettingsBaselineSignature.value;
+  },
+  { immediate: true },
+);
 
 function refreshTradingSettings() {
   return loadTradingSettingsForSession(sessionOverview.value.sessionId);
@@ -2793,9 +2840,7 @@ onUnmounted(() => {
             <div class="trading-panel-heading">
               <div class="status-dot"></div>
               <div>
-                <p class="eyebrow">Live session</p>
                 <strong>{{ sourceDisplay.title }}</strong>
-                <p>{{ sourceDisplay.description }}</p>
               </div>
             </div>
             <div class="trading-panel-meta">
@@ -2844,7 +2889,8 @@ onUnmounted(() => {
             <button
               type="button"
               class="action-button"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled"
+              :class="{ active: tradingSettingsDirty }"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled || !tradingSettingsDirty"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save trading settings" }}
@@ -2852,16 +2898,13 @@ onUnmounted(() => {
           </div>
           <div class="trading-panel-grid">
             <label v-for="tier in tradingTierKeys" :key="tier" class="trading-field">
-              <span>
-                {{ signalTierLegend[tier].label }}
-              </span>
+              <span>{{ signalTierLegend[tier].label }}</span>
               <input
                 v-model.number="tradingAllocations[tier]"
                 type="number"
                 min="0"
                 step="10"
               />
-              <small>{{ signalTierLegend[tier].description }}</small>
             </label>
             <label class="trading-field trading-field-wide">
               <span>Stop loss (%)</span>
@@ -2872,7 +2915,6 @@ onUnmounted(() => {
                 max="10"
                 step="0.01"
               />
-              <small>Applied automatically to every BUY order.</small>
             </label>
           </div>
           <div class="trading-account-grid">
@@ -2895,9 +2937,6 @@ onUnmounted(() => {
               }}</strong>
             </article>
           </div>
-          <p class="trading-panel-footer">
-            {{ tradingAccount ? `Account mode: ${tradingAccount.mode === 'live' ? 'Live Trading' : 'Paper Trading'}` : 'Trading account not loaded yet.' }}
-          </p>
         </div>
       </div>
     </section>
