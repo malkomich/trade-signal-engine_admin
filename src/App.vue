@@ -74,7 +74,6 @@ import {
   DEFAULT_TRADING_STOP_LOSS_PERCENT,
   loadTradingSettings,
   saveTradingSettings,
-  tradingWritesEnabled,
   type TradingAccountSnapshot,
   type TradingMode,
   type TradingSettingsSnapshot,
@@ -789,10 +788,6 @@ async function saveTradingSettingsFromPanel() {
   const sessionId = String(sessionOverview.value.sessionId ?? "").trim();
   if (!sessionId) {
     tradingSettingsError.value = "No live session is available yet.";
-    return;
-  }
-  if (!tradingWritesEnabled) {
-    tradingSettingsError.value = "Trading writes are disabled in this build.";
     return;
   }
   if (!tradingSettingsLoaded.value) {
@@ -2930,7 +2925,7 @@ onUnmounted(() => {
               type="button"
               class="action-button"
               :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled || !tradingSettingsDirty"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save" }}
