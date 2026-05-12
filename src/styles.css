@@ -149,6 +149,22 @@ h1 {
   border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
+.trading-panel-meta-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.trading-panel-meta-inline span {
+  display: inline;
+  margin-bottom: 0;
+}
+
+.trading-panel-meta-inline strong {
+  display: inline;
+}
+
 .trading-panel-meta span {
   display: block;
   color: #9fb0ca;
@@ -249,16 +265,6 @@ h1 {
   border-radius: 18px;
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.14);
-}
-
-.trading-settings-panel-header {
-  margin-bottom: 10px;
-}
-
-.trading-settings-panel-header strong {
-  display: block;
-  color: #ecf3ff;
-  margin-bottom: 4px;
 }
 
 .trading-settings-list {
@@ -1195,6 +1201,22 @@ h1 {
   gap: 16px;
 }
 
+.window-detail-title {
+  align-items: center;
+}
+
+.window-detail-heading,
+.window-detail-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.window-detail-actions {
+  justify-content: flex-end;
+}
+
 .selected-signal-actions {
   align-items: center;
 }
@@ -1664,6 +1686,10 @@ section.panel.two-column {
     grid-template-columns: 1fr;
   }
 
+  .hero.trading-panel-layout {
+    grid-template-columns: 1fr;
+  }
+
   .grid > .panel {
     grid-column: auto;
   }
@@ -1708,6 +1734,10 @@ section.panel.two-column {
   .trading-panel-meta {
     width: 100%;
     text-align: left;
+  }
+
+  .trading-panel-meta-inline {
+    white-space: normal;
   }
 
   .trading-panel-grid {

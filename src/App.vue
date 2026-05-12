@@ -109,6 +109,7 @@ const liveDataAvailable = ref(true);
 const notificationState = ref<NotificationSetupState>("unsupported");
 const notificationMessage = ref<string | null>(null);
 const selectedSignalCopyState = ref<string | null>(null);
+const selectedWindowCopyState = ref<string | null>(null);
 const selectedLedgerSnapshotId = ref<string>("");
 const selectedWindowReviewId = ref<string>("");
 const selectedOptimizationReviewId = ref<string>("");
@@ -137,7 +138,8 @@ const decisionDayPickerRef = ref<HTMLInputElement | null>(null);
 const windowDayPickerRef = ref<HTMLInputElement | null>(null);
 const chartModalCardRef = ref<HTMLElement | null>(null);
 const chartModalCloseButton = ref<HTMLButtonElement | null>(null);
-let selectedSignalCopyTimer: number | null = null;
+const selectedSignalCopyTimer = ref<number | null>(null);
+const selectedWindowCopyTimer = ref<number | null>(null);
 const selectedSignalCopyFeedbackDurationMs = 1800;
 let chartModalPreviousFocus: HTMLElement | null = null;
 let notificationSetupGeneration = 0;
@@ -2331,6 +2333,49 @@ function formatWindowOptimizationChange(changePct: number) {
   return `${sign}${changePct.toFixed(2)}%`;
 }
 
+function setCopyFeedback(
+  state: Ref<string | null>,
+  timerRef: Ref<number | null>,
+  message: string,
+) {
+  state.value = message;
+  if (timerRef.value !== null) {
+    window.clearTimeout(timerRef.value);
+  }
+  timerRef.value = window.setTimeout(() => {
+    if (state.value === message) {
+      state.value = null;
+    }
+    timerRef.value = null;
+  }, selectedSignalCopyFeedbackDurationMs);
+}
+
+async function copyTextToClipboard(
+  text: string,
+  state: Ref<string | null>,
+  timerRef: Ref<number | null>,
+  successMessage: string,
+  unavailableMessage: string,
+  errorMessage: string,
+) {
+  if (
+    !text ||
+    typeof navigator === "undefined" ||
+    !navigator.clipboard?.writeText
+  ) {
+    setCopyFeedback(state, timerRef, unavailableMessage);
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    setCopyFeedback(state, timerRef, successMessage);
+  } catch (error) {
+    console.error(`Failed to copy ${successMessage.toLowerCase()}:`, error);
+    setCopyFeedback(state, timerRef, errorMessage);
+  }
+}
+
 async function saveWindowReviewOptimization() {
   if (!snapshot.value || !liveDataAvailable.value) {
     return;
@@ -2393,34 +2438,26 @@ function closeExpandedChart() {
 
 async function copySelectedSignalId() {
   const signalId = selectedSignal.value?.id?.trim();
-  const setFeedback = (message: string) => {
-    selectedSignalCopyState.value = message;
-    if (selectedSignalCopyTimer !== null) {
-      window.clearTimeout(selectedSignalCopyTimer);
-    }
-    selectedSignalCopyTimer = window.setTimeout(() => {
-      if (selectedSignalCopyState.value === message) {
-        selectedSignalCopyState.value = null;
-      }
-      selectedSignalCopyTimer = null;
-    }, selectedSignalCopyFeedbackDurationMs);
-  };
-  if (
-    !signalId ||
-    typeof navigator === "undefined" ||
-    !navigator.clipboard?.writeText
-  ) {
-    setFeedback("Copy unavailable");
-    return;
-  }
+  await copyTextToClipboard(
+    signalId ?? "",
+    selectedSignalCopyState,
+    selectedSignalCopyTimer,
+    "Copied signal id",
+    "Copy unavailable",
+    "Copy failed",
+  );
+}
 
-  try {
-    await navigator.clipboard.writeText(signalId);
-    setFeedback("Copied signal id");
-  } catch (error) {
-    console.error("Failed to copy signal id:", error);
-    setFeedback("Copy failed");
-  }
+async function copySelectedWindowId() {
+  const windowId = selectedWindowReview.value?.id?.trim();
+  await copyTextToClipboard(
+    windowId ?? "",
+    selectedWindowCopyState,
+    selectedWindowCopyTimer,
+    "Copied window id",
+    "Copy unavailable",
+    "Copy failed",
+  );
 }
 
 function getFocusableElements(root: HTMLElement) {
@@ -2789,9 +2826,13 @@ watch(selectedMarketDay, (marketDayKey) => {
 
 onUnmounted(() => {
   isMounted = false;
-  if (selectedSignalCopyTimer !== null) {
-    window.clearTimeout(selectedSignalCopyTimer);
-    selectedSignalCopyTimer = null;
+  if (selectedSignalCopyTimer.value !== null) {
+    window.clearTimeout(selectedSignalCopyTimer.value);
+    selectedSignalCopyTimer.value = null;
+  }
+  if (selectedWindowCopyTimer.value !== null) {
+    window.clearTimeout(selectedWindowCopyTimer.value);
+    selectedWindowCopyTimer.value = null;
   }
   if (dashboardRefreshTimer !== null) {
     window.clearTimeout(dashboardRefreshTimer);
@@ -2842,16 +2883,13 @@ onUnmounted(() => {
                 <strong>{{ sourceDisplay.title }}</strong>
               </div>
             </div>
-            <div class="trading-panel-meta">
+            <div class="trading-panel-meta trading-panel-meta-inline">
               <span>Last update</span>
               <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong>
             </div>
           </div>
           <p v-if="snapshotWarning" class="status-warning">
             {{ snapshotWarning }}
-          </p>
-          <p v-if="tradingSettingsError" class="status-warning">
-            {{ tradingSettingsError }}
           </p>
           <p v-if="tradingSettingsMessage" class="status-success">
             {{ tradingSettingsMessage }}
@@ -2887,19 +2925,13 @@ onUnmounted(() => {
               type="button"
               class="action-button"
               :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled || !tradingSettingsDirty"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save" }}
             </button>
           </div>
           <div class="trading-settings-panel">
-            <div class="trading-settings-panel-header">
-              <div>
-                <p class="eyebrow">Signal sizing</p>
-                <strong>Buy allocation by tier</strong>
-              </div>
-            </div>
             <div class="trading-settings-list">
               <label v-for="tier in tradingTierKeys" :key="tier" class="trading-tier-row">
                 <span class="signal-tier-badge trading-tier-chip" :class="tier">
@@ -3342,11 +3374,33 @@ onUnmounted(() => {
             No trade windows available for the selected filters and day.
           </div>
           <div v-if="selectedWindowReview" class="detail-card window-detail">
-            <div class="detail-title">
-              <strong>{{ selectedWindowReview.symbol }}</strong>
-              <span>{{
-                formatWindowStatusLabel(selectedWindowReview.status)
-              }}</span>
+            <div class="detail-title window-detail-title">
+              <div class="window-detail-heading">
+                <strong>{{ selectedWindowReview.symbol }}</strong>
+                <span>{{
+                  formatWindowStatusLabel(selectedWindowReview.status)
+                }}</span>
+              </div>
+              <div class="window-detail-actions">
+                <button
+                  type="button"
+                  class="action-button ghost compact"
+                  :disabled="!selectedWindowReview.id"
+                  :title="selectedWindowReview.id ? 'Copy trade window id to clipboard' : 'No trade window id available'"
+                  @click="copySelectedWindowId"
+                >
+                  Copy ID
+                </button>
+                <span
+                  v-if="selectedWindowCopyState"
+                  class="copy-feedback"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  {{ selectedWindowCopyState }}
+                </span>
+              </div>
             </div>
             <div class="score-grid">
               <div>
