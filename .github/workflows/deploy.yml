@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+      VITE_API_BASE_URL: https://tradesignalengine.backend.synapsesea.com/api
 
     steps:
       - name: Checkout
