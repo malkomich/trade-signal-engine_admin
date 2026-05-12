@@ -29,9 +29,21 @@ export type TradingSettingsPayload = {
 }
 
 const DEFAULT_API_BASE_URL = 'https://tradesignalengine.backend.synapsesea.com/api'
+const DEFAULT_TRADING_STOP_LOSS_PERCENT = 0.1
+export const tradingWritesEnabled = import.meta.env.VITE_TRADING_WRITES_ENABLED?.trim() !== 'false'
 
 function resolveApiBaseUrl() {
   return (import.meta.env.VITE_API_BASE_URL?.trim() || DEFAULT_API_BASE_URL).replace(/\/$/, '')
+}
+
+function parseFiniteNumber(value: unknown, fallback: number) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function parsePositiveNumber(value: unknown, fallback: number) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -71,7 +83,7 @@ function parseTradingAllocations(value: unknown): Record<SignalTier, number> {
   for (const tier of Object.keys(defaults) as SignalTier[]) {
     const raw = (value as Record<string, unknown>)[tier]
     const parsed = Number(raw)
-    if (Number.isFinite(parsed) && parsed > 0) {
+    if (Number.isFinite(parsed) && parsed >= 0) {
       allocations[tier] = parsed
     }
   }
@@ -87,21 +99,24 @@ function parseTradingAccount(value: unknown): TradingAccountSnapshot | null {
   return {
     mode,
     status: String(raw.status ?? '').trim(),
-    buyingPower: Number(raw.buying_power ?? 0),
-    cash: Number(raw.cash ?? 0),
-    equity: Number(raw.equity ?? 0),
-    portfolioValue: Number(raw.portfolio_value ?? 0),
+    buyingPower: parseFiniteNumber(raw.buying_power, 0),
+    cash: parseFiniteNumber(raw.cash, 0),
+    equity: parseFiniteNumber(raw.equity, 0),
+    portfolioValue: parseFiniteNumber(raw.portfolio_value, 0),
     updatedAt: String(raw.updated_at ?? '').trim(),
   }
 }
 
 export async function loadTradingSettings(sessionId: string): Promise<TradingSettingsSnapshot> {
   const payload = await requestJson<Record<string, unknown>>(`/v1/sessions/${encodeURIComponent(sessionId)}/trading`)
+  if (!payload) {
+    throw new Error('Unexpected empty response from server')
+  }
   return {
     sessionId: String(payload.session_id ?? sessionId),
     tradingMode: parseTradingMode(payload.trading_mode),
     tradingAllocations: parseTradingAllocations(payload.trading_allocations),
-    tradingStopLossPercent: Number(payload.trading_stop_loss_percent ?? 0.1),
+    tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, DEFAULT_TRADING_STOP_LOSS_PERCENT),
     tradingAccount: parseTradingAccount(payload.trading_account),
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,
     updatedAt: String(payload.updated_at ?? new Date().toISOString()),
@@ -121,11 +136,14 @@ export async function saveTradingSettings(
       stop_loss_percent: settings.stop_loss_percent,
     }),
   })
+  if (!payload) {
+    throw new Error('Unexpected empty response from server')
+  }
   return {
     sessionId: String(payload.session_id ?? sessionId),
     tradingMode: parseTradingMode(payload.trading_mode),
     tradingAllocations: parseTradingAllocations(payload.trading_allocations),
-    tradingStopLossPercent: Number(payload.trading_stop_loss_percent ?? settings.stop_loss_percent),
+    tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, settings.stop_loss_percent),
     tradingAccount: parseTradingAccount(payload.trading_account),
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,
     updatedAt: String(payload.updated_at ?? new Date().toISOString()),

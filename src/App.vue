@@ -72,6 +72,7 @@ import {
 import {
   loadTradingSettings,
   saveTradingSettings,
+  tradingWritesEnabled,
   type TradingAccountSnapshot,
   type TradingMode,
   type TradingSettingsSnapshot,
@@ -121,6 +122,7 @@ const tradingStopLossPercent = ref(0.1);
 const tradingAccount = ref<TradingAccountSnapshot | null>(null);
 const tradingSettingsLoading = ref(false);
 const tradingSettingsSaving = ref(false);
+const tradingSettingsLoaded = ref(false);
 const tradingSettingsError = ref<string | null>(null);
 const tradingSettingsMessage = ref<string | null>(null);
 const tradingSettingsSessionId = ref<string>("");
@@ -729,10 +731,13 @@ function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   tradingStopLossPercent.value = settings.tradingStopLossPercent;
   tradingAccount.value = settings.tradingAccount;
   tradingSettingsSessionId.value = settings.sessionId;
+  tradingSettingsLoaded.value = true;
 }
 
 async function loadTradingSettingsForSession(sessionId: string) {
   const normalizedSessionId = String(sessionId ?? "").trim();
+  tradingSettingsMessage.value = null;
+  tradingSettingsLoaded.value = false;
   if (!normalizedSessionId) {
     tradingMode.value = "paper";
     Object.assign(tradingAllocations, defaultTradingAllocations());
@@ -768,6 +773,14 @@ async function saveTradingSettingsFromPanel() {
     tradingSettingsError.value = "No live session is available yet.";
     return;
   }
+  if (!tradingWritesEnabled) {
+    tradingSettingsError.value = "Trading writes are disabled in this build.";
+    return;
+  }
+  if (!tradingSettingsLoaded.value) {
+    tradingSettingsError.value = "Trading settings must be loaded before saving.";
+    return;
+  }
   tradingSettingsSaving.value = true;
   tradingSettingsError.value = null;
   tradingSettingsMessage.value = null;
@@ -800,7 +813,7 @@ function formatMoney(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return "--";
   }
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
@@ -2825,7 +2838,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="action-button"
-              :disabled="tradingSettingsSaving"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save trading settings" }}

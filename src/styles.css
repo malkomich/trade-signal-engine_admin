@@ -1619,6 +1619,27 @@ section.panel.two-column {
     align-items: center;
   }
 
+  .trading-panel-header {
+    flex-direction: column;
+  }
+
+  .trading-panel-meta {
+    width: 100%;
+    text-align: left;
+  }
+
+  .trading-panel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trading-field-wide {
+    grid-column: auto;
+  }
+
+  .trading-account-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .optimizer-actions-inline {
     justify-content: flex-start;
   }
