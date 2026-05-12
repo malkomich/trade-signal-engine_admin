@@ -28,7 +28,8 @@ export type TradingSettingsPayload = {
   stop_loss_percent: number
 }
 
-const DEFAULT_TRADING_STOP_LOSS_PERCENT = 0.1
+export const DEFAULT_TRADING_ALLOCATION = 1000
+export const DEFAULT_TRADING_STOP_LOSS_PERCENT = 0.1
 export const tradingWritesEnabled = import.meta.env.VITE_TRADING_WRITES_ENABLED?.trim() !== 'false'
 
 function resolveApiBaseUrl() {
@@ -77,10 +78,10 @@ function parseTradingMode(value: unknown): TradingMode {
 
 function parseTradingAllocations(value: unknown): Record<SignalTier, number> {
   const defaults: Record<SignalTier, number> = {
-    conviction_buy: 1000,
-    balanced_buy: 1000,
-    opportunistic_buy: 1000,
-    speculative_buy: 1000,
+    conviction_buy: DEFAULT_TRADING_ALLOCATION,
+    balanced_buy: DEFAULT_TRADING_ALLOCATION,
+    opportunistic_buy: DEFAULT_TRADING_ALLOCATION,
+    speculative_buy: DEFAULT_TRADING_ALLOCATION,
   }
   if (!value || typeof value !== 'object') {
     return defaults
@@ -113,7 +114,10 @@ function parseTradingAccount(value: unknown): TradingAccountSnapshot | null {
   }
 }
 
-export async function loadTradingSettings(sessionId: string): Promise<TradingSettingsSnapshot> {
+export async function loadTradingSettings(
+  sessionId: string,
+  nowIso: string,
+): Promise<TradingSettingsSnapshot> {
   const payload = await requestJson<Record<string, unknown>>(`/v1/sessions/${encodeURIComponent(sessionId)}/trading`)
   if (!payload) {
     throw new Error('Unexpected empty response from server')
@@ -125,13 +129,14 @@ export async function loadTradingSettings(sessionId: string): Promise<TradingSet
     tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, DEFAULT_TRADING_STOP_LOSS_PERCENT),
     tradingAccount: parseTradingAccount(payload.trading_account),
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,
-    updatedAt: String(payload.updated_at ?? new Date().toISOString()),
+    updatedAt: String(payload.updated_at ?? nowIso),
   }
 }
 
 export async function saveTradingSettings(
   sessionId: string,
   settings: TradingSettingsPayload,
+  nowIso: string,
 ): Promise<TradingSettingsSnapshot> {
   const payload = await requestJson<Record<string, unknown>>(`/v1/sessions/${encodeURIComponent(sessionId)}/trading`, {
     method: 'PUT',
@@ -152,6 +157,6 @@ export async function saveTradingSettings(
     tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, settings.stop_loss_percent),
     tradingAccount: parseTradingAccount(payload.trading_account),
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,
-    updatedAt: String(payload.updated_at ?? new Date().toISOString()),
+    updatedAt: String(payload.updated_at ?? nowIso),
   }
 }

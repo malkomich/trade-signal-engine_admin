@@ -70,6 +70,8 @@ import {
   signalTierLegend,
 } from "./lib/engine";
 import {
+  DEFAULT_TRADING_ALLOCATION,
+  DEFAULT_TRADING_STOP_LOSS_PERCENT,
   loadTradingSettings,
   saveTradingSettings,
   tradingWritesEnabled,
@@ -716,17 +718,17 @@ function emptySessionOverview(): DashboardSnapshot["sessionOverview"] {
 
 function defaultTradingAllocations(): Record<SignalTier, number> {
   return {
-    conviction_buy: 1000,
-    balanced_buy: 1000,
-    opportunistic_buy: 1000,
-    speculative_buy: 1000,
+    conviction_buy: DEFAULT_TRADING_ALLOCATION,
+    balanced_buy: DEFAULT_TRADING_ALLOCATION,
+    opportunistic_buy: DEFAULT_TRADING_ALLOCATION,
+    speculative_buy: DEFAULT_TRADING_ALLOCATION,
   };
 }
 
 function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   tradingMode.value = settings.tradingMode;
   for (const tier of tradingTierKeys) {
-    tradingAllocations[tier] = settings.tradingAllocations[tier] ?? 1000;
+    tradingAllocations[tier] = settings.tradingAllocations[tier] ?? DEFAULT_TRADING_ALLOCATION;
   }
   tradingStopLossPercent.value = settings.tradingStopLossPercent;
   tradingAccount.value = settings.tradingAccount;
@@ -741,7 +743,7 @@ async function loadTradingSettingsForSession(sessionId: string) {
   if (!normalizedSessionId) {
     tradingMode.value = "paper";
     Object.assign(tradingAllocations, defaultTradingAllocations());
-    tradingStopLossPercent.value = 0.1;
+    tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
     tradingAccount.value = null;
     tradingSettingsError.value = null;
     tradingSettingsMessage.value = null;
@@ -751,7 +753,7 @@ async function loadTradingSettingsForSession(sessionId: string) {
   tradingSettingsLoading.value = true;
   tradingSettingsError.value = null;
   try {
-    const settings = await loadTradingSettings(normalizedSessionId);
+    const settings = await loadTradingSettings(normalizedSessionId, new Date().toISOString());
     applyTradingSettingsSnapshot(settings);
   } catch (error) {
     tradingSettingsError.value =
@@ -759,7 +761,7 @@ async function loadTradingSettingsForSession(sessionId: string) {
     tradingSettingsMessage.value = null;
     tradingMode.value = "paper";
     Object.assign(tradingAllocations, defaultTradingAllocations());
-    tradingStopLossPercent.value = 0.1;
+    tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
     tradingAccount.value = null;
     tradingSettingsSessionId.value = normalizedSessionId;
   } finally {
@@ -785,6 +787,7 @@ async function saveTradingSettingsFromPanel() {
   tradingSettingsError.value = null;
   tradingSettingsMessage.value = null;
   try {
+    const normalizedStopLossPercent = Number(tradingStopLossPercent.value);
     const settings = await saveTradingSettings(sessionId, {
       mode: tradingMode.value,
       allocations: {
@@ -793,8 +796,11 @@ async function saveTradingSettingsFromPanel() {
         opportunistic_buy: Number(tradingAllocations.opportunistic_buy) || 0,
         speculative_buy: Number(tradingAllocations.speculative_buy) || 0,
       },
-      stop_loss_percent: Number(tradingStopLossPercent.value) || 0.1,
-    });
+      stop_loss_percent:
+        Number.isFinite(normalizedStopLossPercent) && normalizedStopLossPercent > 0
+          ? normalizedStopLossPercent
+          : DEFAULT_TRADING_STOP_LOSS_PERCENT,
+    }, new Date().toISOString());
     applyTradingSettingsSnapshot(settings);
     tradingSettingsMessage.value = "Trading settings saved.";
   } catch (error) {

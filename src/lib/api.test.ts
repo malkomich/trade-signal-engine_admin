@@ -11,6 +11,8 @@ function createJsonResponse(status: number, body: unknown) {
 }
 
 describe('trading settings api', () => {
+  const nowIso = '2026-05-12T10:00:00Z'
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -18,7 +20,7 @@ describe('trading settings api', () => {
   it('rejects empty load responses', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => createJsonResponse(204, null)))
 
-    await expect(loadTradingSettings('session-1')).rejects.toThrow('Unexpected empty response from server')
+    await expect(loadTradingSettings('session-1', nowIso)).rejects.toThrow('Unexpected empty response from server')
   })
 
   it('rejects empty save responses', async () => {
@@ -34,7 +36,7 @@ describe('trading settings api', () => {
           speculative_buy: 1000,
         },
         stop_loss_percent: 0.1,
-      }),
+      }, nowIso),
     ).rejects.toThrow('Unexpected empty response from server')
   })
 
@@ -66,7 +68,7 @@ describe('trading settings api', () => {
       ),
     )
 
-    const settings = await loadTradingSettings('session-1')
+    const settings = await loadTradingSettings('session-1', nowIso)
 
     expect(settings.tradingMode).toBe('live')
     expect(settings.tradingAllocations.conviction_buy).toBe(0)
