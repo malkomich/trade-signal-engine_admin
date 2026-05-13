@@ -147,11 +147,14 @@ export async function loadTradingAccount(
   const tradingAccount =
     payload.trading_account && typeof payload.trading_account === 'object'
       ? (payload.trading_account as Record<string, unknown>)
-      : {}
+      : null
+  if (!tradingAccount) {
+    return null
+  }
   return parseTradingAccount({
     ...tradingAccount,
     mode: queryMode,
-    updated_at: payload.trading_updated_at ?? payload.updated_at ?? nowIso,
+    updated_at: payload.trading_updated_at ?? payload.updated_at ?? tradingAccount.updated_at ?? nowIso,
   })
 }
 

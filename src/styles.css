@@ -34,7 +34,6 @@ input {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 24px;
   align-items: end;
   margin-bottom: 24px;
@@ -311,7 +310,7 @@ h1 {
   font-weight: 600;
 }
 
-.trading-field input {
+.trading-tier-row input {
   width: 100%;
   min-width: 0;
   border-radius: 12px;
@@ -320,7 +319,6 @@ h1 {
   color: #ecf3ff;
   padding: 8px 10px;
 }
-
 .trading-account-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

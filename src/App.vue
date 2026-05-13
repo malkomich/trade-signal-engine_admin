@@ -168,24 +168,9 @@ const optimizationError = ref<string | null>(null);
 const collapsedChartGroups = reactive<Record<string, boolean>>({});
 const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
 const LIVE_SIGNAL_PAGE_SIZE = 20;
+let tradingAccountRefreshGeneration = 0;
 const getMarketDayKey = (value: string | Date) =>
   marketDayKeyForTimestamp(value) || currentMarketDayKey();
-function buildTradingSettingsSignature(
-  mode: TradingMode,
-  allocations: Record<SignalTier, number>,
-  stopLossPercent: number,
-) {
-  return JSON.stringify({
-    mode,
-    allocations: {
-      conviction_buy: Number(allocations.conviction_buy) || 0,
-      balanced_buy: Number(allocations.balanced_buy) || 0,
-      opportunistic_buy: Number(allocations.opportunistic_buy) || 0,
-      speculative_buy: Number(allocations.speculative_buy) || 0,
-    },
-    stopLossPercent: Number(stopLossPercent) || 0,
-  });
-}
 const sessionOverview = computed(
   () => snapshot.value?.sessionOverview ?? emptySessionOverview(),
 );
@@ -752,7 +737,7 @@ function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   tradingStopLossPercent.value = settings.tradingStopLossPercent;
   tradingAccount.value = settings.tradingAccount;
   tradingSettingsSessionId.value = settings.sessionId;
-  tradingSettingsBaselineSignature.value = buildTradingSettingsSignature(
+  tradingSettingsBaselineSignature.value = tradingSettingsSignature(
     settings.tradingMode,
     settings.tradingAllocations,
     settings.tradingStopLossPercent,
@@ -794,7 +779,7 @@ async function loadTradingSettingsForSession(sessionId: string) {
     tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
     tradingAccount.value = null;
     tradingSettingsSessionId.value = normalizedSessionId;
-    tradingSettingsBaselineSignature.value = buildTradingSettingsSignature(
+    tradingSettingsBaselineSignature.value = tradingSettingsSignature(
       tradingMode.value,
       tradingAllocations,
       tradingStopLossPercent.value,
@@ -807,28 +792,49 @@ async function loadTradingSettingsForSession(sessionId: string) {
   }
 }
 
-async function refreshTradingAccountForSession(sessionId: string, mode = tradingMode.value) {
+async function refreshTradingAccountForSession(
+  sessionId: string,
+  mode = tradingMode.value,
+  nowIso = new Date().toISOString(),
+) {
   const normalizedSessionId = String(sessionId ?? "").trim();
   const normalizedMode = mode === "live" ? "live" : "paper";
   if (!normalizedSessionId) {
     tradingAccount.value = null;
     return;
   }
+  const requestGeneration = ++tradingAccountRefreshGeneration;
   tradingAccountRefreshing.value = true;
   tradingSettingsError.value = null;
+  const previousAccount = tradingAccount.value;
   try {
-    tradingAccount.value = await loadTradingAccount(
+    const account = await loadTradingAccount(
       normalizedSessionId,
       normalizedMode,
-      new Date().toISOString(),
+      nowIso,
     );
+    if (requestGeneration !== tradingAccountRefreshGeneration) {
+      return;
+    }
+    if (account) {
+      tradingAccount.value = account;
+    } else if (!previousAccount) {
+      tradingAccount.value = null;
+    }
     tradingSettingsLoadFailed.value = false;
   } catch (error) {
-    tradingAccount.value = null;
+    if (requestGeneration !== tradingAccountRefreshGeneration) {
+      return;
+    }
+    if (!previousAccount) {
+      tradingAccount.value = null;
+    }
     tradingSettingsError.value =
       error instanceof Error ? error.message : "Failed to refresh trading account.";
   } finally {
-    tradingAccountRefreshing.value = false;
+    if (requestGeneration === tradingAccountRefreshGeneration) {
+      tradingAccountRefreshing.value = false;
+    }
   }
 }
 
@@ -875,7 +881,7 @@ async function saveTradingSettingsFromPanel() {
 }
 
 const tradingSettingsCurrentSignature = computed(() =>
-  buildTradingSettingsSignature(
+  tradingSettingsSignature(
     tradingMode.value,
     tradingAllocations,
     tradingStopLossPercent.value,
@@ -893,7 +899,11 @@ function syncTradingSettingsDirty() {
 function toggleTradingMode() {
   tradingMode.value = tradingMode.value === "live" ? "paper" : "live";
   syncTradingSettingsDirty();
-  void refreshTradingAccountForSession(sessionOverview.value.sessionId, tradingMode.value);
+  void refreshTradingAccountForSession(
+    sessionOverview.value.sessionId,
+    tradingMode.value,
+    new Date().toISOString(),
+  );
 }
 
 function notifyTradingSettingsEdited() {
@@ -909,7 +919,11 @@ watch(
 );
 
 function refreshTradingSettings() {
-  return refreshTradingAccountForSession(sessionOverview.value.sessionId, tradingMode.value);
+  return refreshTradingAccountForSession(
+    sessionOverview.value.sessionId,
+    tradingMode.value,
+    new Date().toISOString(),
+  );
 }
 
 function formatMoney(value: number | null | undefined) {
@@ -2940,6 +2954,9 @@ onUnmounted(() => {
           <p v-if="snapshotWarning" class="status-warning">
             {{ snapshotWarning }}
           </p>
+          <p v-if="tradingSettingsError" class="status-warning">
+            {{ tradingSettingsError }}
+          </p>
           <p v-if="tradingSettingsMessage" class="status-success">
             {{ tradingSettingsMessage }}
           </p>
@@ -2980,28 +2997,36 @@ onUnmounted(() => {
               {{ tradingSettingsSaving ? "Saving..." : "Save" }}
             </button>
           </div>
-          <div class="trading-panel-grid">
-            <label v-for="tier in tradingTierKeys" :key="tier" class="trading-field">
-              <span>{{ signalTierLegend[tier].label }}</span>
-              <input
-                v-model.number="tradingAllocations[tier]"
-                type="number"
-                min="0"
-                step="10"
-                @input="notifyTradingSettingsEdited"
-              />
-            </label>
-            <label class="trading-field trading-field-wide">
-              <span>Stop loss (%)</span>
-              <input
-                v-model.number="tradingStopLossPercent"
-                type="number"
-                min="0.01"
-                max="10"
-                step="0.01"
-                @input="notifyTradingSettingsEdited"
-              />
-            </label>
+          <div class="trading-settings-panel">
+            <div class="trading-settings-list">
+              <label v-for="tier in tradingTierKeys" :key="tier" class="trading-tier-row">
+                <span class="signal-tier-badge trading-tier-chip" :class="tier">
+                  <i>{{ signalTierLegend[tier].icon }}</i>
+                </span>
+                <span class="trading-tier-label">{{ signalTierLegend[tier].label }}</span>
+                <input
+                  v-model.number="tradingAllocations[tier]"
+                  type="number"
+                  @input="notifyTradingSettingsEdited"
+                  min="0"
+                  step="10"
+                />
+              </label>
+              <label class="trading-tier-row trading-tier-row-wide">
+                <span class="signal-tier-badge trading-tier-chip stop-loss">
+                  <i>SL</i>
+                </span>
+                <span class="trading-tier-label">Stop loss (%)</span>
+                <input
+                  v-model.number="tradingStopLossPercent"
+                  type="number"
+                  @input="notifyTradingSettingsEdited"
+                  min="0.01"
+                  max="10"
+                  step="0.01"
+                />
+              </label>
+            </div>
           </div>
           <div class="trading-account-grid">
             <article class="trading-account-card">

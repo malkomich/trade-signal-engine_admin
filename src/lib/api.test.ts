@@ -120,4 +120,22 @@ describe('trading settings api', () => {
       updatedAt: '2026-05-12T10:00:00Z',
     })
   })
+
+  it('returns null when trading account payload is absent', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        createJsonResponse(200, {
+          session_id: 'session-1',
+          trading_mode: 'live',
+          trading_account: null,
+          trading_updated_at: null,
+        }),
+      ),
+    )
+
+    const account = await loadTradingAccount('session-1', 'live', nowIso)
+
+    expect(account).toBeNull()
+  })
 })
