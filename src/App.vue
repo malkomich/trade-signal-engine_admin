@@ -72,9 +72,9 @@ import {
 import {
   DEFAULT_TRADING_ALLOCATION,
   DEFAULT_TRADING_STOP_LOSS_PERCENT,
+  loadTradingAccount,
   loadTradingSettings,
   saveTradingSettings,
-  tradingWritesEnabled,
   type TradingAccountSnapshot,
   type TradingMode,
   type TradingSettingsSnapshot,
@@ -123,6 +123,7 @@ const tradingAllocations = reactive<Record<SignalTier, number>>({
 const tradingStopLossPercent = ref(DEFAULT_TRADING_STOP_LOSS_PERCENT);
 const tradingAccount = ref<TradingAccountSnapshot | null>(null);
 const tradingSettingsLoading = ref(false);
+const tradingAccountRefreshing = ref(false);
 const tradingSettingsSaving = ref(false);
 const tradingSettingsLoaded = ref(false);
 const tradingSettingsLoadFailed = ref(false);
@@ -167,6 +168,7 @@ const optimizationError = ref<string | null>(null);
 const collapsedChartGroups = reactive<Record<string, boolean>>({});
 const DASHBOARD_REFRESH_INTERVAL_MS = 30_000;
 const LIVE_SIGNAL_PAGE_SIZE = 20;
+let tradingAccountRefreshGeneration = 0;
 const getMarketDayKey = (value: string | Date) =>
   marketDayKeyForTimestamp(value) || currentMarketDayKey();
 const sessionOverview = computed(
@@ -790,6 +792,48 @@ async function loadTradingSettingsForSession(sessionId: string) {
   }
 }
 
+async function refreshTradingAccountForSession(
+  sessionId: string,
+  mode = tradingMode.value,
+  nowIso = new Date().toISOString(),
+) {
+  const normalizedSessionId = String(sessionId ?? "").trim();
+  const normalizedMode = mode === "live" ? "live" : "paper";
+  if (!normalizedSessionId) {
+    tradingAccount.value = null;
+    return;
+  }
+  const requestGeneration = ++tradingAccountRefreshGeneration;
+  tradingAccountRefreshing.value = true;
+  tradingSettingsError.value = null;
+  const previousAccount = tradingAccount.value;
+  try {
+    const account = await loadTradingAccount(
+      normalizedSessionId,
+      normalizedMode,
+      nowIso,
+    );
+    if (requestGeneration !== tradingAccountRefreshGeneration) {
+      return;
+    }
+    tradingAccount.value = account;
+    tradingSettingsLoadFailed.value = false;
+  } catch (error) {
+    if (requestGeneration !== tradingAccountRefreshGeneration) {
+      return;
+    }
+    if (!previousAccount || previousAccount.mode !== normalizedMode) {
+      tradingAccount.value = null;
+    }
+    tradingSettingsError.value =
+      error instanceof Error ? error.message : "Failed to refresh trading account.";
+  } finally {
+    if (requestGeneration === tradingAccountRefreshGeneration) {
+      tradingAccountRefreshing.value = false;
+    }
+  }
+}
+
 async function saveTradingSettingsFromPanel() {
   const sessionId = String(sessionOverview.value.sessionId ?? "").trim();
   if (!sessionId) {
@@ -798,10 +842,6 @@ async function saveTradingSettingsFromPanel() {
   }
   if (!tradingSettingsLoaded.value) {
     tradingSettingsError.value = "Trading settings must be loaded before saving.";
-    return;
-  }
-  if (!tradingWritesEnabled) {
-    tradingSettingsError.value = "Trading writes are disabled in this build.";
     return;
   }
   if (!tradingSettingsDirty.value) {
@@ -855,6 +895,11 @@ function syncTradingSettingsDirty() {
 function toggleTradingMode() {
   tradingMode.value = tradingMode.value === "live" ? "paper" : "live";
   syncTradingSettingsDirty();
+  void refreshTradingAccountForSession(
+    sessionOverview.value.sessionId,
+    tradingMode.value,
+    new Date().toISOString(),
+  );
 }
 
 function notifyTradingSettingsEdited() {
@@ -870,7 +915,11 @@ watch(
 );
 
 function refreshTradingSettings() {
-  return loadTradingSettingsForSession(sessionOverview.value.sessionId);
+  return refreshTradingAccountForSession(
+    sessionOverview.value.sessionId,
+    tradingMode.value,
+    new Date().toISOString(),
+  );
 }
 
 function formatMoney(value: number | null | undefined) {
@@ -2901,6 +2950,9 @@ onUnmounted(() => {
           <p v-if="snapshotWarning" class="status-warning">
             {{ snapshotWarning }}
           </p>
+          <p v-if="tradingSettingsError" class="status-warning">
+            {{ tradingSettingsError }}
+          </p>
           <p v-if="tradingSettingsMessage" class="status-success">
             {{ tradingSettingsMessage }}
           </p>
@@ -2924,7 +2976,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="action-button icon-button"
-              :disabled="tradingSettingsLoading"
+              :disabled="tradingSettingsLoading || tradingAccountRefreshing"
               @click="refreshTradingSettings"
               aria-label="Refresh account"
               title="Refresh account"
@@ -2935,7 +2987,7 @@ onUnmounted(() => {
               type="button"
               class="action-button"
               :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled || !tradingSettingsDirty"
+              :disabled="tradingSettingsLoading || tradingAccountRefreshing || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save" }}

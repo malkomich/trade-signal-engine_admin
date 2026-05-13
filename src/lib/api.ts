@@ -30,7 +30,6 @@ export type TradingSettingsPayload = {
 
 export const DEFAULT_TRADING_ALLOCATION = 1000
 export const DEFAULT_TRADING_STOP_LOSS_PERCENT = 0.2
-export const tradingWritesEnabled = import.meta.env.VITE_TRADING_WRITES_ENABLED?.trim() !== 'false'
 
 function resolveApiBaseUrl() {
   const baseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
@@ -131,6 +130,32 @@ export async function loadTradingSettings(
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,
     updatedAt: String(payload.updated_at ?? nowIso),
   }
+}
+
+export async function loadTradingAccount(
+  sessionId: string,
+  mode: TradingMode,
+  nowIso: string,
+): Promise<TradingAccountSnapshot | null> {
+  const queryMode = parseTradingMode(mode)
+  const payload = await requestJson<Record<string, unknown>>(
+    `/v1/sessions/${encodeURIComponent(sessionId)}/trading/account?mode=${encodeURIComponent(queryMode)}`,
+  )
+  if (!payload) {
+    return null
+  }
+  const tradingAccount =
+    payload.trading_account && typeof payload.trading_account === 'object'
+      ? (payload.trading_account as Record<string, unknown>)
+      : null
+  if (!tradingAccount) {
+    return null
+  }
+  return parseTradingAccount({
+    ...tradingAccount,
+    mode: queryMode,
+    updated_at: payload.trading_updated_at ?? payload.updated_at ?? tradingAccount.updated_at ?? nowIso,
+  })
 }
 
 export async function saveTradingSettings(

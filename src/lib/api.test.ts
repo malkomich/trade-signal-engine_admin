@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { loadTradingSettings, saveTradingSettings } from './api'
+import { loadTradingAccount, loadTradingSettings, saveTradingSettings } from './api'
 
 function createJsonResponse(status: number, body: unknown) {
   return {
@@ -85,5 +85,57 @@ describe('trading settings api', () => {
       portfolioValue: 2000.75,
       updatedAt: '2026-05-12T10:00:00Z',
     })
+  })
+
+  it('loads trading accounts by mode', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        createJsonResponse(200, {
+          session_id: 'session-1',
+          trading_mode: 'live',
+          trading_account: {
+            mode: 'live',
+            status: 'active',
+            buying_power: '4321.00',
+            cash: '100.50',
+            equity: '5000.00',
+            portfolio_value: '5100.50',
+            updated_at: '2026-05-12T10:00:00Z',
+          },
+          trading_updated_at: '2026-05-12T10:00:00Z',
+        }),
+      ),
+    )
+
+    const account = await loadTradingAccount('session-1', 'live', nowIso)
+
+    expect(account).toEqual({
+      mode: 'live',
+      status: 'active',
+      buyingPower: 4321,
+      cash: 100.5,
+      equity: 5000,
+      portfolioValue: 5100.5,
+      updatedAt: '2026-05-12T10:00:00Z',
+    })
+  })
+
+  it('returns null when trading account payload is absent', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        createJsonResponse(200, {
+          session_id: 'session-1',
+          trading_mode: 'live',
+          trading_account: null,
+          trading_updated_at: null,
+        }),
+      ),
+    )
+
+    const account = await loadTradingAccount('session-1', 'live', nowIso)
+
+    expect(account).toBeNull()
   })
 })

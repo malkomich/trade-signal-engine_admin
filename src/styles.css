@@ -319,7 +319,6 @@ h1 {
   color: #ecf3ff;
   padding: 8px 10px;
 }
-
 .trading-account-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
