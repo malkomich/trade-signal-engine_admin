@@ -745,6 +745,7 @@ function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   tradingSettingsDirty.value = false;
   tradingSettingsLoaded.value = true;
   tradingSettingsLoadFailed.value = false;
+  tradingSettingsError.value = settings.tradingAccountError;
 }
 
 async function loadTradingSettingsForSession(sessionId: string) {
@@ -770,6 +771,13 @@ async function loadTradingSettingsForSession(sessionId: string) {
   try {
     const settings = await loadTradingSettings(normalizedSessionId, new Date().toISOString());
     applyTradingSettingsSnapshot(settings);
+    if (!settings.tradingAccount || settings.tradingAccountError) {
+      void refreshTradingAccountForSession(
+        sessionId,
+        settings.tradingMode,
+        new Date().toISOString(),
+      );
+    }
   } catch (error) {
     tradingSettingsError.value =
       error instanceof Error ? error.message : "Failed to load trading settings.";
@@ -816,7 +824,11 @@ async function refreshTradingAccountForSession(
     if (requestGeneration !== tradingAccountRefreshGeneration) {
       return;
     }
-    tradingAccount.value = account;
+    if (account) {
+      tradingAccount.value = account;
+    } else if (!previousAccount || previousAccount.mode !== normalizedMode) {
+      tradingAccount.value = null;
+    }
     tradingSettingsLoadFailed.value = false;
   } catch (error) {
     if (requestGeneration !== tradingAccountRefreshGeneration) {
@@ -867,6 +879,13 @@ async function saveTradingSettingsFromPanel() {
           : DEFAULT_TRADING_STOP_LOSS_PERCENT,
     }, new Date().toISOString());
     applyTradingSettingsSnapshot(settings);
+    if (!settings.tradingAccount || settings.tradingAccountError) {
+      void refreshTradingAccountForSession(
+        sessionId,
+        settings.tradingMode,
+        new Date().toISOString(),
+      );
+    }
     tradingSettingsMessage.value = "Trading settings saved.";
   } catch (error) {
     tradingSettingsError.value =

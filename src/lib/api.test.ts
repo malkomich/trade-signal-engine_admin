@@ -121,6 +121,25 @@ describe('trading settings api', () => {
     })
   })
 
+  it('throws when trading account payload includes an error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        createJsonResponse(200, {
+          session_id: 'session-1',
+          trading_mode: 'live',
+          trading_account: null,
+          trading_account_error: 'alpaca live trading credentials not configured',
+          trading_updated_at: null,
+        }),
+      ),
+    )
+
+    await expect(loadTradingAccount('session-1', 'live', nowIso)).rejects.toThrow(
+      'alpaca live trading credentials not configured',
+    )
+  })
+
   it('returns null when trading account payload is absent', async () => {
     vi.stubGlobal(
       'fetch',
