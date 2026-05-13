@@ -29,7 +29,7 @@ export type TradingSettingsPayload = {
 }
 
 export const DEFAULT_TRADING_ALLOCATION = 1000
-export const DEFAULT_TRADING_STOP_LOSS_PERCENT = 0.1
+export const DEFAULT_TRADING_STOP_LOSS_PERCENT = 0.2
 export const tradingWritesEnabled = import.meta.env.VITE_TRADING_WRITES_ENABLED?.trim() !== 'false'
 
 function resolveApiBaseUrl() {

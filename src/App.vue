@@ -79,6 +79,11 @@ import {
   type TradingMode,
   type TradingSettingsSnapshot,
 } from "./lib/api";
+import {
+  isTradingSettingsDirty,
+  tradingSettingsSignature,
+  tradingTierKeys,
+} from "./lib/trading-settings";
 
 const snapshot = ref<DashboardSnapshot | null>(null);
 const selectedSignal = ref<DashboardSnapshot["selectedSignal"] | null>(null);
@@ -104,27 +109,25 @@ const liveDataAvailable = ref(true);
 const notificationState = ref<NotificationSetupState>("unsupported");
 const notificationMessage = ref<string | null>(null);
 const selectedSignalCopyState = ref<string | null>(null);
+const selectedWindowCopyState = ref<string | null>(null);
 const selectedLedgerSnapshotId = ref<string>("");
 const selectedWindowReviewId = ref<string>("");
 const selectedOptimizationReviewId = ref<string>("");
 const tradingMode = ref<TradingMode>("paper");
-const tradingTierKeys: SignalTier[] = [
-  "conviction_buy",
-  "balanced_buy",
-  "opportunistic_buy",
-  "speculative_buy",
-];
 const tradingAllocations = reactive<Record<SignalTier, number>>({
   conviction_buy: 1000,
   balanced_buy: 1000,
   opportunistic_buy: 1000,
   speculative_buy: 1000,
 });
-const tradingStopLossPercent = ref(0.1);
+const tradingStopLossPercent = ref(DEFAULT_TRADING_STOP_LOSS_PERCENT);
 const tradingAccount = ref<TradingAccountSnapshot | null>(null);
 const tradingSettingsLoading = ref(false);
 const tradingSettingsSaving = ref(false);
 const tradingSettingsLoaded = ref(false);
+const tradingSettingsLoadFailed = ref(false);
+const tradingSettingsDirty = ref(false);
+const tradingSettingsBaselineSignature = ref("");
 const tradingSettingsError = ref<string | null>(null);
 const tradingSettingsMessage = ref<string | null>(null);
 const tradingSettingsSessionId = ref<string>("");
@@ -136,7 +139,8 @@ const decisionDayPickerRef = ref<HTMLInputElement | null>(null);
 const windowDayPickerRef = ref<HTMLInputElement | null>(null);
 const chartModalCardRef = ref<HTMLElement | null>(null);
 const chartModalCloseButton = ref<HTMLButtonElement | null>(null);
-let selectedSignalCopyTimer: number | null = null;
+const selectedSignalCopyTimer = ref<number | null>(null);
+const selectedWindowCopyTimer = ref<number | null>(null);
 const selectedSignalCopyFeedbackDurationMs = 1800;
 let chartModalPreviousFocus: HTMLElement | null = null;
 let notificationSetupGeneration = 0;
@@ -695,13 +699,11 @@ const sourceDisplay = computed(() => {
   if (snapshotSource.value === "live") {
     return {
       title: "Live session",
-      description: "Live trading data is available for the selected day.",
     };
   }
 
   return {
     title: "Waiting for live session",
-    description: "No live trading data has been written for the selected day yet.",
   };
 });
 
@@ -733,13 +735,21 @@ function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   tradingStopLossPercent.value = settings.tradingStopLossPercent;
   tradingAccount.value = settings.tradingAccount;
   tradingSettingsSessionId.value = settings.sessionId;
+  tradingSettingsBaselineSignature.value = tradingSettingsSignature(
+    settings.tradingMode,
+    settings.tradingAllocations,
+    settings.tradingStopLossPercent,
+  );
+  tradingSettingsDirty.value = false;
   tradingSettingsLoaded.value = true;
+  tradingSettingsLoadFailed.value = false;
 }
 
 async function loadTradingSettingsForSession(sessionId: string) {
   const normalizedSessionId = String(sessionId ?? "").trim();
   tradingSettingsMessage.value = null;
   tradingSettingsLoaded.value = false;
+  tradingSettingsLoadFailed.value = false;
   if (!normalizedSessionId) {
     tradingMode.value = "paper";
     Object.assign(tradingAllocations, defaultTradingAllocations());
@@ -748,6 +758,9 @@ async function loadTradingSettingsForSession(sessionId: string) {
     tradingSettingsError.value = null;
     tradingSettingsMessage.value = null;
     tradingSettingsSessionId.value = "";
+    tradingSettingsBaselineSignature.value = "";
+    tradingSettingsDirty.value = false;
+    tradingSettingsLoadFailed.value = false;
     return;
   }
   tradingSettingsLoading.value = true;
@@ -764,6 +777,14 @@ async function loadTradingSettingsForSession(sessionId: string) {
     tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
     tradingAccount.value = null;
     tradingSettingsSessionId.value = normalizedSessionId;
+    tradingSettingsBaselineSignature.value = tradingSettingsSignature(
+      tradingMode.value,
+      tradingAllocations,
+      tradingStopLossPercent.value,
+    );
+    tradingSettingsDirty.value = false;
+    tradingSettingsLoaded.value = true;
+    tradingSettingsLoadFailed.value = true;
   } finally {
     tradingSettingsLoading.value = false;
   }
@@ -775,12 +796,16 @@ async function saveTradingSettingsFromPanel() {
     tradingSettingsError.value = "No live session is available yet.";
     return;
   }
+  if (!tradingSettingsLoaded.value) {
+    tradingSettingsError.value = "Trading settings must be loaded before saving.";
+    return;
+  }
   if (!tradingWritesEnabled) {
     tradingSettingsError.value = "Trading writes are disabled in this build.";
     return;
   }
-  if (!tradingSettingsLoaded.value) {
-    tradingSettingsError.value = "Trading settings must be loaded before saving.";
+  if (!tradingSettingsDirty.value) {
+    tradingSettingsError.value = "No trading setting changes detected.";
     return;
   }
   tradingSettingsSaving.value = true;
@@ -810,6 +835,39 @@ async function saveTradingSettingsFromPanel() {
     tradingSettingsSaving.value = false;
   }
 }
+
+const tradingSettingsCurrentSignature = computed(() =>
+  tradingSettingsSignature(
+    tradingMode.value,
+    tradingAllocations,
+    tradingStopLossPercent.value,
+  ),
+);
+
+function syncTradingSettingsDirty() {
+  tradingSettingsDirty.value = isTradingSettingsDirty(
+    tradingSettingsLoaded.value,
+    tradingSettingsBaselineSignature.value,
+    tradingSettingsCurrentSignature.value,
+  );
+}
+
+function toggleTradingMode() {
+  tradingMode.value = tradingMode.value === "live" ? "paper" : "live";
+  syncTradingSettingsDirty();
+}
+
+function notifyTradingSettingsEdited() {
+  syncTradingSettingsDirty();
+}
+
+watch(
+  tradingSettingsCurrentSignature,
+  () => {
+    syncTradingSettingsDirty();
+  },
+  { immediate: true },
+);
 
 function refreshTradingSettings() {
   return loadTradingSettingsForSession(sessionOverview.value.sessionId);
@@ -2285,6 +2343,49 @@ function formatWindowOptimizationChange(changePct: number) {
   return `${sign}${changePct.toFixed(2)}%`;
 }
 
+function setCopyFeedback(
+  state: Ref<string | null>,
+  timerRef: Ref<number | null>,
+  message: string,
+) {
+  state.value = message;
+  if (timerRef.value !== null) {
+    window.clearTimeout(timerRef.value);
+  }
+  timerRef.value = window.setTimeout(() => {
+    if (state.value === message) {
+      state.value = null;
+    }
+    timerRef.value = null;
+  }, selectedSignalCopyFeedbackDurationMs);
+}
+
+async function copyTextToClipboard(
+  text: string,
+  state: Ref<string | null>,
+  timerRef: Ref<number | null>,
+  successMessage: string,
+  unavailableMessage: string,
+  errorMessage: string,
+) {
+  if (
+    !text ||
+    typeof navigator === "undefined" ||
+    !navigator.clipboard?.writeText
+  ) {
+    setCopyFeedback(state, timerRef, unavailableMessage);
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    setCopyFeedback(state, timerRef, successMessage);
+  } catch (error) {
+    console.error(`Failed to copy ${successMessage.toLowerCase()}:`, error);
+    setCopyFeedback(state, timerRef, errorMessage);
+  }
+}
+
 async function saveWindowReviewOptimization() {
   if (!snapshot.value || !liveDataAvailable.value) {
     return;
@@ -2347,34 +2448,26 @@ function closeExpandedChart() {
 
 async function copySelectedSignalId() {
   const signalId = selectedSignal.value?.id?.trim();
-  const setFeedback = (message: string) => {
-    selectedSignalCopyState.value = message;
-    if (selectedSignalCopyTimer !== null) {
-      window.clearTimeout(selectedSignalCopyTimer);
-    }
-    selectedSignalCopyTimer = window.setTimeout(() => {
-      if (selectedSignalCopyState.value === message) {
-        selectedSignalCopyState.value = null;
-      }
-      selectedSignalCopyTimer = null;
-    }, selectedSignalCopyFeedbackDurationMs);
-  };
-  if (
-    !signalId ||
-    typeof navigator === "undefined" ||
-    !navigator.clipboard?.writeText
-  ) {
-    setFeedback("Copy unavailable");
-    return;
-  }
+  await copyTextToClipboard(
+    signalId ?? "",
+    selectedSignalCopyState,
+    selectedSignalCopyTimer,
+    "Copied signal id",
+    "Copy unavailable",
+    "Copy failed",
+  );
+}
 
-  try {
-    await navigator.clipboard.writeText(signalId);
-    setFeedback("Copied signal id");
-  } catch (error) {
-    console.error("Failed to copy signal id:", error);
-    setFeedback("Copy failed");
-  }
+async function copySelectedWindowId() {
+  const windowId = selectedWindowReview.value?.id?.trim();
+  await copyTextToClipboard(
+    windowId ?? "",
+    selectedWindowCopyState,
+    selectedWindowCopyTimer,
+    "Copied window id",
+    "Copy unavailable",
+    "Copy failed",
+  );
 }
 
 function getFocusableElements(root: HTMLElement) {
@@ -2743,9 +2836,13 @@ watch(selectedMarketDay, (marketDayKey) => {
 
 onUnmounted(() => {
   isMounted = false;
-  if (selectedSignalCopyTimer !== null) {
-    window.clearTimeout(selectedSignalCopyTimer);
-    selectedSignalCopyTimer = null;
+  if (selectedSignalCopyTimer.value !== null) {
+    window.clearTimeout(selectedSignalCopyTimer.value);
+    selectedSignalCopyTimer.value = null;
+  }
+  if (selectedWindowCopyTimer.value !== null) {
+    window.clearTimeout(selectedWindowCopyTimer.value);
+    selectedWindowCopyTimer.value = null;
   }
   if (dashboardRefreshTimer !== null) {
     window.clearTimeout(dashboardRefreshTimer);
@@ -2770,7 +2867,7 @@ onUnmounted(() => {
 
 <template>
   <main class="shell">
-    <section class="hero">
+    <section class="hero trading-panel-layout">
       <div>
         <p class="eyebrow">Trade Signal Engine</p>
         <h1>Live signal control room</h1>
@@ -2793,12 +2890,10 @@ onUnmounted(() => {
             <div class="trading-panel-heading">
               <div class="status-dot"></div>
               <div>
-                <p class="eyebrow">Live session</p>
                 <strong>{{ sourceDisplay.title }}</strong>
-                <p>{{ sourceDisplay.description }}</p>
               </div>
             </div>
-            <div class="trading-panel-meta">
+            <div class="trading-panel-meta trading-panel-meta-inline">
               <span>Last update</span>
               <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong>
             </div>
@@ -2806,74 +2901,76 @@ onUnmounted(() => {
           <p v-if="snapshotWarning" class="status-warning">
             {{ snapshotWarning }}
           </p>
-          <p v-if="tradingSettingsError" class="status-warning">
-            {{ tradingSettingsError }}
-          </p>
           <p v-if="tradingSettingsMessage" class="status-success">
             {{ tradingSettingsMessage }}
           </p>
-          <div class="trading-mode-switch" role="group" aria-label="Trading mode">
-            <button
-              type="button"
-              class="mode-toggle-button"
-              :class="{ active: tradingMode === 'paper' }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving"
-              @click="tradingMode = 'paper'"
-            >
-              Paper Trading
-            </button>
-            <button
-              type="button"
-              class="mode-toggle-button"
-              :class="{ active: tradingMode === 'live' }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving"
-              @click="tradingMode = 'live'"
-            >
-              Live Trading
-            </button>
-          </div>
           <div class="trading-panel-actions">
             <button
               type="button"
-              class="action-button ghost"
+              class="mode-switch"
+              role="switch"
+              :aria-checked="tradingMode === 'live'"
+              :class="tradingMode"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving"
+              @click="toggleTradingMode"
+            >
+              <span class="mode-switch-track">
+                <span class="mode-switch-thumb"></span>
+              </span>
+              <span class="mode-switch-label">
+                {{ tradingMode === 'live' ? 'Live Trading' : 'Paper Trading' }}
+              </span>
+            </button>
+            <button
+              type="button"
+              class="action-button icon-button"
               :disabled="tradingSettingsLoading"
               @click="refreshTradingSettings"
+              aria-label="Refresh account"
+              title="Refresh account"
             >
-              {{ tradingSettingsLoading ? "Refreshing account..." : "Refresh account" }}
+              ↻
             </button>
             <button
               type="button"
               class="action-button"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled"
+              :class="{ active: tradingSettingsDirty }"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled || !tradingSettingsDirty"
               @click="saveTradingSettingsFromPanel"
             >
-              {{ tradingSettingsSaving ? "Saving..." : "Save trading settings" }}
+              {{ tradingSettingsSaving ? "Saving..." : "Save" }}
             </button>
           </div>
-          <div class="trading-panel-grid">
-            <label v-for="tier in tradingTierKeys" :key="tier" class="trading-field">
-              <span>
-                {{ signalTierLegend[tier].label }}
-              </span>
-              <input
-                v-model.number="tradingAllocations[tier]"
-                type="number"
-                min="0"
-                step="10"
-              />
-              <small>{{ signalTierLegend[tier].description }}</small>
-            </label>
-            <label class="trading-field trading-field-wide">
-              <span>Stop loss (%)</span>
-              <input
-                v-model.number="tradingStopLossPercent"
-                type="number"
-                min="0.01"
-                max="10"
-                step="0.01"
-              />
-              <small>Applied automatically to every BUY order.</small>
-            </label>
+          <div class="trading-settings-panel">
+            <div class="trading-settings-list">
+              <label v-for="tier in tradingTierKeys" :key="tier" class="trading-tier-row">
+                <span class="signal-tier-badge trading-tier-chip" :class="tier">
+                  <i>{{ signalTierLegend[tier].icon }}</i>
+                </span>
+                <span class="trading-tier-label">{{ signalTierLegend[tier].label }}</span>
+                <input
+                  v-model.number="tradingAllocations[tier]"
+                  type="number"
+                  @input="notifyTradingSettingsEdited"
+                  min="0"
+                  step="10"
+                />
+              </label>
+              <label class="trading-tier-row trading-tier-row-wide">
+                <span class="signal-tier-badge trading-tier-chip stop-loss">
+                  <i>SL</i>
+                </span>
+                <span class="trading-tier-label">Stop loss (%)</span>
+                <input
+                  v-model.number="tradingStopLossPercent"
+                  type="number"
+                  @input="notifyTradingSettingsEdited"
+                  min="0.01"
+                  max="10"
+                  step="0.01"
+                />
+              </label>
+            </div>
           </div>
           <div class="trading-account-grid">
             <article class="trading-account-card">
@@ -2895,9 +2992,6 @@ onUnmounted(() => {
               }}</strong>
             </article>
           </div>
-          <p class="trading-panel-footer">
-            {{ tradingAccount ? `Account mode: ${tradingAccount.mode === 'live' ? 'Live Trading' : 'Paper Trading'}` : 'Trading account not loaded yet.' }}
-          </p>
         </div>
       </div>
     </section>
@@ -3290,11 +3384,33 @@ onUnmounted(() => {
             No trade windows available for the selected filters and day.
           </div>
           <div v-if="selectedWindowReview" class="detail-card window-detail">
-            <div class="detail-title">
-              <strong>{{ selectedWindowReview.symbol }}</strong>
-              <span>{{
-                formatWindowStatusLabel(selectedWindowReview.status)
-              }}</span>
+            <div class="detail-title window-detail-title">
+              <div class="window-detail-heading">
+                <strong>{{ selectedWindowReview.symbol }}</strong>
+                <span>{{
+                  formatWindowStatusLabel(selectedWindowReview.status)
+                }}</span>
+              </div>
+              <div class="window-detail-actions">
+                <button
+                  type="button"
+                  class="action-button ghost compact"
+                  :disabled="!selectedWindowReview.id"
+                  :title="selectedWindowReview.id ? 'Copy trade window id to clipboard' : 'No trade window id available'"
+                  @click="copySelectedWindowId"
+                >
+                  Copy ID
+                </button>
+                <span
+                  v-if="selectedWindowCopyState"
+                  class="copy-feedback"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  {{ selectedWindowCopyState }}
+                </span>
+              </div>
             </div>
             <div class="score-grid">
               <div>
