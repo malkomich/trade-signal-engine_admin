@@ -816,17 +816,13 @@ async function refreshTradingAccountForSession(
     if (requestGeneration !== tradingAccountRefreshGeneration) {
       return;
     }
-    if (account) {
-      tradingAccount.value = account;
-    } else if (!previousAccount) {
-      tradingAccount.value = null;
-    }
+    tradingAccount.value = account;
     tradingSettingsLoadFailed.value = false;
   } catch (error) {
     if (requestGeneration !== tradingAccountRefreshGeneration) {
       return;
     }
-    if (!previousAccount) {
+    if (!previousAccount || previousAccount.mode !== normalizedMode) {
       tradingAccount.value = null;
     }
     tradingSettingsError.value =
