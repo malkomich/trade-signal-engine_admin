@@ -74,6 +74,7 @@ import {
   DEFAULT_TRADING_STOP_LOSS_PERCENT,
   loadTradingSettings,
   saveTradingSettings,
+  tradingWritesEnabled,
   type TradingAccountSnapshot,
   type TradingMode,
   type TradingSettingsSnapshot,
@@ -124,6 +125,7 @@ const tradingAccount = ref<TradingAccountSnapshot | null>(null);
 const tradingSettingsLoading = ref(false);
 const tradingSettingsSaving = ref(false);
 const tradingSettingsLoaded = ref(false);
+const tradingSettingsLoadFailed = ref(false);
 const tradingSettingsDirty = ref(false);
 const tradingSettingsBaselineSignature = ref("");
 const tradingSettingsError = ref<string | null>(null);
@@ -740,12 +742,14 @@ function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   );
   tradingSettingsDirty.value = false;
   tradingSettingsLoaded.value = true;
+  tradingSettingsLoadFailed.value = false;
 }
 
 async function loadTradingSettingsForSession(sessionId: string) {
   const normalizedSessionId = String(sessionId ?? "").trim();
   tradingSettingsMessage.value = null;
   tradingSettingsLoaded.value = false;
+  tradingSettingsLoadFailed.value = false;
   if (!normalizedSessionId) {
     tradingMode.value = "paper";
     Object.assign(tradingAllocations, defaultTradingAllocations());
@@ -756,6 +760,7 @@ async function loadTradingSettingsForSession(sessionId: string) {
     tradingSettingsSessionId.value = "";
     tradingSettingsBaselineSignature.value = "";
     tradingSettingsDirty.value = false;
+    tradingSettingsLoadFailed.value = false;
     return;
   }
   tradingSettingsLoading.value = true;
@@ -779,6 +784,7 @@ async function loadTradingSettingsForSession(sessionId: string) {
     );
     tradingSettingsDirty.value = false;
     tradingSettingsLoaded.value = true;
+    tradingSettingsLoadFailed.value = true;
   } finally {
     tradingSettingsLoading.value = false;
   }
@@ -792,6 +798,10 @@ async function saveTradingSettingsFromPanel() {
   }
   if (!tradingSettingsLoaded.value) {
     tradingSettingsError.value = "Trading settings must be loaded before saving.";
+    return;
+  }
+  if (!tradingWritesEnabled) {
+    tradingSettingsError.value = "Trading writes are disabled in this build.";
     return;
   }
   if (!tradingSettingsDirty.value) {
@@ -2925,7 +2935,7 @@ onUnmounted(() => {
               type="button"
               class="action-button"
               :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingWritesEnabled || !tradingSettingsDirty"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save" }}
