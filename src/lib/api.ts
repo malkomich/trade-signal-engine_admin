@@ -18,6 +18,7 @@ export type TradingSettingsSnapshot = {
   tradingAllocations: Record<SignalTier, number>
   tradingStopLossPercent: number
   tradingAccount: TradingAccountSnapshot | null
+  tradingAccountError: string | null
   tradingUpdatedAt: string | null
   updatedAt: string
 }
@@ -127,6 +128,7 @@ export async function loadTradingSettings(
     tradingAllocations: parseTradingAllocations(payload.trading_allocations),
     tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, DEFAULT_TRADING_STOP_LOSS_PERCENT),
     tradingAccount: parseTradingAccount(payload.trading_account),
+    tradingAccountError: payload.trading_account_error ? String(payload.trading_account_error) : null,
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,
     updatedAt: String(payload.updated_at ?? nowIso),
   }
@@ -148,6 +150,9 @@ export async function loadTradingAccount(
     payload.trading_account && typeof payload.trading_account === 'object'
       ? (payload.trading_account as Record<string, unknown>)
       : null
+  if (payload.trading_account_error) {
+    throw new Error(String(payload.trading_account_error))
+  }
   if (!tradingAccount) {
     return null
   }
@@ -181,6 +186,7 @@ export async function saveTradingSettings(
     tradingAllocations: parseTradingAllocations(payload.trading_allocations),
     tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, settings.stop_loss_percent),
     tradingAccount: parseTradingAccount(payload.trading_account),
+    tradingAccountError: payload.trading_account_error ? String(payload.trading_account_error) : null,
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,
     updatedAt: String(payload.updated_at ?? nowIso),
   }
