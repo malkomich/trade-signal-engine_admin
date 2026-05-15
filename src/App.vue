@@ -143,7 +143,7 @@ const tradingSettingsControlsDisabled = computed(
   () => tradingSettingsLoading.value || tradingSettingsSaving.value || !tradingSettingsLoaded.value,
 );
 const tradingSettingsReady = computed(
-  () => tradingSettingsLoaded.value && !tradingSettingsLoading.value,
+  () => tradingSettingsLoaded.value && !tradingSettingsLoading.value && !tradingSettingsLoadFailed.value,
 );
 const tradingPositionModeOptions: { value: TradingPositionMode; label: string; description: string; badgeClass: string; icon: string }[] = [
   { value: "stop_loss", label: "Stop loss", description: "Protect the position with a fixed stop", badgeClass: "stop-loss", icon: "SL" },
@@ -889,6 +889,10 @@ async function saveTradingSettingsFromPanel() {
     tradingSettingsError.value = "Trading settings must be loaded before saving.";
     return;
   }
+  if (!tradingSettingsDirty.value) {
+    tradingSettingsError.value = "No trading setting changes detected.";
+    return;
+  }
   tradingSettingsSaving.value = true;
   tradingSettingsError.value = null;
   tradingSettingsMessage.value = null;
@@ -932,6 +936,12 @@ async function saveTradingSettingsFromPanel() {
   } finally {
     tradingSettingsSaving.value = false;
   }
+}
+
+function retryTradingSettingsLoad() {
+  return loadTradingSettingsForSession(
+    tradingSettingsSessionId.value || sessionOverview.value.sessionId,
+  );
 }
 
 const tradingSettingsCurrentSignature = computed(() =>
@@ -3049,21 +3059,21 @@ onUnmounted(() => {
                   {{ tradingMode === 'live' ? 'Live Trading' : 'Paper Trading' }}
                 </span>
               </button>
-              <button
-                type="button"
-                class="action-button icon-button"
-                :disabled="tradingSettingsControlsDisabled"
-                @click="refreshTradingSettings"
-                aria-label="Refresh account"
-                title="Refresh account"
-              >
-                ↻
+            <button
+              type="button"
+              class="action-button icon-button"
+              :disabled="tradingSettingsControlsDisabled || tradingAccountRefreshing"
+              @click="refreshTradingSettings"
+              aria-label="Refresh account"
+              title="Refresh account"
+            >
+              ↻
               </button>
               <button
                 type="button"
                 class="action-button"
                 :class="{ active: tradingSettingsDirty }"
-                :disabled="tradingSettingsControlsDisabled"
+                :disabled="tradingSettingsControlsDisabled || !tradingSettingsDirty"
                 @click="saveTradingSettingsFromPanel"
               >
                 {{ tradingSettingsSaving ? "Saving..." : "Save" }}
@@ -3178,10 +3188,20 @@ onUnmounted(() => {
               </article>
             </div>
           </template>
-          <div v-else class="trading-settings-loading">
-            <div class="status-dot"></div>
-            <strong>Loading trading settings...</strong>
-          </div>
+            <div v-else class="trading-settings-loading">
+              <div class="status-dot"></div>
+              <strong v-if="tradingSettingsLoadFailed">Trading settings could not be loaded.</strong>
+              <strong v-else>Loading trading settings...</strong>
+              <button
+                v-if="tradingSettingsLoadFailed"
+                type="button"
+                class="action-button"
+                :disabled="tradingSettingsLoading || tradingSettingsSaving"
+                @click="retryTradingSettingsLoad"
+              >
+                Retry
+              </button>
+            </div>
         </div>
       </div>
     </section>
