@@ -767,7 +767,6 @@ function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
     settings.tradingRebuyMaxCount,
   );
   tradingSettingsDirty.value = false;
-  tradingSettingsLoaded.value = true;
   tradingSettingsLoadFailed.value = false;
   tradingSettingsError.value = settings.tradingAccountError;
 }
@@ -798,6 +797,7 @@ async function loadTradingSettingsForSession(sessionId: string) {
   try {
     const settings = await loadTradingSettings(normalizedSessionId, new Date().toISOString());
     applyTradingSettingsSnapshot(settings);
+    tradingSettingsLoaded.value = true;
     if (!settings.tradingAccount || settings.tradingAccountError) {
       void refreshTradingAccountForSession(
         sessionId,
