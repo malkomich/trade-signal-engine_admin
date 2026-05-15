@@ -3052,7 +3052,7 @@ onUnmounted(() => {
               type="button"
               class="action-button"
               :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save" }}
