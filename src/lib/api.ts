@@ -1,6 +1,7 @@
 import type { SignalTier } from './engine'
 
 export type TradingMode = 'paper' | 'live'
+export type TradingPositionMode = 'stop_loss' | 'rebuy' | 'none'
 
 export type TradingAccountSnapshot = {
   mode: TradingMode
@@ -15,8 +16,11 @@ export type TradingAccountSnapshot = {
 export type TradingSettingsSnapshot = {
   sessionId: string
   tradingMode: TradingMode
+  tradingPositionMode: TradingPositionMode
   tradingAllocations: Record<SignalTier, number>
   tradingStopLossPercent: number
+  tradingRebuyMinDropPercent: number
+  tradingRebuyMaxCount: number
   tradingAccount: TradingAccountSnapshot | null
   tradingAccountError: string | null
   tradingUpdatedAt: string | null
@@ -25,12 +29,18 @@ export type TradingSettingsSnapshot = {
 
 export type TradingSettingsPayload = {
   mode: TradingMode
+  trading_position_mode: TradingPositionMode
   allocations: Record<SignalTier, number>
   stop_loss_percent: number
+  rebuy_min_drop_percent: number
+  rebuy_max_rebuys: number
 }
 
 export const DEFAULT_TRADING_ALLOCATION = 1000
+export const DEFAULT_TRADING_POSITION_MODE: TradingPositionMode = 'stop_loss'
 export const DEFAULT_TRADING_STOP_LOSS_PERCENT = 0.2
+export const DEFAULT_TRADING_REBUY_MIN_DROP_PERCENT = 0.5
+export const DEFAULT_TRADING_REBUY_MAX_COUNT = 2
 
 function resolveApiBaseUrl() {
   const baseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
@@ -51,6 +61,12 @@ function parseFiniteNumber(value: unknown, fallback: number) {
 function parsePositiveNumber(value: unknown, fallback: number) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function parsePositiveInteger(value: unknown, fallback: number) {
+  const parsed = Number(value)
+  const floored = Math.floor(parsed)
+  return Number.isFinite(floored) && floored > 0 ? floored : fallback
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -74,6 +90,14 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 function parseTradingMode(value: unknown): TradingMode {
   const normalized = String(value ?? '').trim().toLowerCase()
   return normalized === 'live' ? 'live' : 'paper'
+}
+
+function parseTradingPositionMode(value: unknown): TradingPositionMode {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === 'rebuy' || normalized === 'none') {
+    return normalized
+  }
+  return DEFAULT_TRADING_POSITION_MODE
 }
 
 function parseTradingAllocations(value: unknown): Record<SignalTier, number> {
@@ -125,8 +149,11 @@ export async function loadTradingSettings(
   return {
     sessionId: String(payload.session_id ?? sessionId),
     tradingMode: parseTradingMode(payload.trading_mode),
+    tradingPositionMode: parseTradingPositionMode(payload.trading_position_mode),
     tradingAllocations: parseTradingAllocations(payload.trading_allocations),
     tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, DEFAULT_TRADING_STOP_LOSS_PERCENT),
+    tradingRebuyMinDropPercent: parsePositiveNumber(payload.trading_rebuy_min_drop_percent, DEFAULT_TRADING_REBUY_MIN_DROP_PERCENT),
+    tradingRebuyMaxCount: parsePositiveInteger(payload.trading_rebuy_max_rebuys, DEFAULT_TRADING_REBUY_MAX_COUNT),
     tradingAccount: parseTradingAccount(payload.trading_account),
     tradingAccountError: payload.trading_account_error ? String(payload.trading_account_error) : null,
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,
@@ -171,10 +198,13 @@ export async function saveTradingSettings(
   const payload = await requestJson<Record<string, unknown>>(`/v1/sessions/${encodeURIComponent(sessionId)}/trading`, {
     method: 'PUT',
     body: JSON.stringify({
-      session_id: sessionId,
-      mode: settings.mode,
-      allocations: settings.allocations,
-      stop_loss_percent: settings.stop_loss_percent,
+    session_id: sessionId,
+    mode: settings.mode,
+    trading_position_mode: settings.trading_position_mode,
+    allocations: settings.allocations,
+    stop_loss_percent: settings.stop_loss_percent,
+    rebuy_min_drop_percent: settings.rebuy_min_drop_percent,
+      rebuy_max_rebuys: settings.rebuy_max_rebuys,
     }),
   })
   if (!payload) {
@@ -183,8 +213,11 @@ export async function saveTradingSettings(
   return {
     sessionId: String(payload.session_id ?? sessionId),
     tradingMode: parseTradingMode(payload.trading_mode),
+    tradingPositionMode: parseTradingPositionMode(payload.trading_position_mode),
     tradingAllocations: parseTradingAllocations(payload.trading_allocations),
     tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, settings.stop_loss_percent),
+    tradingRebuyMinDropPercent: parsePositiveNumber(payload.trading_rebuy_min_drop_percent, settings.rebuy_min_drop_percent),
+    tradingRebuyMaxCount: parsePositiveInteger(payload.trading_rebuy_max_rebuys, settings.rebuy_max_rebuys),
     tradingAccount: parseTradingAccount(payload.trading_account),
     tradingAccountError: payload.trading_account_error ? String(payload.trading_account_error) : null,
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,

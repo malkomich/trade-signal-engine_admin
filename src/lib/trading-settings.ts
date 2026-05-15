@@ -1,4 +1,5 @@
 import type { TradingMode } from './api'
+import type { TradingPositionMode } from './api'
 import type { SignalTier } from './engine'
 
 export const tradingTierKeys: SignalTier[] = [
@@ -10,8 +11,11 @@ export const tradingTierKeys: SignalTier[] = [
 
 export function tradingSettingsSignature(
   mode: TradingMode,
+  positionMode: TradingPositionMode,
   allocations: Record<SignalTier, number>,
   stopLossPercent: number,
+  rebuyMinDropPercent: number,
+  rebuyMaxCount: number,
 ) {
   const normalizedAllocations: Record<string, number> = {}
   for (const tier of tradingTierKeys) {
@@ -19,8 +23,11 @@ export function tradingSettingsSignature(
   }
   return JSON.stringify({
     mode,
+    positionMode,
     allocations: normalizedAllocations,
     stopLossPercent: Number(stopLossPercent) || 0,
+    rebuyMinDropPercent: Number(rebuyMinDropPercent) || 0,
+    rebuyMaxCount: Number(rebuyMaxCount) || 0,
   })
 }
 
