@@ -30,6 +30,19 @@ describe('trading settings api', () => {
     await expect(loadTradingSettings('session-1', nowIso)).rejects.toThrow('Unexpected empty response from server')
   })
 
+  it('surfaces a friendly error when the trading API is unreachable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch')
+      }),
+    )
+
+    await expect(loadTradingSettings('session-1', nowIso)).rejects.toThrow(
+      'Unable to reach the trading API.',
+    )
+  })
+
   it('rejects empty save responses', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => createJsonResponse(204, null)))
 

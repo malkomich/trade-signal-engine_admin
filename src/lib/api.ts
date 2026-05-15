@@ -70,13 +70,18 @@ function parsePositiveInteger(value: unknown, fallback: number) {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  })
+  let response: Response
+  try {
+    response = await fetch(`${resolveApiBaseUrl()}${path}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    })
+  } catch {
+    throw new Error('Unable to reach the trading API.')
+  }
   if (!response.ok) {
     const message = await response.text().catch(() => '')
     throw new Error(message.trim() || `Request failed with status ${response.status}`)
