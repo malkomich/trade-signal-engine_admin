@@ -71,7 +71,10 @@ import {
 } from "./lib/engine";
 import {
   DEFAULT_TRADING_ALLOCATION,
+  DEFAULT_TRADING_POSITION_MODE,
   DEFAULT_TRADING_STOP_LOSS_PERCENT,
+  DEFAULT_TRADING_REBUY_MIN_DROP_PERCENT,
+  DEFAULT_TRADING_REBUY_MAX_COUNT,
   loadTradingAccount,
   loadTradingSettings,
   saveTradingSettings,
@@ -115,7 +118,7 @@ const selectedLedgerSnapshotId = ref<string>("");
 const selectedWindowReviewId = ref<string>("");
 const selectedOptimizationReviewId = ref<string>("");
 const tradingMode = ref<TradingMode>("paper");
-const tradingPositionMode = ref<TradingPositionMode>("stop_loss");
+const tradingPositionMode = ref<TradingPositionMode>(DEFAULT_TRADING_POSITION_MODE);
 const tradingAllocations = reactive<Record<SignalTier, number>>({
   conviction_buy: 1000,
   balanced_buy: 1000,
@@ -123,8 +126,8 @@ const tradingAllocations = reactive<Record<SignalTier, number>>({
   speculative_buy: 1000,
 });
 const tradingStopLossPercent = ref(DEFAULT_TRADING_STOP_LOSS_PERCENT);
-const tradingRebuyMinDropPercent = ref(0.5);
-const tradingRebuyMaxCount = ref(2);
+const tradingRebuyMinDropPercent = ref(DEFAULT_TRADING_REBUY_MIN_DROP_PERCENT);
+const tradingRebuyMaxCount = ref(DEFAULT_TRADING_REBUY_MAX_COUNT);
 const tradingAccount = ref<TradingAccountSnapshot | null>(null);
 const tradingSettingsLoading = ref(false);
 const tradingAccountRefreshing = ref(false);
@@ -136,10 +139,10 @@ const tradingSettingsBaselineSignature = ref("");
 const tradingSettingsError = ref<string | null>(null);
 const tradingSettingsMessage = ref<string | null>(null);
 const tradingSettingsSessionId = ref<string>("");
-const tradingPositionModeOptions: { value: TradingPositionMode; label: string; description: string; color: string }[] = [
-  { value: "stop_loss", label: "Stop loss", description: "Protect the position with a fixed stop", color: "slate" },
-  { value: "rebuy", label: "Rebuy", description: "Add on further weakness", color: "emerald" },
-  { value: "none", label: "None", description: "Disable both protections", color: "amber" },
+const tradingPositionModeOptions: { value: TradingPositionMode; label: string; description: string; badgeClass: string; icon: string }[] = [
+  { value: "stop_loss", label: "Stop loss", description: "Protect the position with a fixed stop", badgeClass: "stop-loss", icon: "SL" },
+  { value: "rebuy", label: "Rebuy", description: "Add on further weakness", badgeClass: "rebuy", icon: "RB" },
+  { value: "none", label: "None", description: "Disable both protections", badgeClass: "none", icon: "∅" },
 ];
 const liveSignalPage = ref(0);
 const expandedChartId = ref<string | null>(null);
@@ -770,11 +773,11 @@ async function loadTradingSettingsForSession(sessionId: string) {
   tradingSettingsLoadFailed.value = false;
   if (!normalizedSessionId) {
     tradingMode.value = "paper";
-    tradingPositionMode.value = "stop_loss";
+    tradingPositionMode.value = DEFAULT_TRADING_POSITION_MODE;
     Object.assign(tradingAllocations, defaultTradingAllocations());
     tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
-    tradingRebuyMinDropPercent.value = 0.5;
-    tradingRebuyMaxCount.value = 2;
+    tradingRebuyMinDropPercent.value = DEFAULT_TRADING_REBUY_MIN_DROP_PERCENT;
+    tradingRebuyMaxCount.value = DEFAULT_TRADING_REBUY_MAX_COUNT;
     tradingAccount.value = null;
     tradingSettingsError.value = null;
     tradingSettingsMessage.value = null;
@@ -801,11 +804,11 @@ async function loadTradingSettingsForSession(sessionId: string) {
       error instanceof Error ? error.message : "Failed to load trading settings.";
     tradingSettingsMessage.value = null;
     tradingMode.value = "paper";
-    tradingPositionMode.value = "stop_loss";
+    tradingPositionMode.value = DEFAULT_TRADING_POSITION_MODE;
     Object.assign(tradingAllocations, defaultTradingAllocations());
     tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
-    tradingRebuyMinDropPercent.value = 0.5;
-    tradingRebuyMaxCount.value = 2;
+    tradingRebuyMinDropPercent.value = DEFAULT_TRADING_REBUY_MIN_DROP_PERCENT;
+    tradingRebuyMaxCount.value = DEFAULT_TRADING_REBUY_MAX_COUNT;
     tradingAccount.value = null;
     tradingSettingsSessionId.value = normalizedSessionId;
     tradingSettingsBaselineSignature.value = tradingSettingsSignature(
@@ -876,6 +879,10 @@ async function saveTradingSettingsFromPanel() {
     tradingSettingsError.value = "No live session is available yet.";
     return;
   }
+  if (!tradingSettingsLoaded.value) {
+    tradingSettingsError.value = "Trading settings must be loaded before saving.";
+    return;
+  }
   if (!tradingSettingsDirty.value) {
     tradingSettingsError.value = "No trading setting changes detected.";
     return;
@@ -889,7 +896,7 @@ async function saveTradingSettingsFromPanel() {
     const normalizedRebuyMaxCount = Number(tradingRebuyMaxCount.value);
     const settings = await saveTradingSettings(sessionId, {
       mode: tradingMode.value,
-      position_management_mode: tradingPositionMode.value,
+      trading_position_mode: tradingPositionMode.value,
       allocations: {
         conviction_buy: Number(tradingAllocations.conviction_buy) || 0,
         balanced_buy: Number(tradingAllocations.balanced_buy) || 0,
@@ -903,11 +910,11 @@ async function saveTradingSettingsFromPanel() {
       rebuy_min_drop_percent:
         Number.isFinite(normalizedRebuyMinDropPercent) && normalizedRebuyMinDropPercent > 0
           ? normalizedRebuyMinDropPercent
-          : 0.5,
+          : DEFAULT_TRADING_REBUY_MIN_DROP_PERCENT,
       rebuy_max_rebuys:
-        Number.isFinite(normalizedRebuyMaxCount) && normalizedRebuyMaxCount > 0
+        Number.isFinite(Math.floor(normalizedRebuyMaxCount)) && Math.floor(normalizedRebuyMaxCount) > 0
           ? Math.floor(normalizedRebuyMaxCount)
-          : 2,
+          : DEFAULT_TRADING_REBUY_MAX_COUNT,
     }, new Date().toISOString());
     applyTradingSettingsSnapshot(settings);
     if (!settings.tradingAccount || settings.tradingAccountError) {
@@ -3045,7 +3052,7 @@ onUnmounted(() => {
               type="button"
               class="action-button"
               :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsDirty"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save" }}
@@ -3065,8 +3072,8 @@ onUnmounted(() => {
                   :disabled="tradingSettingsLoading || tradingSettingsSaving"
                   @click="setTradingPositionMode(option.value)"
                 >
-                  <span class="signal-tier-badge" :class="option.value === 'stop_loss' ? 'stop-loss' : option.value">
-                    <i>{{ option.value === 'stop_loss' ? 'SL' : option.value === 'rebuy' ? 'RB' : '∅' }}</i>
+                  <span class="signal-tier-badge trading-tier-chip" :class="option.badgeClass">
+                    <i>{{ option.icon }}</i>
                   </span>
                   <span class="position-mode-copy">
                     <strong>{{ option.label }}</strong>

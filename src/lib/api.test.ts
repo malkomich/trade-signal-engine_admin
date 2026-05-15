@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { loadTradingAccount, loadTradingSettings, saveTradingSettings } from './api'
+import {
+  DEFAULT_TRADING_POSITION_MODE,
+  DEFAULT_TRADING_REBUY_MAX_COUNT,
+  DEFAULT_TRADING_REBUY_MIN_DROP_PERCENT,
+  loadTradingAccount,
+  loadTradingSettings,
+  saveTradingSettings,
+} from './api'
 
 function createJsonResponse(status: number, body: unknown) {
   return {
@@ -29,7 +36,7 @@ describe('trading settings api', () => {
     await expect(
       saveTradingSettings('session-1', {
         mode: 'paper',
-        position_management_mode: 'stop_loss',
+        trading_position_mode: 'stop_loss',
         allocations: {
           conviction_buy: 1000,
           balanced_buy: 1000,
@@ -41,6 +48,12 @@ describe('trading settings api', () => {
         rebuy_max_rebuys: 2,
       }, nowIso),
     ).rejects.toThrow('Unexpected empty response from server')
+  })
+
+  it('exposes default trading constants', () => {
+    expect(DEFAULT_TRADING_POSITION_MODE).toBe('stop_loss')
+    expect(DEFAULT_TRADING_REBUY_MIN_DROP_PERCENT).toBe(0.5)
+    expect(DEFAULT_TRADING_REBUY_MAX_COUNT).toBe(2)
   })
 
   it('sends trading settings payload with position management fields', async () => {
@@ -72,7 +85,7 @@ describe('trading settings api', () => {
 
     const snapshot = await saveTradingSettings('session-1', {
       mode: 'live',
-      position_management_mode: 'rebuy',
+      trading_position_mode: 'rebuy',
       allocations: {
         conviction_buy: 1000,
         balanced_buy: 1000,
@@ -87,7 +100,7 @@ describe('trading settings api', () => {
     expect(capturedBody).toEqual({
       session_id: 'session-1',
       mode: 'live',
-      position_management_mode: 'rebuy',
+      trading_position_mode: 'rebuy',
       allocations: {
         conviction_buy: 1000,
         balanced_buy: 1000,
