@@ -363,11 +363,13 @@ h1 {
 }
 
 .trading-tier-chip {
+  display: inline-flex;
   width: 32px;
   height: 32px;
   border-radius: 999px;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
 }
 
 .trading-tier-chip.stop-loss {
@@ -406,6 +408,8 @@ h1 {
 
 .trading-tier-chip.signal-tier-badge i {
   font-size: 0.7rem;
+  line-height: 1;
+  font-style: normal;
   letter-spacing: 0.03em;
 }
 .trading-account-grid {

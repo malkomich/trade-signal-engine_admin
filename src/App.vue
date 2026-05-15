@@ -883,10 +883,6 @@ async function saveTradingSettingsFromPanel() {
     tradingSettingsError.value = "Trading settings must be loaded before saving.";
     return;
   }
-  if (!tradingSettingsDirty.value) {
-    tradingSettingsError.value = "No trading setting changes detected.";
-    return;
-  }
   tradingSettingsSaving.value = true;
   tradingSettingsError.value = null;
   tradingSettingsMessage.value = null;
@@ -3052,7 +3048,7 @@ onUnmounted(() => {
               type="button"
               class="action-button"
               :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save" }}
