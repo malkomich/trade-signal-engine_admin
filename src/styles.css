@@ -267,6 +267,75 @@ h1 {
   border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+.trading-management-strip {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.trading-management-label {
+  color: #9fb0ca;
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.position-mode-switches {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.position-mode-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px;
+  background: rgba(8, 15, 28, 0.54);
+  color: #ecf3ff;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.position-mode-button strong,
+.position-mode-button small {
+  display: block;
+}
+
+.position-mode-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.position-mode-button.stop_loss.active {
+  border-color: rgba(125, 211, 252, 0.52);
+  box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.18) inset;
+}
+
+.position-mode-button.rebuy.active {
+  border-color: rgba(74, 222, 128, 0.52);
+  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.18) inset;
+}
+
+.position-mode-button.none.active {
+  border-color: rgba(245, 158, 11, 0.52);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.18) inset;
+}
+
+.position-mode-button small {
+  color: #9fb0ca;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.position-mode-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 .trading-settings-list {
   display: grid;
   gap: 10px;
@@ -302,6 +371,18 @@ h1 {
 .trading-tier-chip.stop-loss i {
   font-size: 0.7rem;
   letter-spacing: 0.03em;
+}
+
+.trading-tier-chip.rebuy {
+  border-color: rgba(74, 222, 128, 0.42);
+  background: rgba(74, 222, 128, 0.12);
+  color: #dcfce7;
+}
+
+.trading-tier-chip.none {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fef3c7;
 }
 
 .trading-tier-label {

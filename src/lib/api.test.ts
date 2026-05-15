@@ -29,6 +29,7 @@ describe('trading settings api', () => {
     await expect(
       saveTradingSettings('session-1', {
         mode: 'paper',
+        position_management_mode: 'stop_loss',
         allocations: {
           conviction_buy: 1000,
           balanced_buy: 1000,
@@ -36,8 +37,70 @@ describe('trading settings api', () => {
           speculative_buy: 1000,
         },
         stop_loss_percent: 0.2,
+        rebuy_min_drop_percent: 0.5,
+        rebuy_max_rebuys: 2,
       }, nowIso),
     ).rejects.toThrow('Unexpected empty response from server')
+  })
+
+  it('sends trading settings payload with position management fields', async () => {
+    let capturedBody: Record<string, unknown> | null = null
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input, init) => {
+        capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+        return createJsonResponse(200, {
+          session_id: 'session-1',
+          trading_mode: 'live',
+          trading_position_mode: 'rebuy',
+          trading_allocations: {
+            conviction_buy: 1000,
+            balanced_buy: 1000,
+            opportunistic_buy: 1000,
+            speculative_buy: 1000,
+          },
+          trading_stop_loss_percent: 0.2,
+          trading_rebuy_min_drop_percent: 1.25,
+          trading_rebuy_max_rebuys: 4,
+          trading_account: null,
+          trading_account_error: null,
+          trading_updated_at: null,
+          updated_at: nowIso,
+        })
+      }),
+    )
+
+    const snapshot = await saveTradingSettings('session-1', {
+      mode: 'live',
+      position_management_mode: 'rebuy',
+      allocations: {
+        conviction_buy: 1000,
+        balanced_buy: 1000,
+        opportunistic_buy: 1000,
+        speculative_buy: 1000,
+      },
+      stop_loss_percent: 0.2,
+      rebuy_min_drop_percent: 1.25,
+      rebuy_max_rebuys: 4,
+    }, nowIso)
+
+    expect(capturedBody).toEqual({
+      session_id: 'session-1',
+      mode: 'live',
+      position_management_mode: 'rebuy',
+      allocations: {
+        conviction_buy: 1000,
+        balanced_buy: 1000,
+        opportunistic_buy: 1000,
+        speculative_buy: 1000,
+      },
+      stop_loss_percent: 0.2,
+      rebuy_min_drop_percent: 1.25,
+      rebuy_max_rebuys: 4,
+    })
+    expect(snapshot.tradingPositionMode).toBe('rebuy')
+    expect(snapshot.tradingRebuyMinDropPercent).toBe(1.25)
+    expect(snapshot.tradingRebuyMaxCount).toBe(4)
   })
 
   it('preserves zero allocations and falls back on invalid numeric values', async () => {
@@ -47,6 +110,7 @@ describe('trading settings api', () => {
         createJsonResponse(200, {
           session_id: 'session-1',
           trading_mode: 'live',
+          trading_position_mode: 'rebuy',
           trading_allocations: {
             conviction_buy: 0,
             balanced_buy: 'NaN',
@@ -54,6 +118,8 @@ describe('trading settings api', () => {
           speculative_buy: 0,
           },
           trading_stop_loss_percent: 'NaN',
+          trading_rebuy_min_drop_percent: '1.5',
+          trading_rebuy_max_rebuys: '3',
           trading_account: {
             mode: 'live',
             status: 'active',
@@ -71,11 +137,14 @@ describe('trading settings api', () => {
     const settings = await loadTradingSettings('session-1', nowIso)
 
     expect(settings.tradingMode).toBe('live')
+    expect(settings.tradingPositionMode).toBe('rebuy')
     expect(settings.tradingAllocations.conviction_buy).toBe(0)
     expect(settings.tradingAllocations.balanced_buy).toBe(1000)
     expect(settings.tradingAllocations.opportunistic_buy).toBe(1500)
     expect(settings.tradingAllocations.speculative_buy).toBe(0)
     expect(settings.tradingStopLossPercent).toBe(0.2)
+    expect(settings.tradingRebuyMinDropPercent).toBe(1.5)
+    expect(settings.tradingRebuyMaxCount).toBe(3)
     expect(settings.tradingAccount).toEqual({
       mode: 'live',
       status: 'active',
@@ -94,6 +163,7 @@ describe('trading settings api', () => {
         createJsonResponse(200, {
           session_id: 'session-1',
           trading_mode: 'live',
+          trading_position_mode: 'stop_loss',
           trading_account: {
             mode: 'live',
             status: 'active',
@@ -128,6 +198,7 @@ describe('trading settings api', () => {
         createJsonResponse(200, {
           session_id: 'session-1',
           trading_mode: 'live',
+          trading_position_mode: 'stop_loss',
           trading_account: null,
           trading_account_error: 'alpaca live trading credentials not configured',
           trading_updated_at: null,
@@ -147,6 +218,7 @@ describe('trading settings api', () => {
         createJsonResponse(200, {
           session_id: 'session-1',
           trading_mode: 'live',
+          trading_position_mode: 'stop_loss',
           trading_account: null,
           trading_updated_at: null,
         }),

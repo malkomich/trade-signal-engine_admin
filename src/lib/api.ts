@@ -1,6 +1,7 @@
 import type { SignalTier } from './engine'
 
 export type TradingMode = 'paper' | 'live'
+export type TradingPositionMode = 'stop_loss' | 'rebuy' | 'none'
 
 export type TradingAccountSnapshot = {
   mode: TradingMode
@@ -15,8 +16,11 @@ export type TradingAccountSnapshot = {
 export type TradingSettingsSnapshot = {
   sessionId: string
   tradingMode: TradingMode
+  tradingPositionMode: TradingPositionMode
   tradingAllocations: Record<SignalTier, number>
   tradingStopLossPercent: number
+  tradingRebuyMinDropPercent: number
+  tradingRebuyMaxCount: number
   tradingAccount: TradingAccountSnapshot | null
   tradingAccountError: string | null
   tradingUpdatedAt: string | null
@@ -25,8 +29,11 @@ export type TradingSettingsSnapshot = {
 
 export type TradingSettingsPayload = {
   mode: TradingMode
+  position_management_mode: TradingPositionMode
   allocations: Record<SignalTier, number>
   stop_loss_percent: number
+  rebuy_min_drop_percent: number
+  rebuy_max_rebuys: number
 }
 
 export const DEFAULT_TRADING_ALLOCATION = 1000
@@ -53,6 +60,11 @@ function parsePositiveNumber(value: unknown, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
+function parsePositiveInteger(value: unknown, fallback: number) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
     headers: {
@@ -74,6 +86,14 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 function parseTradingMode(value: unknown): TradingMode {
   const normalized = String(value ?? '').trim().toLowerCase()
   return normalized === 'live' ? 'live' : 'paper'
+}
+
+function parseTradingPositionMode(value: unknown): TradingPositionMode {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === 'rebuy' || normalized === 'none') {
+    return normalized
+  }
+  return 'stop_loss'
 }
 
 function parseTradingAllocations(value: unknown): Record<SignalTier, number> {
@@ -125,8 +145,11 @@ export async function loadTradingSettings(
   return {
     sessionId: String(payload.session_id ?? sessionId),
     tradingMode: parseTradingMode(payload.trading_mode),
+    tradingPositionMode: parseTradingPositionMode(payload.trading_position_mode),
     tradingAllocations: parseTradingAllocations(payload.trading_allocations),
     tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, DEFAULT_TRADING_STOP_LOSS_PERCENT),
+    tradingRebuyMinDropPercent: parsePositiveNumber(payload.trading_rebuy_min_drop_percent, 0.5),
+    tradingRebuyMaxCount: parsePositiveInteger(payload.trading_rebuy_max_rebuys, 2),
     tradingAccount: parseTradingAccount(payload.trading_account),
     tradingAccountError: payload.trading_account_error ? String(payload.trading_account_error) : null,
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,
@@ -173,8 +196,11 @@ export async function saveTradingSettings(
     body: JSON.stringify({
       session_id: sessionId,
       mode: settings.mode,
+      position_management_mode: settings.position_management_mode,
       allocations: settings.allocations,
       stop_loss_percent: settings.stop_loss_percent,
+      rebuy_min_drop_percent: settings.rebuy_min_drop_percent,
+      rebuy_max_rebuys: settings.rebuy_max_rebuys,
     }),
   })
   if (!payload) {
@@ -183,8 +209,11 @@ export async function saveTradingSettings(
   return {
     sessionId: String(payload.session_id ?? sessionId),
     tradingMode: parseTradingMode(payload.trading_mode),
+    tradingPositionMode: parseTradingPositionMode(payload.trading_position_mode),
     tradingAllocations: parseTradingAllocations(payload.trading_allocations),
     tradingStopLossPercent: parsePositiveNumber(payload.trading_stop_loss_percent, settings.stop_loss_percent),
+    tradingRebuyMinDropPercent: parsePositiveNumber(payload.trading_rebuy_min_drop_percent, settings.rebuy_min_drop_percent),
+    tradingRebuyMaxCount: parsePositiveInteger(payload.trading_rebuy_max_rebuys, settings.rebuy_max_rebuys),
     tradingAccount: parseTradingAccount(payload.trading_account),
     tradingAccountError: payload.trading_account_error ? String(payload.trading_account_error) : null,
     tradingUpdatedAt: payload.trading_updated_at ? String(payload.trading_updated_at) : null,

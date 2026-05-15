@@ -77,6 +77,7 @@ import {
   saveTradingSettings,
   type TradingAccountSnapshot,
   type TradingMode,
+  type TradingPositionMode,
   type TradingSettingsSnapshot,
 } from "./lib/api";
 import {
@@ -114,6 +115,7 @@ const selectedLedgerSnapshotId = ref<string>("");
 const selectedWindowReviewId = ref<string>("");
 const selectedOptimizationReviewId = ref<string>("");
 const tradingMode = ref<TradingMode>("paper");
+const tradingPositionMode = ref<TradingPositionMode>("stop_loss");
 const tradingAllocations = reactive<Record<SignalTier, number>>({
   conviction_buy: 1000,
   balanced_buy: 1000,
@@ -121,6 +123,8 @@ const tradingAllocations = reactive<Record<SignalTier, number>>({
   speculative_buy: 1000,
 });
 const tradingStopLossPercent = ref(DEFAULT_TRADING_STOP_LOSS_PERCENT);
+const tradingRebuyMinDropPercent = ref(0.5);
+const tradingRebuyMaxCount = ref(2);
 const tradingAccount = ref<TradingAccountSnapshot | null>(null);
 const tradingSettingsLoading = ref(false);
 const tradingAccountRefreshing = ref(false);
@@ -132,6 +136,11 @@ const tradingSettingsBaselineSignature = ref("");
 const tradingSettingsError = ref<string | null>(null);
 const tradingSettingsMessage = ref<string | null>(null);
 const tradingSettingsSessionId = ref<string>("");
+const tradingPositionModeOptions: { value: TradingPositionMode; label: string; description: string; color: string }[] = [
+  { value: "stop_loss", label: "Stop loss", description: "Protect the position with a fixed stop", color: "slate" },
+  { value: "rebuy", label: "Rebuy", description: "Add on further weakness", color: "emerald" },
+  { value: "none", label: "None", description: "Disable both protections", color: "amber" },
+];
 const liveSignalPage = ref(0);
 const expandedChartId = ref<string | null>(null);
 const expandedChartZoomX = ref(1);
@@ -731,16 +740,22 @@ function defaultTradingAllocations(): Record<SignalTier, number> {
 
 function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   tradingMode.value = settings.tradingMode;
+  tradingPositionMode.value = settings.tradingPositionMode;
   for (const tier of tradingTierKeys) {
     tradingAllocations[tier] = settings.tradingAllocations[tier] ?? DEFAULT_TRADING_ALLOCATION;
   }
   tradingStopLossPercent.value = settings.tradingStopLossPercent;
+  tradingRebuyMinDropPercent.value = settings.tradingRebuyMinDropPercent;
+  tradingRebuyMaxCount.value = settings.tradingRebuyMaxCount;
   tradingAccount.value = settings.tradingAccount;
   tradingSettingsSessionId.value = settings.sessionId;
   tradingSettingsBaselineSignature.value = tradingSettingsSignature(
     settings.tradingMode,
+    settings.tradingPositionMode,
     settings.tradingAllocations,
     settings.tradingStopLossPercent,
+    settings.tradingRebuyMinDropPercent,
+    settings.tradingRebuyMaxCount,
   );
   tradingSettingsDirty.value = false;
   tradingSettingsLoaded.value = true;
@@ -755,8 +770,11 @@ async function loadTradingSettingsForSession(sessionId: string) {
   tradingSettingsLoadFailed.value = false;
   if (!normalizedSessionId) {
     tradingMode.value = "paper";
+    tradingPositionMode.value = "stop_loss";
     Object.assign(tradingAllocations, defaultTradingAllocations());
     tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
+    tradingRebuyMinDropPercent.value = 0.5;
+    tradingRebuyMaxCount.value = 2;
     tradingAccount.value = null;
     tradingSettingsError.value = null;
     tradingSettingsMessage.value = null;
@@ -783,14 +801,20 @@ async function loadTradingSettingsForSession(sessionId: string) {
       error instanceof Error ? error.message : "Failed to load trading settings.";
     tradingSettingsMessage.value = null;
     tradingMode.value = "paper";
+    tradingPositionMode.value = "stop_loss";
     Object.assign(tradingAllocations, defaultTradingAllocations());
     tradingStopLossPercent.value = DEFAULT_TRADING_STOP_LOSS_PERCENT;
+    tradingRebuyMinDropPercent.value = 0.5;
+    tradingRebuyMaxCount.value = 2;
     tradingAccount.value = null;
     tradingSettingsSessionId.value = normalizedSessionId;
     tradingSettingsBaselineSignature.value = tradingSettingsSignature(
       tradingMode.value,
+      tradingPositionMode.value,
       tradingAllocations,
       tradingStopLossPercent.value,
+      tradingRebuyMinDropPercent.value,
+      tradingRebuyMaxCount.value,
     );
     tradingSettingsDirty.value = false;
     tradingSettingsLoaded.value = true;
@@ -852,10 +876,6 @@ async function saveTradingSettingsFromPanel() {
     tradingSettingsError.value = "No live session is available yet.";
     return;
   }
-  if (!tradingSettingsLoaded.value) {
-    tradingSettingsError.value = "Trading settings must be loaded before saving.";
-    return;
-  }
   if (!tradingSettingsDirty.value) {
     tradingSettingsError.value = "No trading setting changes detected.";
     return;
@@ -865,8 +885,11 @@ async function saveTradingSettingsFromPanel() {
   tradingSettingsMessage.value = null;
   try {
     const normalizedStopLossPercent = Number(tradingStopLossPercent.value);
+    const normalizedRebuyMinDropPercent = Number(tradingRebuyMinDropPercent.value);
+    const normalizedRebuyMaxCount = Number(tradingRebuyMaxCount.value);
     const settings = await saveTradingSettings(sessionId, {
       mode: tradingMode.value,
+      position_management_mode: tradingPositionMode.value,
       allocations: {
         conviction_buy: Number(tradingAllocations.conviction_buy) || 0,
         balanced_buy: Number(tradingAllocations.balanced_buy) || 0,
@@ -877,6 +900,14 @@ async function saveTradingSettingsFromPanel() {
         Number.isFinite(normalizedStopLossPercent) && normalizedStopLossPercent > 0
           ? normalizedStopLossPercent
           : DEFAULT_TRADING_STOP_LOSS_PERCENT,
+      rebuy_min_drop_percent:
+        Number.isFinite(normalizedRebuyMinDropPercent) && normalizedRebuyMinDropPercent > 0
+          ? normalizedRebuyMinDropPercent
+          : 0.5,
+      rebuy_max_rebuys:
+        Number.isFinite(normalizedRebuyMaxCount) && normalizedRebuyMaxCount > 0
+          ? Math.floor(normalizedRebuyMaxCount)
+          : 2,
     }, new Date().toISOString());
     applyTradingSettingsSnapshot(settings);
     if (!settings.tradingAccount || settings.tradingAccountError) {
@@ -898,8 +929,11 @@ async function saveTradingSettingsFromPanel() {
 const tradingSettingsCurrentSignature = computed(() =>
   tradingSettingsSignature(
     tradingMode.value,
+    tradingPositionMode.value,
     tradingAllocations,
     tradingStopLossPercent.value,
+    tradingRebuyMinDropPercent.value,
+    tradingRebuyMaxCount.value,
   ),
 );
 
@@ -919,6 +953,11 @@ function toggleTradingMode() {
     tradingMode.value,
     new Date().toISOString(),
   );
+}
+
+function setTradingPositionMode(mode: TradingPositionMode) {
+  tradingPositionMode.value = mode;
+  syncTradingSettingsDirty();
 }
 
 function notifyTradingSettingsEdited() {
@@ -3006,13 +3045,36 @@ onUnmounted(() => {
               type="button"
               class="action-button"
               :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingAccountRefreshing || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
+              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsDirty"
               @click="saveTradingSettingsFromPanel"
             >
               {{ tradingSettingsSaving ? "Saving..." : "Save" }}
             </button>
           </div>
           <div class="trading-settings-panel">
+            <div class="trading-management-strip">
+              <span class="trading-management-label">Position management</span>
+              <div class="position-mode-switches" role="group" aria-label="Position management mode">
+                <button
+                  v-for="option in tradingPositionModeOptions"
+                  :key="option.value"
+                  type="button"
+                  class="position-mode-button"
+                  :class="[option.value, { active: tradingPositionMode === option.value }]"
+                  :aria-pressed="tradingPositionMode === option.value"
+                  :disabled="tradingSettingsLoading || tradingSettingsSaving"
+                  @click="setTradingPositionMode(option.value)"
+                >
+                  <span class="signal-tier-badge" :class="option.value === 'stop_loss' ? 'stop-loss' : option.value">
+                    <i>{{ option.value === 'stop_loss' ? 'SL' : option.value === 'rebuy' ? 'RB' : '∅' }}</i>
+                  </span>
+                  <span class="position-mode-copy">
+                    <strong>{{ option.label }}</strong>
+                    <small>{{ option.description }}</small>
+                  </span>
+                </button>
+              </div>
+            </div>
             <div class="trading-settings-list">
               <label v-for="tier in tradingTierKeys" :key="tier" class="trading-tier-row">
                 <span class="signal-tier-badge trading-tier-chip" :class="tier">
@@ -3039,6 +3101,37 @@ onUnmounted(() => {
                   min="0.01"
                   max="10"
                   step="0.01"
+                  :disabled="tradingPositionMode !== 'stop_loss'"
+                />
+              </label>
+              <label class="trading-tier-row trading-tier-row-wide">
+                <span class="signal-tier-badge trading-tier-chip rebuy">
+                  <i>RB</i>
+                </span>
+                <span class="trading-tier-label">Rebuy drop (%)</span>
+                <input
+                  v-model.number="tradingRebuyMinDropPercent"
+                  type="number"
+                  @input="notifyTradingSettingsEdited"
+                  min="0.01"
+                  max="10"
+                  step="0.01"
+                  :disabled="tradingPositionMode !== 'rebuy'"
+                />
+              </label>
+              <label class="trading-tier-row trading-tier-row-wide">
+                <span class="signal-tier-badge trading-tier-chip rebuy">
+                  <i>MR</i>
+                </span>
+                <span class="trading-tier-label">Max rebuys</span>
+                <input
+                  v-model.number="tradingRebuyMaxCount"
+                  type="number"
+                  @input="notifyTradingSettingsEdited"
+                  min="1"
+                  max="10"
+                  step="1"
+                  :disabled="tradingPositionMode !== 'rebuy'"
                 />
               </label>
             </div>
