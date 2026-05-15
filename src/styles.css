@@ -352,6 +352,12 @@ h1 {
   border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
+.trading-tier-inline-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .trading-tier-row-wide {
   grid-template-columns: auto minmax(0, 1fr) 88px;
 }
@@ -360,17 +366,14 @@ h1 {
   width: 32px;
   height: 32px;
   border-radius: 999px;
+  align-items: center;
+  justify-content: center;
 }
 
 .trading-tier-chip.stop-loss {
   border-color: rgba(125, 211, 252, 0.42);
   background: rgba(56, 189, 248, 0.14);
   color: #dbeafe;
-}
-
-.trading-tier-chip.stop-loss i {
-  font-size: 0.7rem;
-  letter-spacing: 0.03em;
 }
 
 .trading-tier-chip.rebuy {
@@ -399,6 +402,11 @@ h1 {
   background: rgba(12, 18, 31, 0.92);
   color: #ecf3ff;
   padding: 8px 10px;
+}
+
+.trading-tier-chip.signal-tier-badge i {
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
 }
 .trading-account-grid {
   display: grid;
