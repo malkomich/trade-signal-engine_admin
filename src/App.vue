@@ -890,7 +890,7 @@ async function saveTradingSettingsFromPanel() {
     const normalizedStopLossPercent = Number(tradingStopLossPercent.value);
     const normalizedRebuyMinDropPercent = Number(tradingRebuyMinDropPercent.value);
     const normalizedRebuyMaxCount = Number(tradingRebuyMaxCount.value);
-    const settings = await saveTradingSettings(sessionId, {
+    await saveTradingSettings(sessionId, {
       mode: tradingMode.value,
       trading_position_mode: tradingPositionMode.value,
       allocations: {
@@ -912,14 +912,7 @@ async function saveTradingSettingsFromPanel() {
           ? Math.floor(normalizedRebuyMaxCount)
           : DEFAULT_TRADING_REBUY_MAX_COUNT,
     }, new Date().toISOString());
-    applyTradingSettingsSnapshot(settings);
-    if (!settings.tradingAccount || settings.tradingAccountError) {
-      void refreshTradingAccountForSession(
-        sessionId,
-        settings.tradingMode,
-        new Date().toISOString(),
-      );
-    }
+    await loadTradingSettingsForSession(sessionId);
     tradingSettingsMessage.value = "Trading settings saved.";
   } catch (error) {
     tradingSettingsError.value =
