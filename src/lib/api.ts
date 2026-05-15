@@ -177,7 +177,7 @@ export async function loadTradingAccount(
     payload.trading_account && typeof payload.trading_account === 'object'
       ? (payload.trading_account as Record<string, unknown>)
       : null
-  if (payload.trading_account_error) {
+  if (payload.trading_account_error && !tradingAccount) {
     throw new Error(String(payload.trading_account_error))
   }
   if (!tradingAccount) {

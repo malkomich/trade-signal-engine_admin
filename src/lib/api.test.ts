@@ -204,7 +204,7 @@ describe('trading settings api', () => {
     })
   })
 
-  it('throws when trading account payload includes an error', async () => {
+  it('returns the account when the payload includes both an error and a snapshot', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -212,16 +212,30 @@ describe('trading settings api', () => {
           session_id: 'session-1',
           trading_mode: 'live',
           trading_position_mode: 'stop_loss',
-          trading_account: null,
+          trading_account: {
+            mode: 'live',
+            status: 'active',
+            buying_power: '4321.00',
+            cash: '100.50',
+            equity: '5000.00',
+            portfolio_value: '5100.50',
+            updated_at: '2026-05-12T10:00:00Z',
+          },
           trading_account_error: 'alpaca live trading credentials not configured',
-          trading_updated_at: null,
+          trading_updated_at: '2026-05-12T10:00:00Z',
         }),
       ),
     )
 
-    await expect(loadTradingAccount('session-1', 'live', nowIso)).rejects.toThrow(
-      'alpaca live trading credentials not configured',
-    )
+    await expect(loadTradingAccount('session-1', 'live', nowIso)).resolves.toEqual({
+      mode: 'live',
+      status: 'active',
+      buyingPower: 4321,
+      cash: 100.5,
+      equity: 5000,
+      portfolioValue: 5100.5,
+      updatedAt: '2026-05-12T10:00:00Z',
+    })
   })
 
   it('returns null when trading account payload is absent', async () => {
