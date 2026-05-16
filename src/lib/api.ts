@@ -70,19 +70,13 @@ function parsePositiveInteger(value: unknown, fallback: number) {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const baseUrl = resolveApiBaseUrl()
-  let response: Response
-  try {
-    response = await fetch(`${baseUrl}${path}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(init?.headers ?? {}),
-      },
-      ...init,
-    })
-  } catch {
-    throw new Error('Unable to reach the trading API.')
-  }
+  const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  })
   if (!response.ok) {
     const message = await response.text().catch(() => '')
     throw new Error(message.trim() || `Request failed with status ${response.status}`)
@@ -183,7 +177,7 @@ export async function loadTradingAccount(
     payload.trading_account && typeof payload.trading_account === 'object'
       ? (payload.trading_account as Record<string, unknown>)
       : null
-  if (payload.trading_account_error && !tradingAccount) {
+  if (payload.trading_account_error) {
     throw new Error(String(payload.trading_account_error))
   }
   if (!tradingAccount) {
