@@ -794,7 +794,7 @@ async function loadTradingSettingsForSession(sessionId: string) {
     applyTradingSettingsSnapshot(settings);
     if (!settings.tradingAccount || settings.tradingAccountError) {
       void refreshTradingAccountForSession(
-        sessionId,
+        normalizedSessionId,
         settings.tradingMode,
         new Date().toISOString(),
       );
@@ -864,8 +864,6 @@ async function refreshTradingAccountForSession(
     if (!previousAccount || previousAccount.mode !== normalizedMode) {
       tradingAccount.value = null;
     }
-    tradingSettingsError.value =
-      error instanceof Error ? error.message : "Failed to refresh trading account.";
   } finally {
     if (requestGeneration === tradingAccountRefreshGeneration) {
       tradingAccountRefreshing.value = false;

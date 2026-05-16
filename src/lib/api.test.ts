@@ -116,6 +116,39 @@ describe('trading settings api', () => {
     expect(snapshot.tradingRebuyMaxCount).toBe(4)
   })
 
+  it('does not send content type on trading settings GET requests', async () => {
+    let capturedHeaders: HeadersInit | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input, init) => {
+        capturedHeaders = init?.headers
+        return createJsonResponse(200, {
+          session_id: 'session-1',
+          trading_mode: 'paper',
+          trading_position_mode: 'stop_loss',
+          trading_allocations: {
+            conviction_buy: 1000,
+            balanced_buy: 1000,
+            opportunistic_buy: 1000,
+            speculative_buy: 1000,
+          },
+          trading_stop_loss_percent: 0.2,
+          trading_rebuy_min_drop_percent: 0.5,
+          trading_rebuy_max_rebuys: 2,
+          trading_account: null,
+          trading_account_error: null,
+          trading_updated_at: null,
+          updated_at: nowIso,
+        })
+      }),
+    )
+
+    await loadTradingSettings('session-1', nowIso)
+
+    const normalizedHeaders = new Headers(capturedHeaders)
+    expect(normalizedHeaders.get('Content-Type')).toBeNull()
+  })
+
   it('preserves zero allocations and falls back on invalid numeric values', async () => {
     vi.stubGlobal(
       'fetch',
