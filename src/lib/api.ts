@@ -71,11 +71,11 @@ function parsePositiveInteger(value: unknown, fallback: number) {
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase()
-  const headers: Record<string, string> = {
-    ...(init?.headers as Record<string, string> | undefined ?? {}),
-  }
+  const headers = new Headers(init?.headers)
   if (method !== 'GET' && method !== 'HEAD') {
-    headers['Content-Type'] = headers['Content-Type'] ?? 'application/json'
+    if (!headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json')
+    }
   }
   const response = await fetch(`${resolveApiBaseUrl()}${path}`, {
     ...init,

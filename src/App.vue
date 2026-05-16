@@ -766,6 +766,10 @@ function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   tradingSettingsError.value = settings.tradingAccountError;
 }
 
+const isTradingSettingsBusy = computed(
+  () => tradingSettingsLoading.value || tradingSettingsSaving.value,
+);
+
 async function loadTradingSettingsForSession(sessionId: string) {
   const normalizedSessionId = String(sessionId ?? "").trim();
   tradingSettingsMessage.value = null;
@@ -831,12 +835,15 @@ async function refreshTradingAccountForSession(
   sessionId: string,
   mode = tradingMode.value,
   nowIso = new Date().toISOString(),
-) {
+): Promise<boolean> {
   const normalizedSessionId = String(sessionId ?? "").trim();
   const normalizedMode = mode === "live" ? "live" : "paper";
   if (!normalizedSessionId) {
     tradingAccount.value = null;
-    return;
+    return false;
+  }
+  if (tradingAccountRefreshing.value) {
+    return false;
   }
   const requestGeneration = ++tradingAccountRefreshGeneration;
   tradingAccountRefreshing.value = true;
@@ -849,7 +856,7 @@ async function refreshTradingAccountForSession(
       nowIso,
     );
     if (requestGeneration !== tradingAccountRefreshGeneration) {
-      return;
+      return false;
     }
     if (account) {
       tradingAccount.value = account;
@@ -857,13 +864,15 @@ async function refreshTradingAccountForSession(
       tradingAccount.value = null;
     }
     tradingSettingsLoadFailed.value = false;
+    return true;
   } catch (error) {
     if (requestGeneration !== tradingAccountRefreshGeneration) {
-      return;
+      return false;
     }
     if (!previousAccount || previousAccount.mode !== normalizedMode) {
       tradingAccount.value = null;
     }
+    return false;
   } finally {
     if (requestGeneration === tradingAccountRefreshGeneration) {
       tradingAccountRefreshing.value = false;
@@ -915,14 +924,19 @@ async function saveTradingSettingsFromPanel() {
           : DEFAULT_TRADING_REBUY_MAX_COUNT,
     }, new Date().toISOString());
     applyTradingSettingsSnapshot(settings);
-    if (!settings.tradingAccount || settings.tradingAccountError) {
-      void refreshTradingAccountForSession(
+    const accountRefreshed = settings.tradingAccount && !settings.tradingAccountError
+      ? true
+      : await refreshTradingAccountForSession(
         sessionId,
         settings.tradingMode,
         new Date().toISOString(),
       );
+    if (accountRefreshed) {
+      tradingSettingsMessage.value = "Trading settings saved.";
+    } else {
+      tradingSettingsMessage.value = null;
+      tradingSettingsError.value = "Trading settings saved, but trading account refresh failed.";
     }
-    tradingSettingsMessage.value = "Trading settings saved.";
   } catch (error) {
     tradingSettingsError.value =
       error instanceof Error ? error.message : "Failed to save trading settings.";
@@ -966,7 +980,14 @@ function setTradingPositionMode(mode: TradingPositionMode) {
 }
 
 function notifyTradingSettingsEdited() {
+  if (isTradingSettingsBusy.value) {
+    return;
+  }
   syncTradingSettingsDirty();
+}
+
+async function retryLoadTradingSettings() {
+  await loadTradingSettingsForSession(sessionOverview.value.sessionId);
 }
 
 watch(
@@ -3011,6 +3032,14 @@ onUnmounted(() => {
               <p v-if="tradingSettingsError" class="status-warning">
                 {{ tradingSettingsError }}
               </p>
+              <button
+                type="button"
+                class="action-button ghost compact"
+                :disabled="tradingSettingsLoading || tradingSettingsSaving"
+                @click="retryLoadTradingSettings"
+              >
+                Retry
+              </button>
             </div>
           </template>
           <template v-else>
@@ -3108,6 +3137,7 @@ onUnmounted(() => {
                     @input="notifyTradingSettingsEdited"
                     min="0"
                     step="10"
+                    :disabled="isTradingSettingsBusy"
                   />
                 </label>
                 <label
@@ -3125,6 +3155,7 @@ onUnmounted(() => {
                     min="0.01"
                     max="10"
                     step="0.01"
+                    :disabled="isTradingSettingsBusy"
                   />
                 </label>
                 <div v-else-if="tradingPositionMode === 'rebuy'" class="trading-tier-inline-group">
@@ -3140,6 +3171,7 @@ onUnmounted(() => {
                       min="0.01"
                       max="10"
                       step="0.01"
+                      :disabled="isTradingSettingsBusy"
                     />
                   </label>
                   <label class="trading-tier-row trading-tier-row-wide">
@@ -3154,6 +3186,7 @@ onUnmounted(() => {
                       min="1"
                       max="10"
                       step="1"
+                      :disabled="isTradingSettingsBusy"
                     />
                   </label>
                 </div>
