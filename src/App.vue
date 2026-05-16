@@ -766,6 +766,10 @@ function applyTradingSettingsSnapshot(settings: TradingSettingsSnapshot) {
   tradingSettingsError.value = settings.tradingAccountError;
 }
 
+const isTradingSettingsBusy = computed(
+  () => tradingSettingsLoading.value || tradingSettingsSaving.value,
+);
+
 async function loadTradingSettingsForSession(sessionId: string) {
   const normalizedSessionId = String(sessionId ?? "").trim();
   tradingSettingsMessage.value = null;
@@ -794,7 +798,7 @@ async function loadTradingSettingsForSession(sessionId: string) {
     applyTradingSettingsSnapshot(settings);
     if (!settings.tradingAccount || settings.tradingAccountError) {
       void refreshTradingAccountForSession(
-        sessionId,
+        normalizedSessionId,
         settings.tradingMode,
         new Date().toISOString(),
       );
@@ -831,12 +835,15 @@ async function refreshTradingAccountForSession(
   sessionId: string,
   mode = tradingMode.value,
   nowIso = new Date().toISOString(),
-) {
+): Promise<boolean> {
   const normalizedSessionId = String(sessionId ?? "").trim();
   const normalizedMode = mode === "live" ? "live" : "paper";
   if (!normalizedSessionId) {
     tradingAccount.value = null;
-    return;
+    return false;
+  }
+  if (tradingAccountRefreshing.value) {
+    return false;
   }
   const requestGeneration = ++tradingAccountRefreshGeneration;
   tradingAccountRefreshing.value = true;
@@ -849,7 +856,7 @@ async function refreshTradingAccountForSession(
       nowIso,
     );
     if (requestGeneration !== tradingAccountRefreshGeneration) {
-      return;
+      return false;
     }
     if (account) {
       tradingAccount.value = account;
@@ -857,15 +864,15 @@ async function refreshTradingAccountForSession(
       tradingAccount.value = null;
     }
     tradingSettingsLoadFailed.value = false;
+    return true;
   } catch (error) {
     if (requestGeneration !== tradingAccountRefreshGeneration) {
-      return;
+      return false;
     }
     if (!previousAccount || previousAccount.mode !== normalizedMode) {
       tradingAccount.value = null;
     }
-    tradingSettingsError.value =
-      error instanceof Error ? error.message : "Failed to refresh trading account.";
+    return false;
   } finally {
     if (requestGeneration === tradingAccountRefreshGeneration) {
       tradingAccountRefreshing.value = false;
@@ -917,14 +924,19 @@ async function saveTradingSettingsFromPanel() {
           : DEFAULT_TRADING_REBUY_MAX_COUNT,
     }, new Date().toISOString());
     applyTradingSettingsSnapshot(settings);
-    if (!settings.tradingAccount || settings.tradingAccountError) {
-      void refreshTradingAccountForSession(
+    const accountRefreshed = settings.tradingAccount && !settings.tradingAccountError
+      ? true
+      : await refreshTradingAccountForSession(
         sessionId,
         settings.tradingMode,
         new Date().toISOString(),
       );
+    if (accountRefreshed) {
+      tradingSettingsMessage.value = "Trading settings saved.";
+    } else {
+      tradingSettingsMessage.value = null;
+      tradingSettingsError.value = "Trading settings saved, but trading account refresh failed.";
     }
-    tradingSettingsMessage.value = "Trading settings saved.";
   } catch (error) {
     tradingSettingsError.value =
       error instanceof Error ? error.message : "Failed to save trading settings.";
@@ -968,7 +980,14 @@ function setTradingPositionMode(mode: TradingPositionMode) {
 }
 
 function notifyTradingSettingsEdited() {
+  if (isTradingSettingsBusy.value) {
+    return;
+  }
   syncTradingSettingsDirty();
+}
+
+async function retryLoadTradingSettings() {
+  await loadTradingSettingsForSession(sessionOverview.value.sessionId);
 }
 
 watch(
@@ -3000,169 +3019,200 @@ onUnmounted(() => {
 
       <div class="hero-status-row">
         <div class="hero-status trading-panel">
-          <div class="trading-panel-header">
-            <div class="trading-panel-heading">
+          <template v-if="!tradingSettingsLoaded && !tradingSettingsLoadFailed">
+            <div class="trading-settings-state">
               <div class="status-dot"></div>
-              <div>
-                <strong>{{ sourceDisplay.title }}</strong>
+              <strong>Loading trading settings...</strong>
+            </div>
+          </template>
+          <template v-else-if="tradingSettingsLoadFailed">
+            <div class="trading-settings-state">
+              <div class="status-dot"></div>
+              <strong>Trading settings could not be loaded.</strong>
+              <p v-if="tradingSettingsError" class="status-warning">
+                {{ tradingSettingsError }}
+              </p>
+              <button
+                type="button"
+                class="action-button ghost compact"
+                :disabled="tradingSettingsLoading || tradingSettingsSaving"
+                @click="retryLoadTradingSettings"
+              >
+                Retry
+              </button>
+            </div>
+          </template>
+          <template v-else>
+            <div class="trading-panel-header">
+              <div class="trading-panel-heading">
+                <div class="status-dot"></div>
+                <div>
+                  <strong>{{ sourceDisplay.title }}</strong>
+                </div>
+              </div>
+              <div class="trading-panel-meta trading-panel-meta-inline">
+                <span>Last update</span>
+                <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong>
               </div>
             </div>
-            <div class="trading-panel-meta trading-panel-meta-inline">
-              <span>Last update</span>
-              <strong>{{ formatLocaleTimestamp(sessionOverview.updatedAt) }}</strong>
+            <p v-if="snapshotWarning" class="status-warning">
+              {{ snapshotWarning }}
+            </p>
+            <p v-if="tradingSettingsError" class="status-warning">
+              {{ tradingSettingsError }}
+            </p>
+            <p v-if="tradingSettingsMessage" class="status-success">
+              {{ tradingSettingsMessage }}
+            </p>
+            <div class="trading-panel-actions">
+              <button
+                type="button"
+                class="mode-switch"
+                role="switch"
+                :aria-checked="tradingMode === 'live'"
+                :class="tradingMode"
+                :disabled="tradingSettingsLoading || tradingSettingsSaving"
+                @click="toggleTradingMode"
+              >
+                <span class="mode-switch-track">
+                  <span class="mode-switch-thumb"></span>
+                </span>
+                <span class="mode-switch-label">
+                  {{ tradingMode === 'live' ? 'Live Trading' : 'Paper Trading' }}
+                </span>
+              </button>
+              <button
+                type="button"
+                class="action-button icon-button"
+                :disabled="tradingSettingsLoading || tradingAccountRefreshing"
+                @click="refreshTradingSettings"
+                aria-label="Refresh account"
+                title="Refresh account"
+              >
+                ↻
+              </button>
+              <button
+                type="button"
+                class="action-button"
+                :class="{ active: tradingSettingsDirty }"
+                :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
+                @click="saveTradingSettingsFromPanel"
+              >
+                {{ tradingSettingsSaving ? "Saving..." : "Save" }}
+              </button>
             </div>
-          </div>
-          <p v-if="snapshotWarning" class="status-warning">
-            {{ snapshotWarning }}
-          </p>
-          <p v-if="tradingSettingsError" class="status-warning">
-            {{ tradingSettingsError }}
-          </p>
-          <p v-if="tradingSettingsMessage" class="status-success">
-            {{ tradingSettingsMessage }}
-          </p>
-          <div class="trading-panel-actions">
-            <button
-              type="button"
-              class="mode-switch"
-              role="switch"
-              :aria-checked="tradingMode === 'live'"
-              :class="tradingMode"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving"
-              @click="toggleTradingMode"
-            >
-              <span class="mode-switch-track">
-                <span class="mode-switch-thumb"></span>
-              </span>
-              <span class="mode-switch-label">
-                {{ tradingMode === 'live' ? 'Live Trading' : 'Paper Trading' }}
-              </span>
-            </button>
-            <button
-              type="button"
-              class="action-button icon-button"
-              :disabled="tradingSettingsLoading || tradingAccountRefreshing"
-              @click="refreshTradingSettings"
-              aria-label="Refresh account"
-              title="Refresh account"
-            >
-              ↻
-            </button>
-            <button
-              type="button"
-              class="action-button"
-              :class="{ active: tradingSettingsDirty }"
-              :disabled="tradingSettingsLoading || tradingSettingsSaving || !tradingSettingsLoaded || !tradingSettingsDirty"
-              @click="saveTradingSettingsFromPanel"
-            >
-              {{ tradingSettingsSaving ? "Saving..." : "Save" }}
-            </button>
-          </div>
-          <div class="trading-settings-panel">
-            <div class="trading-management-strip">
-              <span class="trading-management-label">Position management</span>
-              <div class="position-mode-switches" role="group" aria-label="Position management mode">
-                <button
-                  v-for="option in tradingPositionModeOptions"
-                  :key="option.value"
-                  type="button"
-                  class="position-mode-button"
-                  :class="[option.value, { active: tradingPositionMode === option.value }]"
-                  :aria-pressed="tradingPositionMode === option.value"
-                  :disabled="tradingSettingsLoading || tradingSettingsSaving"
-                  @click="setTradingPositionMode(option.value)"
+            <div class="trading-settings-panel">
+              <div class="trading-management-strip">
+                <span class="trading-management-label">Position management</span>
+                <div class="position-mode-switches" role="group" aria-label="Position management mode">
+                  <button
+                    v-for="option in tradingPositionModeOptions"
+                    :key="option.value"
+                    type="button"
+                    class="position-mode-button"
+                    :class="[option.value, { active: tradingPositionMode === option.value }]"
+                    :aria-pressed="tradingPositionMode === option.value"
+                    :disabled="tradingSettingsLoading || tradingSettingsSaving"
+                    @click="setTradingPositionMode(option.value)"
+                  >
+                    <span class="signal-tier-badge trading-tier-chip" :class="option.badgeClass">
+                      <i>{{ option.icon }}</i>
+                    </span>
+                    <span class="position-mode-copy">
+                      <strong>{{ option.label }}</strong>
+                      <small>{{ option.description }}</small>
+                    </span>
+                  </button>
+                </div>
+              </div>
+              <div class="trading-settings-list">
+                <label v-for="tier in tradingTierKeys" :key="tier" class="trading-tier-row">
+                  <span class="signal-tier-badge trading-tier-chip" :class="tier">
+                    <i>{{ signalTierLegend[tier].icon }}</i>
+                  </span>
+                  <span class="trading-tier-label">{{ signalTierLegend[tier].label }}</span>
+                  <input
+                    v-model.number="tradingAllocations[tier]"
+                    type="number"
+                    @input="notifyTradingSettingsEdited"
+                    min="0"
+                    step="10"
+                    :disabled="isTradingSettingsBusy"
+                  />
+                </label>
+                <label
+                  v-if="tradingPositionMode === 'stop_loss'"
+                  class="trading-tier-row trading-tier-row-wide"
                 >
-                  <span class="signal-tier-badge trading-tier-chip" :class="option.badgeClass">
-                    <i>{{ option.icon }}</i>
+                  <span class="signal-tier-badge trading-tier-chip stop-loss">
+                    <i>SL</i>
                   </span>
-                  <span class="position-mode-copy">
-                    <strong>{{ option.label }}</strong>
-                    <small>{{ option.description }}</small>
-                  </span>
-                </button>
+                  <span class="trading-tier-label">Stop loss (%)</span>
+                  <input
+                    v-model.number="tradingStopLossPercent"
+                    type="number"
+                    @input="notifyTradingSettingsEdited"
+                    min="0.01"
+                    max="10"
+                    step="0.01"
+                    :disabled="isTradingSettingsBusy"
+                  />
+                </label>
+                <div v-else-if="tradingPositionMode === 'rebuy'" class="trading-tier-inline-group">
+                  <label class="trading-tier-row trading-tier-row-wide">
+                    <span class="signal-tier-badge trading-tier-chip rebuy">
+                      <i>RB</i>
+                    </span>
+                    <span class="trading-tier-label">Rebuy drop (%)</span>
+                    <input
+                      v-model.number="tradingRebuyMinDropPercent"
+                      type="number"
+                      @input="notifyTradingSettingsEdited"
+                      min="0.01"
+                      max="10"
+                      step="0.01"
+                      :disabled="isTradingSettingsBusy"
+                    />
+                  </label>
+                  <label class="trading-tier-row trading-tier-row-wide">
+                    <span class="signal-tier-badge trading-tier-chip rebuy">
+                      <i>MR</i>
+                    </span>
+                    <span class="trading-tier-label">Max rebuys</span>
+                    <input
+                      v-model.number="tradingRebuyMaxCount"
+                      type="number"
+                      @input="notifyTradingSettingsEdited"
+                      min="1"
+                      max="10"
+                      step="1"
+                      :disabled="isTradingSettingsBusy"
+                    />
+                  </label>
+                </div>
               </div>
             </div>
-            <div class="trading-settings-list">
-              <label v-for="tier in tradingTierKeys" :key="tier" class="trading-tier-row">
-                <span class="signal-tier-badge trading-tier-chip" :class="tier">
-                  <i>{{ signalTierLegend[tier].icon }}</i>
-                </span>
-                <span class="trading-tier-label">{{ signalTierLegend[tier].label }}</span>
-                <input
-                  v-model.number="tradingAllocations[tier]"
-                  type="number"
-                  @input="notifyTradingSettingsEdited"
-                  min="0"
-                  step="10"
-                />
-              </label>
-              <label class="trading-tier-row trading-tier-row-wide">
-                <span class="signal-tier-badge trading-tier-chip stop-loss">
-                  <i>SL</i>
-                </span>
-                <span class="trading-tier-label">Stop loss (%)</span>
-                <input
-                  v-model.number="tradingStopLossPercent"
-                  type="number"
-                  @input="notifyTradingSettingsEdited"
-                  min="0.01"
-                  max="10"
-                  step="0.01"
-                  :disabled="tradingPositionMode !== 'stop_loss'"
-                />
-              </label>
-              <label class="trading-tier-row trading-tier-row-wide">
-                <span class="signal-tier-badge trading-tier-chip rebuy">
-                  <i>RB</i>
-                </span>
-                <span class="trading-tier-label">Rebuy drop (%)</span>
-                <input
-                  v-model.number="tradingRebuyMinDropPercent"
-                  type="number"
-                  @input="notifyTradingSettingsEdited"
-                  min="0.01"
-                  max="10"
-                  step="0.01"
-                  :disabled="tradingPositionMode !== 'rebuy'"
-                />
-              </label>
-              <label class="trading-tier-row trading-tier-row-wide">
-                <span class="signal-tier-badge trading-tier-chip rebuy">
-                  <i>MR</i>
-                </span>
-                <span class="trading-tier-label">Max rebuys</span>
-                <input
-                  v-model.number="tradingRebuyMaxCount"
-                  type="number"
-                  @input="notifyTradingSettingsEdited"
-                  min="1"
-                  max="10"
-                  step="1"
-                  :disabled="tradingPositionMode !== 'rebuy'"
-                />
-              </label>
+            <div class="trading-account-grid">
+              <article class="trading-account-card">
+                <span>Account total</span>
+                <strong>{{ formatMoney(tradingAccount?.portfolioValue) }}</strong>
+              </article>
+              <article class="trading-account-card">
+                <span>Buying power</span>
+                <strong>{{ formatMoney(tradingAccount?.buyingPower) }}</strong>
+              </article>
+              <article class="trading-account-card">
+                <span>Cash</span>
+                <strong>{{ formatMoney(tradingAccount?.cash) }}</strong>
+              </article>
+              <article class="trading-account-card">
+                <span>Account status</span>
+                <strong>{{
+                  tradingAccount?.status || (tradingSettingsLoading ? "Refreshing..." : "Unavailable")
+                }}</strong>
+              </article>
             </div>
-          </div>
-          <div class="trading-account-grid">
-            <article class="trading-account-card">
-              <span>Account total</span>
-              <strong>{{ formatMoney(tradingAccount?.portfolioValue) }}</strong>
-            </article>
-            <article class="trading-account-card">
-              <span>Buying power</span>
-              <strong>{{ formatMoney(tradingAccount?.buyingPower) }}</strong>
-            </article>
-            <article class="trading-account-card">
-              <span>Cash</span>
-              <strong>{{ formatMoney(tradingAccount?.cash) }}</strong>
-            </article>
-            <article class="trading-account-card">
-              <span>Account status</span>
-              <strong>{{
-                tradingAccount?.status || (tradingSettingsLoading ? "Refreshing..." : "Unavailable")
-              }}</strong>
-            </article>
-          </div>
+          </template>
         </div>
       </div>
     </section>
