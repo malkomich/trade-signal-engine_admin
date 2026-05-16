@@ -3110,7 +3110,10 @@ onUnmounted(() => {
                     step="10"
                   />
                 </label>
-                <label class="trading-tier-row trading-tier-row-wide">
+                <label
+                  v-if="tradingPositionMode === 'stop_loss'"
+                  class="trading-tier-row trading-tier-row-wide"
+                >
                   <span class="signal-tier-badge trading-tier-chip stop-loss">
                     <i>SL</i>
                   </span>
@@ -3122,39 +3125,38 @@ onUnmounted(() => {
                     min="0.01"
                     max="10"
                     step="0.01"
-                    :disabled="tradingPositionMode !== 'stop_loss'"
                   />
                 </label>
-                <label class="trading-tier-row trading-tier-row-wide">
-                  <span class="signal-tier-badge trading-tier-chip rebuy">
-                    <i>RB</i>
-                  </span>
-                  <span class="trading-tier-label">Rebuy drop (%)</span>
-                  <input
-                    v-model.number="tradingRebuyMinDropPercent"
-                    type="number"
-                    @input="notifyTradingSettingsEdited"
-                    min="0.01"
-                    max="10"
-                    step="0.01"
-                    :disabled="tradingPositionMode !== 'rebuy'"
-                  />
-                </label>
-                <label class="trading-tier-row trading-tier-row-wide">
-                  <span class="signal-tier-badge trading-tier-chip rebuy">
-                    <i>MR</i>
-                  </span>
-                  <span class="trading-tier-label">Max rebuys</span>
-                  <input
-                    v-model.number="tradingRebuyMaxCount"
-                    type="number"
-                    @input="notifyTradingSettingsEdited"
-                    min="1"
-                    max="10"
-                    step="1"
-                    :disabled="tradingPositionMode !== 'rebuy'"
-                  />
-                </label>
+                <div v-else-if="tradingPositionMode === 'rebuy'" class="trading-tier-inline-group">
+                  <label class="trading-tier-row trading-tier-row-wide">
+                    <span class="signal-tier-badge trading-tier-chip rebuy">
+                      <i>RB</i>
+                    </span>
+                    <span class="trading-tier-label">Rebuy drop (%)</span>
+                    <input
+                      v-model.number="tradingRebuyMinDropPercent"
+                      type="number"
+                      @input="notifyTradingSettingsEdited"
+                      min="0.01"
+                      max="10"
+                      step="0.01"
+                    />
+                  </label>
+                  <label class="trading-tier-row trading-tier-row-wide">
+                    <span class="signal-tier-badge trading-tier-chip rebuy">
+                      <i>MR</i>
+                    </span>
+                    <span class="trading-tier-label">Max rebuys</span>
+                    <input
+                      v-model.number="tradingRebuyMaxCount"
+                      type="number"
+                      @input="notifyTradingSettingsEdited"
+                      min="1"
+                      max="10"
+                      step="1"
+                    />
+                  </label>
+                </div>
               </div>
             </div>
             <div class="trading-account-grid">
