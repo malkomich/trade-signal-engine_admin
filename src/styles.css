@@ -441,6 +441,19 @@ h1 {
   color: #9fb0ca;
 }
 
+.trading-settings-state {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  min-height: 140px;
+  padding-top: 6px;
+  align-content: center;
+}
+
+.trading-settings-state strong {
+  font-size: 1rem;
+}
+
 .hero-status p,
 .signal-row p,
 .config-card p,
